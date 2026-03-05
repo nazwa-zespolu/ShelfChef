@@ -2,13 +2,11 @@
 # Lista Ryzyk - Aplikacja ShelfChef
 
 
-## Ryzyka Funkcjonalności
-
-### 1. Niedokładne skanowanie kodów kreskowych (EAN)
+### R1. Niedokładne skanowanie kodów kreskowych (EAN)
 | Parametr | Wartość |
 |----------|---------|
 | **Prawdopodobieństwo** | (3/5) |
-| **Wpływ** | (3/5) |
+| **Wpływ** | (4/5) |
 | **Priorytet** | WYSOKI |
 
 **Opis:** Kamera może błędnie rozpoznać kod EAN.
@@ -20,14 +18,14 @@
 
 ---
 
-### 2. Baza danych EAN zawiera błędne lub zastarzsłe informacje
+### R2. Baza danych EAN zawiera błędne lub przestarzałe informacje
 | Parametr | Wartość |
 |----------|---------|
-| **Prawdopodobieństwo** | (2/5) |
+| **Prawdopodobieństwo** | (3/5) |
 | **Wpływ** | (2/5) |
 | **Priorytet** | ŚREDNI |
 
-**Opis:** Zewnętrzny API z kodami EAN może zwracać niepoprawne dane o produkcie.
+**Opis:** Zewnętrzne API z kodami EAN może zwracać niepoprawne dane o produkcie.
 
 **Działania łagodzące:**
 - Możliwość ręcznej edycji informacji o produkcie przez użytkownika
@@ -35,25 +33,25 @@
 
 ---
 
-### 3. Nieadekwatne propozycje przepisów z AI
+### R3. Nieadekwatne propozycje przepisów z AI
 | Parametr | Wartość |
 |----------|---------|
 | **Prawdopodobieństwo** | (4/5) |
 | **Wpływ** | (2/5) |
-| **Priorytet** | NISKI |
+| **Priorytet** | ŚREDNI |
 
-**Opis:** Model AI może zwracać przepisy ze składnikami niedostępnymi lub pomijać ograniczenia kulinarnych użytkownika.
+**Opis:** Model AI może zwracać przepisy ze składnikami niedostępnymi lub pomijać ograniczenia kulinarne użytkownika.
 
 **Działania łagodzące:**
 - Testowanie modelu AI na zbiorze testowym 
 - Zmienne parametry (ograniczenia dietetyczne, preferencje kulinarne)
 - Integracja z popularnymi bazami przepisów (API)
-- Testing różnych modeli/promptów AI
+- Testowanie różnych modeli/promptów AI
 - Fallback do przepisów z bazy danych zamiast samych AI
 
 ---
 
-### 4. Niedostępność zewnętrznego API (baza EAN)
+### R4. Niedostępność zewnętrznego API (baza EAN)
 | Parametr | Wartość |
 |----------|---------|
 | **Prawdopodobieństwo** | (1/5) |
@@ -68,7 +66,7 @@
 
 ---
 
-### 5. Ograniczona pojemność przechowywania danych
+### R5. Ograniczona pojemność przechowywania danych
 | Parametr | Wartość |
 |----------|---------|
 | **Prawdopodobieństwo** | (1/5) |
@@ -85,14 +83,14 @@
 ---
 
 
-### 6. Kolizja danych między urządzeniami użytkownika
+### R6. Kolizja danych między urządzeniami użytkownika
 | Parametr | Wartość |
 |----------|---------|
 | **Prawdopodobieństwo** | (3/5) |
 | **Wpływ** | (4/5) |
-| **Priorytet** | ŚREDNI |
+| **Priorytet** | WYSOKI |
 
-**Opis:** Użytkownik używa aplikacji na wielu urządzeniach, a synchronizacja może prowadzić do konfliktów
+**Opis:** Użytkownik używa aplikacji na wielu urządzeniach, a synchronizacja może prowadzić do konfliktów.
 
 **Działania łagodzące:**
 - Zapobieganie konfliktom synchronizacji
