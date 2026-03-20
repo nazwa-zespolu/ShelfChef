@@ -23,6 +23,9 @@ Użytkownik wprowadza dane i klika przycisk "Zapisz".
 
 System rejestruje nowy obiekt w lokalnej bazie i wraca do ekranu skanowania.
 
+### Scenariusz alterantywny:
+Api down/brak wyniku - przejście do ręcznego dodawania produktu
+
 ## UC-02: Ręczne dodanie produktu
 **Opis:** Dodawanie produktu nierozpoznanego przez API lub produktu bez kodu EAN
 
@@ -41,6 +44,9 @@ Otwiera się ekran dodawania ręcznego produktu.
 Użytkownik wprowadza nazwę produktu, datę ważności oraz określa ilości sztuk i klika przycisk "zapisz".
 
 System rejestruje nowy obiekt w lokalnej bazie i szablon produktu.
+
+### Scenariusz alternatywny:
+brak
 
 ## UC-03: Usunięcie produktu
 **Opis:** Po spożyciu produktu należy usunąć go z aplikacji. 
@@ -62,6 +68,9 @@ Użytkownik wybiera produkt z listy lub skanuje kod EAN
 Od dołu wysuwa się zasobnik opcji do wyboru.
 
 Użytkownik wybiera z opcji zmniejszenie liczby lub ilości produktu, usunięcie produktu.  
+
+### Scenariusz alternatywny:
+wszystko zadziała
 
 ## UC-04: Przegląd kończących się terminów
 **Opis:** Wyświetlanie produktów zbliżających się do daty ważności do szybkiego zużycia
@@ -85,6 +94,9 @@ System wyświetla nazwę produktu, datę ważności oraz pozostałą ilość
 Użytkownik wybiera produkt w celu podglądu szczegółów
 
 System wyświetla szczegóły wybranego produktu
+
+### Scenariusz alternatywny:
+Jeśli nie wpisano daty ważności produkt nie wyświetli się lub wyświetli się na końcu listy.
 
 ## UC-05: Propozycja przepisu AI
 **Opis:** Generowanie propozycji przepisu na podstawie produktów posiadanych w aplikacji oraz preferencji użytkownika
@@ -111,6 +123,11 @@ System wyświetla wygenerowany przepis na ekranie
 
 Użytkownik może ponownie uruchomić generację przepisu (np. dla innego wariantu)
 
+
+### Scenariusz alternatywny:
+
+API down/brak dostępu do internetu - nie będzie przepisu
+
 ## UC-06: Generowanie listy zakupów
 **Opis:** Generowanie listy zakupów z automatyczną sugestią brakujących produktów.
 
@@ -131,3 +148,10 @@ Użytkownik dodaje swoje produkty
 Użytkownik potwierdza listę zakupów
 
 Po skończonych zakupach system automatycznie dodaje przedmioty do lokalnej bazy danych
+
+
+### Scenariusz alternatywny:
+
+Nie wszystko z listy istnieje w bazie danych - potrzeba dodać ręcznie
+
+Nie wszystko z listy zostało kupione - użytkownik może zaznaczyć produkty do dodania
