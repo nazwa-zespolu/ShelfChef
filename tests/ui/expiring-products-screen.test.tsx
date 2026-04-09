@@ -5,10 +5,10 @@ import { render, screen } from "@testing-library/react";
 import { ExpiringProductsScreen } from "../../src/app/screens/ExpiringProductsScreen";
 
 describe("UI: ExpiringProductsScreen", () => {
-  it("displays products expiring soon with warning styling", () => {
+  it("displays products expiring soon", () => {
     const expiringProducts = [
-      { id: "1", name: "Mleko", expirationDate: "2026-04-09", quantity: 1 },
-      { id: "2", name: "Jogurt", expirationDate: "2026-04-10", quantity: 3 },
+      { id: "1", name: "Mleko", expirationDate: "2026-04-09" },
+      { id: "2", name: "Jogurt", expirationDate: "2026-04-10" },
     ];
 
     render(<ExpiringProductsScreen products={expiringProducts} />);

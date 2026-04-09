@@ -23,7 +23,7 @@ describe("UC-01: ScanToAdd", () => {
     const result = await scanToAdd.execute({
       ean: "5901234567890",
       expirationDate: new Date("2026-05-01"),
-      quantity: 1,
+      count: 1,
     });
 
     expect(databaseService.queryProductByEan).toHaveBeenCalledWith("5901234567890");
@@ -32,9 +32,10 @@ describe("UC-01: ScanToAdd", () => {
     expect(result.name).toBe("Jogurt naturalny");
   });
 
-  it("queries OFF and saves product when not found locally", async () => {
+  it("queries OFF, saves template and product when not found locally", async () => {
     const databaseService = {
       queryProductByEan: jest.fn().mockResolvedValue(null),
+      insertTemplate: jest.fn().mockResolvedValue("template-1"),
       insertProduct: jest.fn().mockResolvedValue("uuid-123"),
     };
 
@@ -54,13 +55,54 @@ describe("UC-01: ScanToAdd", () => {
     const result = await scanToAdd.execute({
       ean: "5901234567890",
       expirationDate: new Date("2026-05-01"),
-      quantity: 1,
+      count: 1,
     });
 
     expect(databaseService.queryProductByEan).toHaveBeenCalledWith("5901234567890");
     expect(openFoodFactsService.fetchProductByEAN).toHaveBeenCalledWith("5901234567890");
+    expect(databaseService.insertTemplate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ean: "5901234567890",
+        name: "Jogurt naturalny",
+      })
+    );
     expect(databaseService.insertProduct).toHaveBeenCalledTimes(1);
-    expect(result).toBe("uuid-123");
+    expect(result).toEqual(["uuid-123"]);
+  });
+
+  it("creates multiple records when count is greater than 1", async () => {
+    const databaseService = {
+      queryProductByEan: jest.fn().mockResolvedValue(null),
+      insertTemplate: jest.fn().mockResolvedValue("template-1"),
+      insertProduct: jest.fn()
+        .mockResolvedValueOnce("uuid-a")
+        .mockResolvedValueOnce("uuid-b")
+        .mockResolvedValueOnce("uuid-c"),
+    };
+
+    const openFoodFactsService = {
+      fetchProductByEAN: jest.fn().mockResolvedValue({
+        ean: "5901234567890",
+        name: "Mleko",
+      }),
+    };
+
+    const scanToAdd = new ScanToAdd(
+      databaseService as any,
+      openFoodFactsService as any
+    );
+
+    const result = await scanToAdd.execute({
+      ean: "5901234567890",
+      expirationDate: new Date("2026-05-01"),
+      count: 3,
+    });
+
+    expect(databaseService.queryProductByEan).toHaveBeenCalledWith("5901234567890");
+    expect(openFoodFactsService.fetchProductByEAN).toHaveBeenCalledTimes(1);
+    expect(databaseService.insertTemplate).toHaveBeenCalledTimes(1);
+    expect(databaseService.insertProduct).toHaveBeenCalledTimes(3);
+    expect(result).toEqual(["uuid-a", "uuid-b", "uuid-c"]);
   });
 
   it("falls back to manual add when OFF is unavailable", async () => {
@@ -81,7 +123,7 @@ describe("UC-01: ScanToAdd", () => {
     const result = await scanToAdd.execute({
       ean: "5901234567890",
       expirationDate: new Date("2026-05-01"),
-      quantity: 1,
+      count: 1,
     });
 
     expect(databaseService.queryProductByEan).toHaveBeenCalledWith("5901234567890");

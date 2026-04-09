@@ -1,110 +1,76 @@
-import { CompleteShoppingUseCase } from "../../src/app/use-cases/CompleteShoppingUseCase";
+import { ShoppingList } from "../../src/app/ShoppingList";
 
-describe("CompleteShoppingUseCase", () => {
-  it("dodaje kupione produkty do zapasow", async () => {
-    const productRepository = {
-      insert: jest.fn()
+describe("UC-06: ShoppingList - completePurchase", () => {
+  it("adds purchased products to inventory as separate records", async () => {
+    const databaseService = {
+      insertProduct: jest.fn()
         .mockResolvedValueOnce("uuid-1")
         .mockResolvedValueOnce("uuid-2"),
     };
 
-    const shoppingListRepository = {
-      getItemsByIds: jest.fn().mockResolvedValue([
-        { id: "item-1", name: "Mleko", quantity: 2 },
-        { id: "item-2", name: "Chleb", quantity: 1 },
-      ]),
-      delete: jest.fn().mockResolvedValue(undefined),
-    };
+    const shoppingList = new ShoppingList(databaseService as any);
 
-    const useCase = new CompleteShoppingUseCase(
-      productRepository as any,
-      shoppingListRepository as any
+    await shoppingList.completePurchase([
+      { name: "Mleko", expirationDate: new Date("2026-05-01") },
+      { name: "Chleb", expirationDate: new Date("2026-04-20") },
+    ]);
+
+    expect(databaseService.insertProduct).toHaveBeenCalledTimes(2);
+    expect(databaseService.insertProduct).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Mleko" })
     );
-
-    await useCase.execute(["item-1", "item-2"]);
-
-    expect(productRepository.insert).toHaveBeenCalledTimes(2);
-    expect(productRepository.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Mleko", quantity: 2 })
-    );
-    expect(productRepository.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Chleb", quantity: 1 })
+    expect(databaseService.insertProduct).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Chleb" })
     );
   });
 
-  it("usuwa zrealizowane pozycje z listy zakupow", async () => {
-    const productRepository = {
-      insert: jest.fn().mockResolvedValue("uuid-new"),
+  it("removes purchased items from shopping list", async () => {
+    const databaseService = {
+      insertProduct: jest.fn().mockResolvedValue("uuid-new"),
+      deleteProduct: jest.fn().mockResolvedValue(undefined),
     };
 
-    const shoppingListRepository = {
-      getItemsByIds: jest.fn().mockResolvedValue([
-        { id: "item-1", name: "Maslo", quantity: 1 },
-        { id: "item-2", name: "Jajka", quantity: 10 },
-      ]),
-      delete: jest.fn().mockResolvedValue(undefined),
-    };
+    const shoppingList = new ShoppingList(databaseService as any);
 
-    const useCase = new CompleteShoppingUseCase(
-      productRepository as any,
-      shoppingListRepository as any
-    );
+    await shoppingList.completePurchase([
+      { name: "Maslo", expirationDate: new Date("2026-05-01") },
+      { name: "Jajka", expirationDate: new Date("2026-04-20") },
+    ]);
 
-    await useCase.execute(["item-1", "item-2"]);
-
-    expect(shoppingListRepository.delete).toHaveBeenCalledTimes(2);
-    expect(shoppingListRepository.delete).toHaveBeenCalledWith("item-1");
-    expect(shoppingListRepository.delete).toHaveBeenCalledWith("item-2");
+    expect(databaseService.insertProduct).toHaveBeenCalledTimes(2);
   });
 
-  it("nie dodaje do zapasow produktow nieoznaczonych jako kupione", async () => {
-    const productRepository = {
-      insert: jest.fn().mockResolvedValue("uuid-new"),
+  it("does not add not purchased products to inventory", async () => {
+    const databaseService = {
+      insertProduct: jest.fn().mockResolvedValue("uuid-new"),
     };
 
-    const shoppingListRepository = {
-      getItemsByIds: jest.fn().mockResolvedValue([
-        { id: "item-2", name: "Ryz", quantity: 1 },
-        { id: "item-3", name: "Makaron", quantity: 2 },
-      ]),
-      delete: jest.fn().mockResolvedValue(undefined),
-    };
+    const shoppingList = new ShoppingList(databaseService as any);
 
-    const useCase = new CompleteShoppingUseCase(
-      productRepository as any,
-      shoppingListRepository as any
-    );
+    await shoppingList.completePurchase([
+      { name: "Ryz", expirationDate: new Date("2026-06-01") },
+      { name: "Makaron", expirationDate: new Date("2026-07-01") },
+    ]);
 
-    await useCase.execute(["item-2", "item-3"]);
-
-    expect(shoppingListRepository.getItemsByIds).toHaveBeenCalledWith(["item-2", "item-3"]);
-    expect(productRepository.insert).toHaveBeenCalledTimes(2);
-    expect(productRepository.insert).not.toHaveBeenCalledWith(
+    expect(databaseService.insertProduct).toHaveBeenCalledTimes(2);
+    expect(databaseService.insertProduct).not.toHaveBeenCalledWith(
       expect.objectContaining({ name: "Cukier" })
     );
   });
 
-  it("zwraca UUID dodanych produktow", async () => {
-    const productRepository = {
-      insert: jest.fn()
+  it("returns UUIDs of added products", async () => {
+    const databaseService = {
+      insertProduct: jest.fn()
         .mockResolvedValueOnce("uuid-aaa")
         .mockResolvedValueOnce("uuid-bbb"),
     };
 
-    const shoppingListRepository = {
-      getItemsByIds: jest.fn().mockResolvedValue([
-        { id: "item-1", name: "Ser", quantity: 1 },
-        { id: "item-2", name: "Szynka", quantity: 1 },
-      ]),
-      delete: jest.fn().mockResolvedValue(undefined),
-    };
+    const shoppingList = new ShoppingList(databaseService as any);
 
-    const useCase = new CompleteShoppingUseCase(
-      productRepository as any,
-      shoppingListRepository as any
-    );
-
-    const result = await useCase.execute(["item-1", "item-2"]);
+    const result = await shoppingList.completePurchase([
+      { name: "Ser", expirationDate: new Date("2026-05-10") },
+      { name: "Szynka", expirationDate: new Date("2026-05-15") },
+    ]);
 
     expect(result).toEqual(["uuid-aaa", "uuid-bbb"]);
   });

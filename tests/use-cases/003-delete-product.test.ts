@@ -8,29 +8,8 @@ describe("UC-03: DeleteProduct", () => {
 
     const deleteProduct = new DeleteProduct(databaseService as any);
 
-    await deleteProduct.execute({ id: "uuid-123", action: "delete" });
+    await deleteProduct.execute("uuid-123");
 
     expect(databaseService.deleteProduct).toHaveBeenCalledWith("uuid-123");
-  });
-
-  it("decreases product quantity instead of deleting", async () => {
-    const databaseService = {
-      updateProduct: jest.fn().mockResolvedValue(undefined),
-    };
-
-    const deleteProduct = new DeleteProduct(databaseService as any);
-
-    await deleteProduct.execute({
-      id: "uuid-456",
-      action: "decrease",
-      decreaseBy: 2,
-    });
-
-    expect(databaseService.updateProduct).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "uuid-456",
-        decreaseBy: 2,
-      })
-    );
   });
 });

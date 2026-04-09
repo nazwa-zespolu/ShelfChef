@@ -4,9 +4,9 @@ describe("UC-04: getExpiringProducts", () => {
   it("returns only products expiring within 2 days, sorted by date ascending", async () => {
     const databaseService = {
       queryAllProducts: jest.fn().mockResolvedValue([
-        { id: "1", name: "Ryż", expirationDate: new Date("2026-06-01"), quantity: 2 },
-        { id: "2", name: "Mleko", expirationDate: new Date("2026-04-09"), quantity: 1 },
-        { id: "3", name: "Jogurt", expirationDate: new Date("2026-04-10"), quantity: 3 },
+        { id: "1", name: "Ryż", expirationDate: new Date("2026-06-01") },
+        { id: "2", name: "Mleko", expirationDate: new Date("2026-04-09") },
+        { id: "3", name: "Jogurt", expirationDate: new Date("2026-04-10") },
       ]),
     };
 
@@ -22,8 +22,8 @@ describe("UC-04: getExpiringProducts", () => {
   it("excludes products without expiration date", async () => {
     const databaseService = {
       queryAllProducts: jest.fn().mockResolvedValue([
-        { id: "1", name: "Sól", expirationDate: null, quantity: 1 },
-        { id: "2", name: "Mleko", expirationDate: new Date("2026-04-09"), quantity: 1 },
+        { id: "1", name: "Sól", expirationDate: null },
+        { id: "2", name: "Mleko", expirationDate: new Date("2026-04-09") },
       ]),
     };
 

@@ -7,8 +7,8 @@ import { StockScreen } from "../../src/app/screens/StockScreen";
 describe("UI: StockScreen", () => {
   it("displays list of products sorted by expiration date", () => {
     const products = [
-      { id: "1", name: "Jogurt", expirationDate: "2026-04-10", quantity: 2 },
-      { id: "2", name: "Mleko", expirationDate: "2026-04-09", quantity: 1 },
+      { id: "1", name: "Jogurt", expirationDate: "2026-04-10" },
+      { id: "2", name: "Mleko", expirationDate: "2026-04-09" },
     ];
 
     render(<StockScreen products={products} />);

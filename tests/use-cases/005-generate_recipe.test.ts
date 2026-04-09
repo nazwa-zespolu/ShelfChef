@@ -1,11 +1,11 @@
-import { GenerateRecipeUseCase } from "../../src/app/use-cases/GenerateRecipeUseCase";
+import { GenerateRecipe } from "../../src/app/GenerateRecipe";
 
-describe("GenerateRecipeUseCase", () => {
-  it("pobiera dostepne produkty i przekazuje je wraz z preferencjami do AI", async () => {
-    const productRepository = {
-      getAll: jest.fn().mockResolvedValue([
-        { id: "p1", name: "Makaron", quantity: 1, expirationDate: new Date("2026-04-20") },
-        { id: "p2", name: "Pomidory", quantity: 2, expirationDate: new Date("2026-04-18") },
+describe("UC-05: GenerateRecipe", () => {
+  it("fetches available products and passes them with preferences to AI", async () => {
+    const databaseService = {
+      queryAllProducts: jest.fn().mockResolvedValue([
+        { id: "1", name: "Makaron", expirationDate: new Date("2026-04-20") },
+        { id: "2", name: "Pomidory", expirationDate: new Date("2026-04-18") },
       ]),
     };
 
@@ -17,27 +17,27 @@ describe("GenerateRecipeUseCase", () => {
       }),
     };
 
-    const useCase = new GenerateRecipeUseCase(
-      productRepository as any,
+    const generateRecipe = new GenerateRecipe(
+      databaseService as any,
       aiRecipeService as any
     );
 
-    await useCase.execute({ preferences: "wegetarianskie, szybkie" });
+    await generateRecipe.execute({ preferences: "wegetarianskie, szybkie" });
 
-    expect(productRepository.getAll).toHaveBeenCalledTimes(1);
+    expect(databaseService.queryAllProducts).toHaveBeenCalledTimes(1);
     expect(aiRecipeService.generateRecipe).toHaveBeenCalledWith(
       [
-        { id: "p1", name: "Makaron", quantity: 1, expirationDate: new Date("2026-04-20") },
-        { id: "p2", name: "Pomidory", quantity: 2, expirationDate: new Date("2026-04-18") },
+        { id: "1", name: "Makaron", expirationDate: new Date("2026-04-20") },
+        { id: "2", name: "Pomidory", expirationDate: new Date("2026-04-18") },
       ],
       "wegetarianskie, szybkie"
     );
   });
 
-  it("zwraca wygenerowana propozycje przepisu", async () => {
-    const productRepository = {
-      getAll: jest.fn().mockResolvedValue([
-        { id: "p1", name: "Jajka", quantity: 4, expirationDate: new Date("2026-04-16") },
+  it("returns generated recipe proposal", async () => {
+    const databaseService = {
+      queryAllProducts: jest.fn().mockResolvedValue([
+        { id: "1", name: "Jajka", expirationDate: new Date("2026-04-16") },
       ]),
     };
 
@@ -49,12 +49,12 @@ describe("GenerateRecipeUseCase", () => {
       }),
     };
 
-    const useCase = new GenerateRecipeUseCase(
-      productRepository as any,
+    const generateRecipe = new GenerateRecipe(
+      databaseService as any,
       aiRecipeService as any
     );
 
-    const recipe = await useCase.execute({ preferences: "bez mleka" });
+    const recipe = await generateRecipe.execute({ preferences: "bez mleka" });
 
     expect(recipe).toEqual({
       title: "Omlet studencki",
@@ -63,10 +63,10 @@ describe("GenerateRecipeUseCase", () => {
     });
   });
 
-  it("zglasza blad, gdy AI API jest niedostepne", async () => {
-    const productRepository = {
-      getAll: jest.fn().mockResolvedValue([
-        { id: "p1", name: "Ryz", quantity: 1, expirationDate: new Date("2026-04-22") },
+  it("throws error when AI API is unavailable", async () => {
+    const databaseService = {
+      queryAllProducts: jest.fn().mockResolvedValue([
+        { id: "1", name: "Ryz", expirationDate: new Date("2026-04-22") },
       ]),
     };
 
@@ -74,22 +74,22 @@ describe("GenerateRecipeUseCase", () => {
       generateRecipe: jest.fn().mockRejectedValue(new Error("AI unavailable")),
     };
 
-    const useCase = new GenerateRecipeUseCase(
-      productRepository as any,
+    const generateRecipe = new GenerateRecipe(
+      databaseService as any,
       aiRecipeService as any
     );
 
     await expect(
-      useCase.execute({ preferences: "tanie i szybkie" })
+      generateRecipe.execute({ preferences: "tanie i szybkie" })
     ).rejects.toThrow("AI unavailable");
 
-    expect(productRepository.getAll).toHaveBeenCalledTimes(1);
+    expect(databaseService.queryAllProducts).toHaveBeenCalledTimes(1);
     expect(aiRecipeService.generateRecipe).toHaveBeenCalledTimes(1);
   });
 
-  it("przekazuje pusta liste produktow, gdy magazyn jest pusty", async () => {
-    const productRepository = {
-      getAll: jest.fn().mockResolvedValue([]),
+  it("passes empty product list when pantry is empty", async () => {
+    const databaseService = {
+      queryAllProducts: jest.fn().mockResolvedValue([]),
     };
 
     const aiRecipeService = {
@@ -100,12 +100,12 @@ describe("GenerateRecipeUseCase", () => {
       }),
     };
 
-    const useCase = new GenerateRecipeUseCase(
-      productRepository as any,
+    const generateRecipe = new GenerateRecipe(
+      databaseService as any,
       aiRecipeService as any
     );
 
-    await useCase.execute({ preferences: "dowolne" });
+    await generateRecipe.execute({ preferences: "dowolne" });
 
     expect(aiRecipeService.generateRecipe).toHaveBeenCalledWith([], "dowolne");
   });
