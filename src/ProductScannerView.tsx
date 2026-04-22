@@ -5,15 +5,14 @@ import {
   Button,
   Easing,
   Image,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import WheelPicker from './components/WheelPicker';
+import {colors} from './theme/colors';
 
 const visionCamera = (() => {
   try {
@@ -57,9 +56,6 @@ const MOCK_PRODUCTS: MockProduct[] = [
 ];
 
 const BOTTOM_SHEET_HEIGHT = 300;
-const WHEEL_ITEM_HEIGHT = 34;
-const WHEEL_VISIBLE_ROWS = 3;
-const WHEEL_HEIGHT = WHEEL_ITEM_HEIGHT * WHEEL_VISIBLE_ROWS;
 
 function getDefaultExpirationDate() {
   const date = new Date();
@@ -75,63 +71,6 @@ function formatDate(day: number, month: number, year: number) {
   const dd = String(day).padStart(2, '0');
   const mm = String(month).padStart(2, '0');
   return `${dd}.${mm}.${year}`;
-}
-
-type WheelPickerProps = {
-  label: string;
-  values: number[];
-  selectedValue: number;
-  onValueChange: (value: number) => void;
-};
-
-function WheelPicker({label, values, selectedValue, onValueChange}: WheelPickerProps) {
-  const scrollRef = useRef<ScrollView>(null);
-
-  useEffect(() => {
-    const selectedIndex = Math.max(values.indexOf(selectedValue), 0);
-    scrollRef.current?.scrollTo({
-      y: selectedIndex * WHEEL_ITEM_HEIGHT,
-      animated: false,
-    });
-  }, [selectedValue, values]);
-
-  const handleScrollEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const scrollY = event.nativeEvent.contentOffset.y;
-    const index = Math.round(scrollY / WHEEL_ITEM_HEIGHT);
-    const clampedIndex = Math.min(Math.max(index, 0), values.length - 1);
-    const value = values[clampedIndex];
-    if (value !== selectedValue) {
-      onValueChange(value);
-    }
-  };
-
-  return (
-    <View style={styles.wheelColumn}>
-      <Text style={styles.wheelLabel}>{label}</Text>
-      <View style={styles.wheelFrame}>
-        <View pointerEvents="none" style={styles.wheelSelectionLine} />
-        <ScrollView
-          ref={scrollRef}
-          showsVerticalScrollIndicator={false}
-          snapToInterval={WHEEL_ITEM_HEIGHT}
-          decelerationRate="fast"
-          onMomentumScrollEnd={handleScrollEnd}
-          onScrollEndDrag={handleScrollEnd}
-          contentContainerStyle={styles.wheelContent}>
-          {values.map(value => {
-            const isSelected = value === selectedValue;
-            return (
-              <View key={`${label}-${value}`} style={styles.wheelItem}>
-                <Text style={[styles.wheelItemText, isSelected && styles.wheelItemTextSelected]}>
-                  {String(value).padStart(2, '0')}
-                </Text>
-              </View>
-            );
-          })}
-        </ScrollView>
-      </View>
-    </View>
-  );
 }
 
 function isValidEAN(code: string) {
@@ -445,7 +384,7 @@ export default function ProductScannerView() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: colors.black,
   },
   center: {
     flex: 1,
@@ -461,13 +400,13 @@ const styles = StyleSheet.create({
     right: 16,
   },
   header: {
-    color: '#fff',
+    color: colors.textPrimary,
     fontSize: 24,
     fontWeight: '700',
     marginBottom: 6,
   },
   title: {
-    color: '#fff',
+    color: colors.textPrimary,
     fontSize: 20,
     fontWeight: '700',
     textAlign: 'center',
@@ -477,12 +416,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   overlayInfo: {
-    color: '#e6e9ee',
+    color: colors.infoText,
     fontSize: 13,
     marginBottom: 2,
   },
   scanValue: {
-    color: '#9ef2aa',
+    color: colors.successAccent,
     fontWeight: '700',
   },
   bottomSheet: {
@@ -491,7 +430,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     minHeight: BOTTOM_SHEET_HEIGHT,
-    backgroundColor: '#15181d',
+    backgroundColor: colors.surfaceDark,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 16,
@@ -521,16 +460,16 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   productName: {
-    color: '#fff',
+    color: colors.textPrimary,
     fontSize: 18,
     fontWeight: '700',
   },
   productProducer: {
-    color: '#c9ced8',
+    color: colors.textSecondary,
     fontSize: 14,
   },
   productEan: {
-    color: '#9ef2aa',
+    color: colors.successAccent,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -545,51 +484,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
-  wheelColumn: {
-    flex: 1,
-    gap: 6,
-  },
-  wheelLabel: {
-    color: '#c9ced8',
-    fontSize: 12,
-  },
-  wheelFrame: {
-    height: WHEEL_HEIGHT,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#303643',
-    backgroundColor: '#20242c',
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  wheelContent: {
-    paddingVertical: WHEEL_ITEM_HEIGHT,
-  },
-  wheelSelectionLine: {
-    position: 'absolute',
-    left: 6,
-    right: 6,
-    top: WHEEL_ITEM_HEIGHT,
-    height: WHEEL_ITEM_HEIGHT,
-    borderRadius: 8,
-    // borderWidth: 2,
-    // borderColor: '#47d16b',
-    backgroundColor: 'rgba(71, 209, 107, 0.30)',
-    zIndex: 1,
-  },
-  wheelItem: {
-    height: WHEEL_ITEM_HEIGHT,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  wheelItemText: {
-    color: '#9099a8',
-    fontSize: 16,
-  },
-  wheelItemTextSelected: {
-    color: '#ffffff',
-    fontWeight: '700',
-  },
   expirationToggleRow: {
     flexDirection: 'row',
     gap: 8,
@@ -598,19 +492,19 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 36,
     borderRadius: 9,
-    backgroundColor: '#2a313b',
+    backgroundColor: colors.surfaceSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   expirationToggleButtonActive: {
-    backgroundColor: '#47d16b',
+    backgroundColor: colors.success,
   },
   expirationToggleText: {
     color: '#c9ced8',
     fontWeight: '600',
   },
   expirationToggleTextActive: {
-    color: '#102014',
+    color: colors.successText,
   },
   amountRow: {
     flexDirection: 'row',
@@ -620,7 +514,7 @@ const styles = StyleSheet.create({
   },
   amountButtonBase: {
     height: 42,
-    backgroundColor: '#2a313b',
+    backgroundColor: colors.surfaceSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -633,7 +527,7 @@ const styles = StyleSheet.create({
     borderRadius: 21,
   },
   amountButtonText: {
-    color: '#fff',
+    color: colors.textPrimary,
     fontSize: 24,
     lineHeight: 28,
     fontWeight: '700',
@@ -641,7 +535,7 @@ const styles = StyleSheet.create({
   amountValue: {
     minWidth: 52,
     textAlign: 'center',
-    color: '#fff',
+    color: colors.textPrimary,
     fontSize: 24,
     fontWeight: '700',
   },
@@ -660,16 +554,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   secondaryButton: {
-    backgroundColor: '#2a313b',
+    backgroundColor: colors.surfaceSoft,
   },
   secondaryButtonText: {
     color: '#e5e7eb',
   },
   primaryButton: {
-    backgroundColor: '#47d16b',
+    backgroundColor: colors.success,
   },
   primaryButtonText: {
-    color: '#102014',
+    color: colors.successText,
     fontWeight: '800',
   },
 });
