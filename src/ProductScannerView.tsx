@@ -167,7 +167,7 @@ function ScannerUnavailable() {
   return (
     <View style={styles.center}>
       <Text style={styles.title}>Scanner unavailable</Text>
-      <Text style={styles.info}>Missing `react-native-vision-camera` package.</Text>
+      <Text style={styles.info}>Missing scanner library or permission denied.</Text>
     </View>
   );
 }
@@ -290,6 +290,7 @@ export default function ProductScannerView() {
     if (!scannedProduct) {
       return;
     }
+    setScannedProduct(null);
 
     Alert.alert(
       'Product added (mock)',
@@ -314,13 +315,6 @@ export default function ProductScannerView() {
         codeScanner={codeScanner}
       />
 
-      <View style={[styles.topOverlay, {paddingTop: insets.top + 16}]}>
-        <Text style={styles.header}>Scan EAN</Text>
-        <Text style={styles.overlayInfo}>
-          Last scan: <Text style={styles.scanValue}>{lastCode}</Text>
-        </Text>
-        <Text style={styles.overlayInfo}>Valid EAN opens product details.</Text>
-      </View>
 
       <Animated.View
         style={[
@@ -342,7 +336,6 @@ export default function ProductScannerView() {
             </View>
 
             <View style={styles.expirationSection}>
-              {/* <Text style={styles.inputLabel}>Expiration date</Text> */}
               <Text style={styles.inputLabel}>
                 Expiration date: {expirationDate
                   ? formatDate(
@@ -408,24 +401,24 @@ export default function ProductScannerView() {
               <Text style={styles.inputLabel}>Amount</Text>
               <View style={styles.amountRow}>
                 <Pressable
-                  style={styles.amountButtonWide}
+                  style={[styles.amountButtonBase, styles.amountButtonWide]}
                   onPress={() => setAmount(current => Math.max(1, current - 5))}>
                   <Text style={styles.amountButtonText}>-5</Text>
                 </Pressable>
                 <Pressable
-                  style={styles.amountButton}
+                  style={[styles.amountButtonBase, styles.amountButtonRound]}
                   onPress={() => setAmount(current => Math.max(1, current - 1))}>
                   <Text style={styles.amountButtonText}>-</Text>
                 </Pressable>
-                
+
                 <Text style={styles.amountValue}>{amount}</Text>
                 <Pressable
-                  style={styles.amountButton}
+                  style={[styles.amountButtonBase, styles.amountButtonRound]}
                   onPress={() => setAmount(current => Math.min(999, current + 1))}>
                   <Text style={styles.amountButtonText}>+</Text>
                 </Pressable>
                 <Pressable
-                  style={styles.amountButtonWide}
+                  style={[styles.amountButtonBase, styles.amountButtonWide]}
                   onPress={() => setAmount(current => Math.min(999, current + 5))}>
                   <Text style={styles.amountButtonText}>+5</Text>
                 </Pressable>
@@ -433,11 +426,13 @@ export default function ProductScannerView() {
             </View>
 
             <View style={styles.actions}>
-              <Pressable style={styles.secondaryButton} onPress={() => setScannedProduct(null)}>
-                <Text style={styles.secondaryButtonText}>Close</Text>
+              <Pressable
+                style={[styles.actionButtonBase, styles.secondaryButton]}
+                onPress={() => setScannedProduct(null)}>
+                <Text style={[styles.actionButtonTextBase, styles.secondaryButtonText]}>Close</Text>
               </Pressable>
-              <Pressable style={styles.primaryButton} onPress={handleAddProduct}>
-                <Text style={styles.primaryButtonText}>Add</Text>
+              <Pressable style={[styles.actionButtonBase, styles.primaryButton]} onPress={handleAddProduct}>
+                <Text style={[styles.actionButtonTextBase, styles.primaryButtonText]}>Add</Text>
               </Pressable>
             </View>
           </View>
@@ -603,14 +598,11 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 36,
     borderRadius: 9,
-    // borderWidth: 1,
-    //borderColor: '#303643',
     backgroundColor: '#2a313b',
     alignItems: 'center',
     justifyContent: 'center',
   },
   expirationToggleButtonActive: {
-    //borderColor: '#7dd3fc',
     backgroundColor: '#47d16b',
   },
   expirationToggleText: {
@@ -620,31 +612,25 @@ const styles = StyleSheet.create({
   expirationToggleTextActive: {
     color: '#102014',
   },
-  datePreview: {
-    color: '#9ef2aa',
-    fontWeight: '600',
-  },
   amountRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
   },
-  amountButton: {
-    width: 42,
+  amountButtonBase: {
     height: 42,
-    borderRadius: 21,
     backgroundColor: '#2a313b',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  amountButtonRound: {
+    width: 42,
+    borderRadius: 21,
+  },
   amountButtonWide: {
     width: 55,
-    height: 42,
     borderRadius: 21,
-    backgroundColor: '#2a313b',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   amountButtonText: {
     color: '#fff',
@@ -659,46 +645,27 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
   },
-  amountQuickRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  amountQuickButton: {
-    flex: 1,
-    height: 36,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: '#303643',
-    backgroundColor: '#20242c',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  amountQuickButtonText: {
-    color: '#e5e7eb',
-    fontWeight: '600',
-  },
   actions: {
     flexDirection: 'row',
     gap: 10,
   },
-  secondaryButton: {
+  actionButtonBase: {
     flex: 1,
     height: 44,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  actionButtonTextBase: {
+    fontWeight: '600',
+  },
+  secondaryButton: {
     backgroundColor: '#2a313b',
   },
   secondaryButtonText: {
     color: '#e5e7eb',
-    fontWeight: '600',
   },
   primaryButton: {
-    flex: 1,
-    height: 44,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: '#47d16b',
   },
   primaryButtonText: {
