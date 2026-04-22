@@ -57,7 +57,7 @@ const MOCK_PRODUCTS: MockProduct[] = [
 ];
 
 const BOTTOM_SHEET_HEIGHT = 300;
-const WHEEL_ITEM_HEIGHT = 25;
+const WHEEL_ITEM_HEIGHT = 34;
 const WHEEL_VISIBLE_ROWS = 3;
 const WHEEL_HEIGHT = WHEEL_ITEM_HEIGHT * WHEEL_VISIBLE_ROWS;
 
@@ -109,7 +109,7 @@ function WheelPicker({label, values, selectedValue, onValueChange}: WheelPickerP
     <View style={styles.wheelColumn}>
       <Text style={styles.wheelLabel}>{label}</Text>
       <View style={styles.wheelFrame}>
-        <View style={styles.wheelSelectionLine} />
+        <View pointerEvents="none" style={styles.wheelSelectionLine} />
         <ScrollView
           ref={scrollRef}
           showsVerticalScrollIndicator={false}
@@ -199,7 +199,7 @@ export default function ProductScannerView() {
   const device = useCameraDevice('back');
   const [lastCode, setLastCode] = useState('No scans yet');
   const [scannedProduct, setScannedProduct] = useState<MockProduct | null>(null);
-  const [expirationDate, setExpirationDate] = useState(getDefaultExpirationDate);
+  const [expirationDate, setExpirationDate] = useState<Date | null>(getDefaultExpirationDate);
   const [amount, setAmount] = useState(1);
   const sheetTranslateY = useRef(new Animated.Value(BOTTOM_SHEET_HEIGHT)).current;
   const lastAcceptedScanRef = useRef<{code: string; scannedAt: number} | null>(null);
@@ -209,18 +209,19 @@ export default function ProductScannerView() {
     [currentYear],
   );
   const months = useMemo(() => Array.from({length: 12}, (_, index) => index + 1), []);
+  const activeDate = expirationDate ?? getDefaultExpirationDate();
   const days = useMemo(
     () =>
       Array.from(
-        {length: getDaysInMonth(expirationDate.getFullYear(), expirationDate.getMonth() + 1)},
+        {length: getDaysInMonth(activeDate.getFullYear(), activeDate.getMonth() + 1)},
         (_, index) => index + 1,
       ),
-    [expirationDate],
+    [activeDate],
   );
 
   const updateDatePart = (part: 'day' | 'month' | 'year', value: number) => {
     setExpirationDate(currentDate => {
-      const nextDate = new Date(currentDate);
+      const nextDate = new Date(currentDate ?? getDefaultExpirationDate());
       const nextYear = part === 'year' ? value : nextDate.getFullYear();
       const nextMonth = part === 'month' ? value : nextDate.getMonth() + 1;
       const maxDay = getDaysInMonth(nextYear, nextMonth);
@@ -292,11 +293,15 @@ export default function ProductScannerView() {
 
     Alert.alert(
       'Product added (mock)',
-      `${scannedProduct.name}\nEAN: ${scannedProduct.ean}\nExpiration: ${formatDate(
-        expirationDate.getDate(),
-        expirationDate.getMonth() + 1,
-        expirationDate.getFullYear(),
-      )}\nAmount: ${amount}`,
+      `${scannedProduct.name}\nEAN: ${scannedProduct.ean}\nExpiration: ${
+        expirationDate
+          ? formatDate(
+              expirationDate.getDate(),
+              expirationDate.getMonth() + 1,
+              expirationDate.getFullYear(),
+            )
+          : 'No expiration date'
+      }\nAmount: ${amount}`,
     );
   };
 
@@ -339,32 +344,66 @@ export default function ProductScannerView() {
             <View style={styles.expirationSection}>
               {/* <Text style={styles.inputLabel}>Expiration date</Text> */}
               <Text style={styles.inputLabel}>
-                Expiration date: {formatDate(
-                  expirationDate.getDate(),
-                  expirationDate.getMonth() + 1,
-                  expirationDate.getFullYear(),
-                )}
+                Expiration date: {expirationDate
+                  ? formatDate(
+                      expirationDate.getDate(),
+                      expirationDate.getMonth() + 1,
+                      expirationDate.getFullYear(),
+                    )
+                  : 'not set'}
               </Text>
-              <View style={styles.wheelsRow}>
-                <WheelPicker
-                  label="Day"
-                  values={days}
-                  selectedValue={expirationDate.getDate()}
-                  onValueChange={value => updateDatePart('day', value)}
-                />
-                <WheelPicker
-                  label="Month"
-                  values={months}
-                  selectedValue={expirationDate.getMonth() + 1}
-                  onValueChange={value => updateDatePart('month', value)}
-                />
-                <WheelPicker
-                  label="Year"
-                  values={years}
-                  selectedValue={expirationDate.getFullYear()}
-                  onValueChange={value => updateDatePart('year', value)}
-                />
+              <View style={styles.expirationToggleRow}>
+                <Pressable
+                  style={[
+                    styles.expirationToggleButton,
+                    expirationDate && styles.expirationToggleButtonActive,
+                  ]}
+                  onPress={() => setExpirationDate(current => current ?? getDefaultExpirationDate())}>
+                  <Text
+                    style={[
+                      styles.expirationToggleText,
+                      expirationDate && styles.expirationToggleTextActive,
+                    ]}>
+                    Set expiration date
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.expirationToggleButton,
+                    !expirationDate && styles.expirationToggleButtonActive,
+                  ]}
+                  onPress={() => setExpirationDate(null)}>
+                  <Text
+                    style={[
+                      styles.expirationToggleText,
+                      !expirationDate && styles.expirationToggleTextActive,
+                    ]}>
+                    No expiration date
+                  </Text>
+                </Pressable>
               </View>
+              {expirationDate ? (
+                <View style={styles.wheelsRow}>
+                  <WheelPicker
+                    label="Day"
+                    values={days}
+                    selectedValue={expirationDate.getDate()}
+                    onValueChange={value => updateDatePart('day', value)}
+                  />
+                  <WheelPicker
+                    label="Month"
+                    values={months}
+                    selectedValue={expirationDate.getMonth() + 1}
+                    onValueChange={value => updateDatePart('month', value)}
+                  />
+                  <WheelPicker
+                    label="Year"
+                    values={years}
+                    selectedValue={expirationDate.getFullYear()}
+                    onValueChange={value => updateDatePart('year', value)}
+                  />
+                </View>
+              ) : null}
               
               <Text style={styles.inputLabel}>Amount</Text>
               <View style={styles.amountRow}>
@@ -391,16 +430,6 @@ export default function ProductScannerView() {
                   <Text style={styles.amountButtonText}>+5</Text>
                 </Pressable>
               </View>
-              {/* <View style={styles.amountQuickRow}>
-                {[1, 5, 10].map(value => (
-                  <Pressable
-                    key={value}
-                    style={styles.amountQuickButton}
-                    onPress={() => setAmount(value)}>
-                    <Text style={styles.amountQuickButtonText}>{value}</Text>
-                  </Pressable>
-                ))}
-              </View> */}
             </View>
 
             <View style={styles.actions}>
@@ -548,9 +577,9 @@ const styles = StyleSheet.create({
     top: WHEEL_ITEM_HEIGHT,
     height: WHEEL_ITEM_HEIGHT,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#3f4858',
-    backgroundColor: '#2a303b',
+    // borderWidth: 2,
+    // borderColor: '#47d16b',
+    backgroundColor: 'rgba(71, 209, 107, 0.30)',
     zIndex: 1,
   },
   wheelItem: {
@@ -563,8 +592,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   wheelItemTextSelected: {
-    color: '#eef1f7',
+    color: '#ffffff',
     fontWeight: '700',
+  },
+  expirationToggleRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  expirationToggleButton: {
+    flex: 1,
+    height: 36,
+    borderRadius: 9,
+    // borderWidth: 1,
+    //borderColor: '#303643',
+    backgroundColor: '#2a313b',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  expirationToggleButtonActive: {
+    //borderColor: '#7dd3fc',
+    backgroundColor: '#47d16b',
+  },
+  expirationToggleText: {
+    color: '#c9ced8',
+    fontWeight: '600',
+  },
+  expirationToggleTextActive: {
+    color: '#102014',
   },
   datePreview: {
     color: '#9ef2aa',
