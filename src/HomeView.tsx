@@ -1,6 +1,8 @@
-import React, {useCallback, useMemo, useState} from 'react';
+import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  PanResponder,
   FlatList,
   Modal,
   Pressable,
@@ -8,6 +10,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -16,6 +19,9 @@ import {ProductRepository} from './infrastructure/ProductRepository';
 import {colors} from './theme/colors';
 
 const repo = new ProductRepository();
+const DELETE_BG = '#d64545';
+const DELETE_BG_ACTIVE = '#b93535';
+const SWIPE_DELETE_THRESHOLD = 110;
 
 type SortKey = 'name_asc' | 'name_desc' | 'expiry_asc' | 'expiry_desc';
 
@@ -64,6 +70,103 @@ type HomeViewProps = {
   onOpenShopping: () => void;
 };
 
+function SwipeToDeleteCard({
+  children,
+  onDelete,
+}: {
+  children: React.ReactNode;
+  onDelete: () => void;
+}) {
+  const {width} = useWindowDimensions();
+  const translateX = useRef(new Animated.Value(0)).current;
+  const [active, setActive] = useState(false);
+
+  const animateBack = useCallback(() => {
+    setActive(false);
+    Animated.spring(translateX, {
+      toValue: 0,
+      useNativeDriver: true,
+      speed: 18,
+      bounciness: 6,
+    }).start();
+  }, [translateX]);
+
+  const animateOffAndDelete = useCallback(
+    (dir: 1 | -1) => {
+      setActive(false);
+      Animated.timing(translateX, {
+        toValue: dir * width,
+        duration: 180,
+        useNativeDriver: true,
+      }).start(({finished}) => {
+        if (finished) {
+          onDelete();
+        } else {
+          animateBack();
+        }
+      });
+    },
+    [animateBack, onDelete, translateX, width],
+  );
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_evt, gesture) => {
+          const dx = Math.abs(gesture.dx);
+          const dy = Math.abs(gesture.dy);
+          return dx > 8 && dx > dy;
+        },
+        onPanResponderGrant: () => {
+          translateX.stopAnimation();
+        },
+        onPanResponderMove: (_evt, gesture) => {
+          const dx = gesture.dx;
+          translateX.setValue(dx);
+          setActive(Math.abs(dx) >= SWIPE_DELETE_THRESHOLD);
+        },
+        onPanResponderTerminationRequest: () => true,
+        onPanResponderRelease: (_evt, gesture) => {
+          const dx = gesture.dx;
+          if (Math.abs(dx) >= SWIPE_DELETE_THRESHOLD) {
+            animateOffAndDelete(dx > 0 ? 1 : -1);
+            return;
+          }
+          animateBack();
+        },
+        onPanResponderTerminate: () => {
+          animateBack();
+        },
+      }),
+    [animateBack, animateOffAndDelete, translateX],
+  );
+
+  const bgOpacity = translateX.interpolate({
+    inputRange: [-SWIPE_DELETE_THRESHOLD, 0, SWIPE_DELETE_THRESHOLD],
+    outputRange: [1, 0, 1],
+    extrapolate: 'clamp',
+  });
+
+  return (
+    <View style={styles.swipeWrap}>
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.deleteBg,
+          {backgroundColor: active ? DELETE_BG_ACTIVE : DELETE_BG, opacity: bgOpacity},
+        ]}>
+        <Text style={styles.deleteBgText}>Usuń</Text>
+      </Animated.View>
+
+      <Animated.View
+        style={{transform: [{translateX}]}}
+        {...panResponder.panHandlers}>
+        {children}
+      </Animated.View>
+    </View>
+  );
+}
+
 export default function HomeView({onOpenScan, onOpenRecipes, onOpenShopping}: HomeViewProps) {
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -109,38 +212,50 @@ export default function HomeView({onOpenScan, onOpenRecipes, onOpenShopping}: Ho
     return copy;
   }, [items, query, sortKey]);
 
+  const deleteItem = useCallback(async (id: string) => {
+    try {
+      await repo.removeFromInventory(id);
+      setItems(prev => prev.filter(p => p.id !== id));
+    } catch {
+      // jeśli usuwanie nie przejdzie, wróć do spójnego stanu z bazą
+      void load();
+    }
+  }, [load]);
+
   const renderItem = useCallback(
     ({item}: {item: InventoryItem}) => (
-      <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.productName} numberOfLines={2}>
-            {item.name}
-          </Text>
-          {item.isOpened ? (
-            <View style={styles.badgeOpen}>
-              <Text style={styles.badgeOpenText}>Otwarte</Text>
-            </View>
-          ) : null}
-        </View>
-        {item.brand ? <Text style={styles.brand}>{item.brand}</Text> : null}
-        <View style={styles.cardMeta}>
-          <Text style={styles.metaLine}>
-            Ważne do: <Text style={styles.metaValue}>{formatExpiryLine(item.expiryDate)}</Text>
-          </Text>
-          {item.ean ? (
-            <Text style={styles.metaLine}>
-              EAN: <Text style={styles.ean}>{item.ean}</Text>
+      <SwipeToDeleteCard onDelete={() => void deleteItem(item.id)}>
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.productName} numberOfLines={2}>
+              {item.name}
             </Text>
-          ) : null}
-          {item.category ? (
-            <View style={styles.categoryPill}>
-              <Text style={styles.categoryText}>{item.category}</Text>
-            </View>
-          ) : null}
+            {item.isOpened ? (
+              <View style={styles.badgeOpen}>
+                <Text style={styles.badgeOpenText}>Otwarte</Text>
+              </View>
+            ) : null}
+          </View>
+          {item.brand ? <Text style={styles.brand}>{item.brand}</Text> : null}
+          <View style={styles.cardMeta}>
+            <Text style={styles.metaLine}>
+              Ważne do: <Text style={styles.metaValue}>{formatExpiryLine(item.expiryDate)}</Text>
+            </Text>
+            {item.ean ? (
+              <Text style={styles.metaLine}>
+                EAN: <Text style={styles.ean}>{item.ean}</Text>
+              </Text>
+            ) : null}
+            {item.category ? (
+              <View style={styles.categoryPill}>
+                <Text style={styles.categoryText}>{item.category}</Text>
+              </View>
+            ) : null}
+          </View>
         </View>
-      </View>
+      </SwipeToDeleteCard>
     ),
-    [],
+    [deleteItem],
   );
 
   return (
@@ -365,7 +480,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceDark,
     borderRadius: 14,
     padding: 14,
-    marginBottom: 10,
     borderWidth: 1,
     borderColor: colors.borderDark,
   },
@@ -499,5 +613,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  swipeWrap: {
+    position: 'relative',
+    marginBottom: 10,
+  },
+  deleteBg: {
+    ...StyleSheet.absoluteFill,
+    borderRadius: 14,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  deleteBgText: {
+    color: '#fff',
+    fontWeight: '900',
+    fontSize: 16,
+    letterSpacing: 0.2,
   },
 });
