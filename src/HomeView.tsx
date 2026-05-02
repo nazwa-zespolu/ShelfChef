@@ -1,8 +1,6 @@
-import React, {useCallback, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
-  Animated,
-  PanResponder,
   FlatList,
   Modal,
   Pressable,
@@ -10,18 +8,16 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {InventoryItem} from './domain/types';
+import {SwipeToDeleteCard} from './components/SwipeToDeleteCard';
 import {ProductRepository} from './infrastructure/ProductRepository';
 import {colors} from './theme/colors';
+import {compareExpiry, formatExpiryLine} from './utils/inventory';
 
 const repo = new ProductRepository();
-const DELETE_BG = '#d64545';
-const DELETE_BG_ACTIVE = '#b93535';
-const SWIPE_DELETE_THRESHOLD = 110;
 
 type SortKey = 'name_asc' | 'name_desc' | 'expiry_asc' | 'expiry_desc';
 
@@ -32,140 +28,11 @@ const SORT_OPTIONS: {key: SortKey; label: string}[] = [
   {key: 'expiry_desc', label: 'Ważność: późniejsze'},
 ];
 
-function formatExpiryLine(iso: string): string {
-  if (!iso) {
-    return '—';
-  }
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) {
-    return iso;
-  }
-  return d.toLocaleDateString('pl-PL', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  });
-}
-
-function compareExpiry(a: InventoryItem, b: InventoryItem): number {
-  const ta = new Date(a.expiryDate).getTime();
-  const tb = new Date(b.expiryDate).getTime();
-  const aOk = !Number.isNaN(ta);
-  const bOk = !Number.isNaN(tb);
-  if (aOk && bOk) {
-    return ta - tb;
-  }
-  if (aOk) {
-    return -1;
-  }
-  if (bOk) {
-    return 1;
-  }
-  return 0;
-}
-
 type HomeViewProps = {
   onOpenScan: () => void;
   onOpenRecipes: () => void;
   onOpenShopping: () => void;
 };
-
-function SwipeToDeleteCard({
-  children,
-  onDelete,
-}: {
-  children: React.ReactNode;
-  onDelete: () => void;
-}) {
-  const {width} = useWindowDimensions();
-  const translateX = useRef(new Animated.Value(0)).current;
-  const [active, setActive] = useState(false);
-
-  const animateBack = useCallback(() => {
-    setActive(false);
-    Animated.spring(translateX, {
-      toValue: 0,
-      useNativeDriver: true,
-      speed: 18,
-      bounciness: 6,
-    }).start();
-  }, [translateX]);
-
-  const animateOffAndDelete = useCallback(
-    (dir: 1 | -1) => {
-      setActive(false);
-      Animated.timing(translateX, {
-        toValue: dir * width,
-        duration: 180,
-        useNativeDriver: true,
-      }).start(({finished}) => {
-        if (finished) {
-          onDelete();
-        } else {
-          animateBack();
-        }
-      });
-    },
-    [animateBack, onDelete, translateX, width],
-  );
-
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_evt, gesture) => {
-          const dx = Math.abs(gesture.dx);
-          const dy = Math.abs(gesture.dy);
-          return dx > 8 && dx > dy;
-        },
-        onPanResponderGrant: () => {
-          translateX.stopAnimation();
-        },
-        onPanResponderMove: (_evt, gesture) => {
-          const dx = gesture.dx;
-          translateX.setValue(dx);
-          setActive(Math.abs(dx) >= SWIPE_DELETE_THRESHOLD);
-        },
-        onPanResponderTerminationRequest: () => true,
-        onPanResponderRelease: (_evt, gesture) => {
-          const dx = gesture.dx;
-          if (Math.abs(dx) >= SWIPE_DELETE_THRESHOLD) {
-            animateOffAndDelete(dx > 0 ? 1 : -1);
-            return;
-          }
-          animateBack();
-        },
-        onPanResponderTerminate: () => {
-          animateBack();
-        },
-      }),
-    [animateBack, animateOffAndDelete, translateX],
-  );
-
-  const bgOpacity = translateX.interpolate({
-    inputRange: [-SWIPE_DELETE_THRESHOLD, 0, SWIPE_DELETE_THRESHOLD],
-    outputRange: [1, 0, 1],
-    extrapolate: 'clamp',
-  });
-
-  return (
-    <View style={styles.swipeWrap}>
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          styles.deleteBg,
-          {backgroundColor: active ? DELETE_BG_ACTIVE : DELETE_BG, opacity: bgOpacity},
-        ]}>
-        <Text style={styles.deleteBgText}>Usuń</Text>
-      </Animated.View>
-
-      <Animated.View
-        style={{transform: [{translateX}]}}
-        {...panResponder.panHandlers}>
-        {children}
-      </Animated.View>
-    </View>
-  );
-}
 
 export default function HomeView({onOpenScan, onOpenRecipes, onOpenShopping}: HomeViewProps) {
   const insets = useSafeAreaInsets();
@@ -613,21 +480,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
-  },
-  swipeWrap: {
-    position: 'relative',
-    marginBottom: 10,
-  },
-  deleteBg: {
-    ...StyleSheet.absoluteFill,
-    borderRadius: 14,
-    justifyContent: 'center',
-    paddingHorizontal: 18,
-  },
-  deleteBgText: {
-    color: '#fff',
-    fontWeight: '900',
-    fontSize: 16,
-    letterSpacing: 0.2,
   },
 });
