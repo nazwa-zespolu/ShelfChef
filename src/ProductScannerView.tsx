@@ -102,18 +102,31 @@ function getMockProductByEAN(ean: string): MockProduct {
   return {...fallback, ean};
 }
 
-function ScannerUnavailable() {
+function ScannerUnavailable({onRequestClose}: {onRequestClose?: () => void}) {
+  const insets = useSafeAreaInsets();
   return (
     <View style={styles.center}>
+      {onRequestClose ? (
+        <Pressable
+          onPress={onRequestClose}
+          style={[styles.backOverlay, {top: Math.max(insets.top, 12)}]}
+          hitSlop={12}>
+          <Text style={styles.backText}>&#8592; Wróć</Text>
+        </Pressable>
+      ) : null}
       <Text style={styles.title}>Scanner unavailable</Text>
       <Text style={styles.info}>Missing scanner library or permission denied.</Text>
     </View>
   );
 }
 
-export default function ProductScannerView() {
+type ProductScannerViewProps = {
+  onRequestClose?: () => void;
+};
+
+export default function ProductScannerView({onRequestClose}: ProductScannerViewProps) {
   if (!visionCamera) {
-    return <ScannerUnavailable />;
+    return <ScannerUnavailable onRequestClose={onRequestClose} />;
   }
 
   const Camera = visionCamera.Camera as React.ComponentType<any>;
@@ -130,7 +143,7 @@ export default function ProductScannerView() {
   }) => any) | null;
 
   if (!useCodeScanner || !useCameraPermission || !useCameraDevice) {
-    return <ScannerUnavailable />;
+    return <ScannerUnavailable onRequestClose={onRequestClose} />;
   }
 
   const insets = useSafeAreaInsets();
@@ -209,6 +222,14 @@ export default function ProductScannerView() {
   if (!hasPermission) {
     return (
       <View style={styles.center}>
+        {onRequestClose ? (
+          <Pressable
+            onPress={onRequestClose}
+            style={[styles.backOverlay, {top: Math.max(insets.top, 12)}]}
+            hitSlop={12}>
+            <Text style={styles.backText}>&#8592; Wróć</Text>
+          </Pressable>
+        ) : null}
         <Text style={styles.title}>Scan Product</Text>
         <Text style={styles.info}>Camera permission denied</Text>
         <Button title="Grant camera permission" onPress={requestPermission} />
@@ -219,6 +240,14 @@ export default function ProductScannerView() {
   if (!device) {
     return (
       <View style={styles.center}>
+        {onRequestClose ? (
+          <Pressable
+            onPress={onRequestClose}
+            style={[styles.backOverlay, {top: Math.max(insets.top, 12)}]}
+            hitSlop={12}>
+            <Text style={styles.backText}>&#8592; Wróć</Text>
+          </Pressable>
+        ) : null}
         <Text style={styles.title}>Scan Product</Text>
         <Text style={styles.info}>No camera is available on this device.</Text>
       </View>
@@ -253,7 +282,14 @@ export default function ProductScannerView() {
         isActive={true}
         codeScanner={codeScanner}
       />
-
+      {onRequestClose ? (
+        <Pressable
+          onPress={onRequestClose}
+          style={[styles.backOverlay, {top: Math.max(insets.top, 12)}]}
+          hitSlop={12}>
+          <Text style={styles.backText}>&#8592; Wróć</Text>
+        </Pressable>
+      ) : null}
 
       <Animated.View
         style={[
@@ -393,6 +429,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 24,
     gap: 10,
+  },
+  backOverlay: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  backText: {
+    color: colors.successAccent,
+    fontSize: 16,
+    fontWeight: '700',
   },
   topOverlay: {
     position: 'absolute',
