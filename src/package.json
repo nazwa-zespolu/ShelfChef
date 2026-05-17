@@ -14,7 +14,8 @@
     "react": "19.2.3",
     "react-native": "0.85.1",
     "react-native-quick-sqlite": "^8.2.7",
-    "react-native-safe-area-context": "^5.5.2"
+    "react-native-safe-area-context": "^5.5.2",
+    "react-native-vision-camera": "^4.7.3"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
