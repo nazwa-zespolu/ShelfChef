@@ -1,6 +1,11 @@
 import { ProductDefinition } from "../domain/types";
 
 export type SupportedEan = string;
+type FetchLike = (input: string, init?: { method?: string; signal?: unknown }) => Promise<{
+  status: number;
+  ok: boolean;
+  json: () => Promise<unknown>;
+}>;
 
 export class OpenFoodFactsClientError extends Error {
   readonly code: string;
@@ -55,6 +60,128 @@ export class UpstreamError extends OpenFoodFactsClientError {
  */
 export interface OpenFoodFactsClient {
   fetchProductByEAN(ean: SupportedEan): Promise<ProductDefinition>;
+}
+
+interface OpenFoodFactsProductDto {
+  code?: string;
+  product_name?: string;
+  brands?: string;
+  image_url?: string;
+  categories?: string;
+}
+
+interface OpenFoodFactsLookupResponse {
+  status?: number;
+  product?: OpenFoodFactsProductDto;
+}
+
+export interface HttpOpenFoodFactsClientOptions {
+  timeoutMs?: number;
+  baseUrl?: string;
+  fetchFn?: FetchLike;
+}
+
+export class HttpOpenFoodFactsClient implements OpenFoodFactsClient {
+  private readonly timeoutMs: number;
+  private readonly baseUrl: string;
+  private readonly fetchFn: FetchLike;
+
+  constructor(options: HttpOpenFoodFactsClientOptions = {}) {
+    this.timeoutMs = options.timeoutMs ?? 5000;
+    this.baseUrl = options.baseUrl ?? "https://world.openfoodfacts.org/api/v2";
+    this.fetchFn =
+      options.fetchFn ??
+      (() => {
+        const maybeFetch = (globalThis as { fetch?: FetchLike }).fetch;
+        if (!maybeFetch) {
+          throw new NetworkError("Global fetch is not available");
+        }
+        return maybeFetch;
+      })();
+  }
+
+  async fetchProductByEAN(ean: SupportedEan): Promise<ProductDefinition> {
+    assertValidEan(ean);
+    const normalizedEan = ean.trim();
+    const url = `${this.baseUrl}/product/${normalizedEan}.json`;
+
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), this.timeoutMs);
+
+    try {
+      const response = await this.fetchFn(url, {
+        method: "GET",
+        signal: abortController.signal,
+      });
+
+      if (response.status === 404 || response.status === 410) {
+        throw new NotFoundError(normalizedEan);
+      }
+
+      if (response.status === 429) {
+        throw new RateLimitError();
+      }
+
+      if (response.status >= 500) {
+        throw new UpstreamError(response.status);
+      }
+
+      if (!response.ok) {
+        throw new UpstreamError(response.status);
+      }
+
+      const payload = (await response.json()) as OpenFoodFactsLookupResponse;
+      const product = payload.product;
+      const hasProduct = payload.status === 1 && product;
+
+      if (!hasProduct) {
+        throw new NotFoundError(normalizedEan);
+      }
+
+      return this.mapProduct(normalizedEan, product);
+    } catch (error: unknown) {
+      if (error instanceof OpenFoodFactsClientError) {
+        throw error;
+      }
+
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new TimeoutError();
+      }
+
+      if (error instanceof Error) {
+        throw new NetworkError(error.message);
+      }
+
+      throw new NetworkError("Unexpected network failure");
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  private mapProduct(ean: string, product: OpenFoodFactsProductDto): ProductDefinition {
+    const name = product.product_name?.trim();
+
+    if (!name) {
+      throw new NotFoundError(ean);
+    }
+
+    const category = product.categories
+      ?.split(",")
+      .map(part => part.trim())
+      .filter(Boolean)[0];
+    const brand = product.brands
+      ?.split(",")
+      .map(part => part.trim())
+      .filter(Boolean)[0];
+
+    return {
+      ean,
+      name,
+      brand,
+      imageUrl: product.image_url?.trim(),
+      category,
+    };
+  }
 }
 
 /**
