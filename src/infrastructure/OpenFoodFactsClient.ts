@@ -8,12 +8,15 @@ export type SupportedEan = string;
 const OFF_PRODUCT_READ_LIMIT_PER_MINUTE = 15;
 const ONE_MINUTE_IN_MS = 60_000;
 const DEFAULT_USER_AGENT = "MDstudy/1.0 (kubakar2005@gmail.com)";
+const OFF_PRODUCTION_BASE_URL = "https://world.openfoodfacts.org/api/v2";
+const OFF_STAGING_BASE_URL = "https://world.openfoodfacts.net/api/v2";
 const OFF_MINIMUM_FIELDS = "product_name,brands,categories,image_url";
 type FetchLike = (input: string, init?: { method?: string; signal?: unknown; headers?: Record<string, string> }) => Promise<{
   status: number;
   ok: boolean;
   json: () => Promise<unknown>;
 }>;
+type OpenFoodFactsDeployment = "production" | "staging";
 
 export class OpenFoodFactsClientError extends Error {
   readonly code: string;
@@ -90,10 +93,15 @@ interface OpenFoodFactsLookupResponse {
 }
 
 export interface HttpOpenFoodFactsClientOptions {
+  deployment?: OpenFoodFactsDeployment;
   timeoutMs?: number;
   baseUrl?: string;
   fetchFn?: FetchLike;
   userAgent?: string;
+  stagingBasicAuth?: {
+    username: string;
+    password: string;
+  };
   rateLimiter?: OpenFoodFactsRateLimiter;
   rateLimit?: {
     maxRequests: number;
@@ -107,12 +115,22 @@ export class HttpOpenFoodFactsClient implements OpenFoodFactsClient {
   private readonly baseUrl: string;
   private readonly fetchFn: FetchLike;
   private readonly userAgent: string;
+  private readonly authorizationHeader?: string;
   private readonly rateLimiter: OpenFoodFactsRateLimiter;
 
   constructor(options: HttpOpenFoodFactsClientOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 5000;
-    this.baseUrl = options.baseUrl ?? "https://world.openfoodfacts.org/api/v2";
+    const deployment = options.deployment ?? "production";
+    const defaultBaseUrl =
+      deployment === "staging" ? OFF_STAGING_BASE_URL : OFF_PRODUCTION_BASE_URL;
+    this.baseUrl = options.baseUrl ?? defaultBaseUrl;
     this.userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
+    this.authorizationHeader = options.stagingBasicAuth
+      ? this.buildBasicAuthHeader(
+          options.stagingBasicAuth.username,
+          options.stagingBasicAuth.password,
+        )
+      : undefined;
     this.fetchFn =
       options.fetchFn ??
       (() => {
@@ -147,12 +165,16 @@ export class HttpOpenFoodFactsClient implements OpenFoodFactsClient {
     try {
       const abortController = new AbortController();
       timeoutId = setTimeout(() => abortController.abort(), this.timeoutMs);
+      const headers: Record<string, string> = {
+        "User-Agent": this.userAgent,
+      };
+      if (this.authorizationHeader) {
+        headers.Authorization = this.authorizationHeader;
+      }
       const response = await this.fetchFn(url, {
         method: "GET",
         signal: abortController.signal,
-        headers: {
-          "User-Agent": this.userAgent,
-        },
+        headers,
       });
 
       if (response.status === 404 || response.status === 410) {
@@ -202,6 +224,21 @@ export class HttpOpenFoodFactsClient implements OpenFoodFactsClient {
         clearTimeout(timeoutId);
       }
     }
+  }
+
+  private buildBasicAuthHeader(username: string, password: string): string {
+    const credentials = `${username}:${password}`;
+    const maybeBtoa = (globalThis as { btoa?: (value: string) => string }).btoa;
+    if (maybeBtoa) {
+      return `Basic ${maybeBtoa(credentials)}`;
+    }
+
+    const maybeBuffer = (globalThis as { Buffer?: { from: (value: string, encoding: string) => { toString: (encoding: string) => string } } }).Buffer;
+    if (maybeBuffer) {
+      return `Basic ${maybeBuffer.from(credentials, "utf-8").toString("base64")}`;
+    }
+
+    throw new NetworkError("Cannot encode Basic Auth credentials in this environment");
   }
 
   private mapProduct(ean: string, product: OpenFoodFactsProductDto): ProductDefinition {

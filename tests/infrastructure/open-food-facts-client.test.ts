@@ -192,4 +192,29 @@ describe("HttpOpenFoodFactsClient", () => {
       }),
     );
   });
+
+  it("uses staging base URL when deployment is staging", async () => {
+    const fetchFn = jest.fn<Promise<FetchResponse>, [string, FetchInit?]>(async () => ({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        status: 1,
+        product: {
+          product_name: "Ser",
+        },
+      }),
+    }));
+
+    const client = new HttpOpenFoodFactsClient({
+      fetchFn,
+      deployment: "staging",
+    });
+
+    await client.fetchProductByEAN("5901234567890");
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      expect.stringContaining("https://world.openfoodfacts.net/api/v2/product/"),
+      expect.anything(),
+    );
+  });
 });
