@@ -38,6 +38,12 @@ describe("HttpOpenFoodFactsClient", () => {
     const result = await client.fetchProductByEAN("5901234567890");
 
     expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "/product/5901234567890.json?fields=product_name%2Cbrands%2Ccategories%2Cimage_url",
+      ),
+      expect.anything(),
+    );
     expect(result).toEqual({
       ean: "5901234567890",
       name: "Jogurt naturalny",

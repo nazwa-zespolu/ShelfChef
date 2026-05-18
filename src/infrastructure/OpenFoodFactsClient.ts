@@ -8,6 +8,7 @@ export type SupportedEan = string;
 const OFF_PRODUCT_READ_LIMIT_PER_MINUTE = 15;
 const ONE_MINUTE_IN_MS = 60_000;
 const DEFAULT_USER_AGENT = "MDstudy/1.0 (kubakar2005@gmail.com)";
+const OFF_MINIMUM_FIELDS = "product_name,brands,categories,image_url";
 type FetchLike = (input: string, init?: { method?: string; signal?: unknown; headers?: Record<string, string> }) => Promise<{
   status: number;
   ok: boolean;
@@ -138,7 +139,9 @@ export class HttpOpenFoodFactsClient implements OpenFoodFactsClient {
     }
 
     const normalizedEan = ean.trim();
-    const url = `${this.baseUrl}/product/${normalizedEan}.json`;
+    const url = `${this.baseUrl}/product/${normalizedEan}.json?fields=${encodeURIComponent(
+      OFF_MINIMUM_FIELDS,
+    )}`;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     try {
