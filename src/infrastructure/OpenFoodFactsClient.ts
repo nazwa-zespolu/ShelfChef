@@ -60,6 +60,12 @@ export class UpstreamError extends OpenFoodFactsClientError {
   }
 }
 
+export class ServiceUnavailableError extends OpenFoodFactsClientError {
+  constructor(message = "Open Food Facts service is temporarily unavailable") {
+    super(message, "SERVICE_UNAVAILABLE");
+  }
+}
+
 /**
  * Contract for product lookup by EAN in Open Food Facts.
  * Success: returns normalized ProductDefinition.
@@ -155,6 +161,9 @@ export class HttpOpenFoodFactsClient implements OpenFoodFactsClient {
       }
 
       if (response.status >= 500) {
+        if (response.status === 503) {
+          throw new ServiceUnavailableError();
+        }
         throw new UpstreamError(response.status);
       }
 

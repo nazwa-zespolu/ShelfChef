@@ -2,6 +2,7 @@ import {
   HttpOpenFoodFactsClient,
   NotFoundError,
   RateLimitError,
+  ServiceUnavailableError,
   TimeoutError,
 } from "../../src/infrastructure/OpenFoodFactsClient";
 
@@ -109,6 +110,20 @@ describe("HttpOpenFoodFactsClient", () => {
 
     await expect(client.fetchProductByEAN("5901234567890")).rejects.toBeInstanceOf(
       NotFoundError,
+    );
+  });
+
+  it("throws ServiceUnavailableError when upstream returns 503", async () => {
+    const fetchFn = jest.fn<Promise<FetchResponse>, [string, FetchInit?]>(async () => ({
+      status: 503,
+      ok: false,
+      json: async () => ({}),
+    }));
+
+    const client = new HttpOpenFoodFactsClient({ fetchFn });
+
+    await expect(client.fetchProductByEAN("5901234567890")).rejects.toBeInstanceOf(
+      ServiceUnavailableError,
     );
   });
 
