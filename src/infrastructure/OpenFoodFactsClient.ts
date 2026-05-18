@@ -1,6 +1,12 @@
 import { ProductDefinition } from "../domain/types";
+import {
+  OpenFoodFactsRateLimiter,
+  SlidingWindowRateLimiter,
+} from "./OpenFoodFactsRateLimiter";
 
 export type SupportedEan = string;
+const OFF_PRODUCT_READ_LIMIT_PER_MINUTE = 15;
+const ONE_MINUTE_IN_MS = 60_000;
 type FetchLike = (input: string, init?: { method?: string; signal?: unknown }) => Promise<{
   status: number;
   ok: boolean;
@@ -79,12 +85,19 @@ export interface HttpOpenFoodFactsClientOptions {
   timeoutMs?: number;
   baseUrl?: string;
   fetchFn?: FetchLike;
+  rateLimiter?: OpenFoodFactsRateLimiter;
+  rateLimit?: {
+    maxRequests: number;
+    windowMs: number;
+    now?: () => number;
+  };
 }
 
 export class HttpOpenFoodFactsClient implements OpenFoodFactsClient {
   private readonly timeoutMs: number;
   private readonly baseUrl: string;
   private readonly fetchFn: FetchLike;
+  private readonly rateLimiter: OpenFoodFactsRateLimiter;
 
   constructor(options: HttpOpenFoodFactsClientOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 5000;
@@ -98,17 +111,29 @@ export class HttpOpenFoodFactsClient implements OpenFoodFactsClient {
         }
         return maybeFetch;
       })();
+    this.rateLimiter =
+      options.rateLimiter ??
+      new SlidingWindowRateLimiter({
+        maxRequests: options.rateLimit?.maxRequests ?? OFF_PRODUCT_READ_LIMIT_PER_MINUTE,
+        windowMs: options.rateLimit?.windowMs ?? ONE_MINUTE_IN_MS,
+        now: options.rateLimit?.now,
+      });
   }
 
   async fetchProductByEAN(ean: SupportedEan): Promise<ProductDefinition> {
     assertValidEan(ean);
+    const isAllowed = this.rateLimiter.tryConsume();
+    if (!isAllowed) {
+      throw new RateLimitError();
+    }
+
     const normalizedEan = ean.trim();
     const url = `${this.baseUrl}/product/${normalizedEan}.json`;
-
-    const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), this.timeoutMs);
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     try {
+      const abortController = new AbortController();
+      timeoutId = setTimeout(() => abortController.abort(), this.timeoutMs);
       const response = await this.fetchFn(url, {
         method: "GET",
         signal: abortController.signal,
@@ -154,7 +179,9 @@ export class HttpOpenFoodFactsClient implements OpenFoodFactsClient {
 
       throw new NetworkError("Unexpected network failure");
     } finally {
-      clearTimeout(timeoutId);
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
     }
   }
 
