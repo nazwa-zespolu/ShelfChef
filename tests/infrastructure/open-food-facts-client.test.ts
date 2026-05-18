@@ -10,10 +10,11 @@ type FetchResponse = {
   ok: boolean;
   json: () => Promise<unknown>;
 };
+type FetchInit = { method?: string; signal?: unknown; headers?: Record<string, string> };
 
 describe("HttpOpenFoodFactsClient", () => {
   it("returns mapped product definition for valid OFF response", async () => {
-    const fetchFn = jest.fn<Promise<FetchResponse>, [string, { method?: string; signal?: unknown }?]>(
+    const fetchFn = jest.fn<Promise<FetchResponse>, [string, FetchInit?]>(
       async () => ({
         status: 200,
         ok: true,
@@ -46,7 +47,7 @@ describe("HttpOpenFoodFactsClient", () => {
   });
 
   it("throws TimeoutError when fetch is aborted by timeout", async () => {
-    const fetchFn = jest.fn().mockImplementation((_url, init) => {
+    const fetchFn = jest.fn().mockImplementation((_url, init: FetchInit | undefined) => {
       const signal = init?.signal as AbortSignal | undefined;
 
       return new Promise((_resolve, reject) => {
@@ -74,7 +75,7 @@ describe("HttpOpenFoodFactsClient", () => {
   });
 
   it("throws RateLimitError when upstream returns 429", async () => {
-    const fetchFn = jest.fn<Promise<FetchResponse>, [string, { method?: string; signal?: unknown }?]>(
+    const fetchFn = jest.fn<Promise<FetchResponse>, [string, FetchInit?]>(
       async () => ({
         status: 429,
         ok: false,
@@ -92,7 +93,7 @@ describe("HttpOpenFoodFactsClient", () => {
   });
 
   it("throws NotFoundError when OFF does not contain product", async () => {
-    const fetchFn = jest.fn<Promise<FetchResponse>, [string, { method?: string; signal?: unknown }?]>(
+    const fetchFn = jest.fn<Promise<FetchResponse>, [string, FetchInit?]>(
       async () => ({
         status: 200,
         ok: true,
@@ -112,7 +113,7 @@ describe("HttpOpenFoodFactsClient", () => {
   });
 
   it("uses default local rate limit of 15 requests per minute", async () => {
-    const fetchFn = jest.fn<Promise<FetchResponse>, [string, { method?: string; signal?: unknown }?]>(
+    const fetchFn = jest.fn<Promise<FetchResponse>, [string, FetchInit?]>(
       async () => ({
         status: 200,
         ok: true,
@@ -140,5 +141,34 @@ describe("HttpOpenFoodFactsClient", () => {
       RateLimitError,
     );
     expect(fetchFn).toHaveBeenCalledTimes(15);
+  });
+
+  it("sends custom User-Agent header in OFF requests", async () => {
+    const fetchFn = jest.fn<Promise<FetchResponse>, [string, FetchInit?]>(async () => ({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        status: 1,
+        product: {
+          product_name: "Ser",
+        },
+      }),
+    }));
+
+    const client = new HttpOpenFoodFactsClient({
+      fetchFn,
+      userAgent: "MDstudy/1.0 (team@example.com)",
+    });
+
+    await client.fetchProductByEAN("5901234567890");
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "User-Agent": "MDstudy/1.0 (team@example.com)",
+        }),
+      }),
+    );
   });
 });

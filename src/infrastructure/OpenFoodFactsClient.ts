@@ -7,7 +7,8 @@ import {
 export type SupportedEan = string;
 const OFF_PRODUCT_READ_LIMIT_PER_MINUTE = 15;
 const ONE_MINUTE_IN_MS = 60_000;
-type FetchLike = (input: string, init?: { method?: string; signal?: unknown }) => Promise<{
+const DEFAULT_USER_AGENT = "MDstudy/1.0 (kubakar2005@gmail.com)";
+type FetchLike = (input: string, init?: { method?: string; signal?: unknown; headers?: Record<string, string> }) => Promise<{
   status: number;
   ok: boolean;
   json: () => Promise<unknown>;
@@ -85,6 +86,7 @@ export interface HttpOpenFoodFactsClientOptions {
   timeoutMs?: number;
   baseUrl?: string;
   fetchFn?: FetchLike;
+  userAgent?: string;
   rateLimiter?: OpenFoodFactsRateLimiter;
   rateLimit?: {
     maxRequests: number;
@@ -97,11 +99,13 @@ export class HttpOpenFoodFactsClient implements OpenFoodFactsClient {
   private readonly timeoutMs: number;
   private readonly baseUrl: string;
   private readonly fetchFn: FetchLike;
+  private readonly userAgent: string;
   private readonly rateLimiter: OpenFoodFactsRateLimiter;
 
   constructor(options: HttpOpenFoodFactsClientOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 5000;
     this.baseUrl = options.baseUrl ?? "https://world.openfoodfacts.org/api/v2";
+    this.userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
     this.fetchFn =
       options.fetchFn ??
       (() => {
@@ -137,6 +141,9 @@ export class HttpOpenFoodFactsClient implements OpenFoodFactsClient {
       const response = await this.fetchFn(url, {
         method: "GET",
         signal: abortController.signal,
+        headers: {
+          "User-Agent": this.userAgent,
+        },
       });
 
       if (response.status === 404 || response.status === 410) {
