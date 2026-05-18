@@ -217,4 +217,37 @@ describe("HttpOpenFoodFactsClient", () => {
       expect.anything(),
     );
   });
+
+  it("sends Authorization header when staging basic auth is configured", async () => {
+    const fetchFn = jest.fn<Promise<FetchResponse>, [string, FetchInit?]>(async () => ({
+      status: 200,
+      ok: true,
+      json: async () => ({
+        status: 1,
+        product: {
+          product_name: "Ser",
+        },
+      }),
+    }));
+
+    const client = new HttpOpenFoodFactsClient({
+      fetchFn,
+      deployment: "staging",
+      stagingBasicAuth: {
+        username: "off",
+        password: "off",
+      },
+    });
+
+    await client.fetchProductByEAN("5901234567890");
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Basic\s.+/),
+        }),
+      }),
+    );
+  });
 });
