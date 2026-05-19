@@ -24,7 +24,7 @@ describe("UC-01: ScanToAdd", () => {
       ean: "5901234567890",
       expirationDate: new Date("2026-05-01"),
       count: 1,
-    });
+    }) as any;
 
     expect(databaseService.queryProductByEan).toHaveBeenCalledWith("5901234567890");
     expect(openFoodFactsService.fetchProductByEAN).not.toHaveBeenCalled();

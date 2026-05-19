@@ -1,6 +1,7 @@
 # ShelfChef - Instrukcja Uruchamiania
 
 ## 1. Pierwsze uruchomienie projektu na emulatorze
+
 Tę procedurę wykonaj po raz pierwszy po pobraniu projektu, przy nowym emulatorze lub gdy zmienisz ustawienia natywne w folderze `/android`.
 
 1.  **Instalacja zależności:**
@@ -15,15 +16,16 @@ Tę procedurę wykonaj po raz pierwszy po pobraniu projektu, przy nowym emulator
     ```bash
     npx react-native run-android
     ```
-5.  **Jeśli pojawila sie aplikacja ale z błedem "Unable to load script":**
-Uruchamiamy recznie Metro bo moze sie wylaczyl.
-    ```bash
+4.  **Jeśli pojawila sie aplikacja ale z błedem "Unable to load script":**
+    Uruchamiamy recznie Metro bo moze sie wylaczyl.
+    `bash
     npx react-native start
-    ```
+    `
 
 ---
 
 ## 2. Każde następne uruchomienie tego samego emulatora
+
 Gdy aplikacja jest już zainstalowana na Twoim emulatorze.
 
 1.  **Uruchom emulator** w Android Studio.
@@ -32,13 +34,13 @@ Gdy aplikacja jest już zainstalowana na Twoim emulatorze.
     ```bash
     npx react-native start
     ```
-    *Zostaw ten terminal otwarty przez cały czas pracy.*
+    _Zostaw ten terminal otwarty przez cały czas pracy._
 3.  **Otwórz aplikację:**
-    Po prostu kliknij ikonę **ShelfChef** na pulpicie emulatora. 
+    Po prostu kliknij ikonę **ShelfChef** na pulpicie emulatora.
 4.  **Szybkie odświeżanie (Fast Refresh):**
     Po każdej zmianie w kodzie i zapisaniu pliku (`Ctrl + S`), aplikacja na emulatorze zaktualizuje się automatycznie.
 
-*Uwaga: Komendy `run-android` nie musisz już powtarzać, chyba że zainstalujesz nową bibliotekę natywną lub zmodyfikujesz folder `/android`.*
+_Uwaga: Komendy `run-android` nie musisz już powtarzać, chyba że zainstalujesz nową bibliotekę natywną lub zmodyfikujesz folder `/android`._
 
 ---
 
@@ -46,3 +48,4 @@ Gdy aplikacja jest już zainstalowana na Twoim emulatorze.
 
 ```bash
 npm test
+```
