@@ -6,15 +6,23 @@
  */
 
 import React, {useEffect, useState} from 'react';
-import {StatusBar, useColorScheme, View} from 'react-native';
+import {StyleSheet, View} from 'react-native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import HomeView from './HomeView';
 import ProductScannerView from './ProductScannerView';
 import RecipeGeneratorView from './RecipeGeneratorView';
 import ShoppingListView from './ShoppingListView';
 import {setupDatabase} from './infrastructure/db/init';
+import {initExecutorch} from 'react-native-executorch';
+import {BareResourceFetcher} from 'react-native-executorch-bare-resource-fetcher';
 
 type AppScreen = 'home' | 'scan' | 'recipes' | 'shopping';
+
+try {
+  initExecutorch({resourceFetcher: BareResourceFetcher});
+} catch (e) {
+  console.error('[ShelfChef] initExecutorch failed', e);
+}
 
 function App() {
   //const isDarkMode = useColorScheme() === 'dark';
@@ -31,7 +39,7 @@ function App() {
   return (
     <SafeAreaProvider>
       {/* <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} /> */}
-      <View style={{flex: 1}}>
+      <View style={styles.shell}>
         {screen === 'home' && (
           <HomeView
             onOpenScan={() => setScreen('scan')}
@@ -54,3 +62,9 @@ function App() {
 }
 
 export default App;
+
+const styles = StyleSheet.create({
+  shell: {
+    flex: 1,
+  },
+});

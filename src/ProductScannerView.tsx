@@ -17,7 +17,6 @@ import {colors} from './theme/colors';
 const visionCamera = (() => {
   try {
     // Runtime require keeps Jest/tests working when native module is missing.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     return require('react-native-vision-camera');
   } catch {
     return null;
@@ -124,32 +123,30 @@ type ProductScannerViewProps = {
   onRequestClose?: () => void;
 };
 
-export default function ProductScannerView({onRequestClose}: ProductScannerViewProps) {
-  if (!visionCamera) {
-    return <ScannerUnavailable onRequestClose={onRequestClose} />;
-  }
-
-  const Camera = visionCamera.Camera as React.ComponentType<any>;
-  const useCameraPermission = visionCamera.useCameraPermission as () => {
+type VisionCameraModule = {
+  Camera: React.ComponentType<any>;
+  useCameraPermission: () => {
     hasPermission: boolean;
     requestPermission: () => Promise<boolean>;
   };
-  const useCameraDevice = visionCamera.useCameraDevice as (
-    cameraPosition: 'front' | 'back',
-  ) => any;
-  const useCodeScanner = visionCamera.useCodeScanner as ((args: {
+  useCameraDevice: (cameraPosition: 'front' | 'back') => any;
+  useCodeScanner: (args: {
     codeTypes: string[];
     onCodeScanned: (codes: Array<{value?: string}>) => void;
-  }) => any) | null;
+  }) => any;
+};
 
-  if (!useCodeScanner || !useCameraPermission || !useCameraDevice) {
-    return <ScannerUnavailable onRequestClose={onRequestClose} />;
-  }
-
+function ProductScannerVisionContent({
+  onRequestClose,
+  visionModule,
+}: {
+  onRequestClose?: () => void;
+  visionModule: VisionCameraModule;
+}) {
+  const {Camera, useCameraPermission, useCameraDevice, useCodeScanner} = visionModule;
   const insets = useSafeAreaInsets();
   const {hasPermission, requestPermission} = useCameraPermission();
   const device = useCameraDevice('back');
-  const [lastCode, setLastCode] = useState('No scans yet');
   const [scannedProduct, setScannedProduct] = useState<MockProduct | null>(null);
   const [expirationDate, setExpirationDate] = useState<Date | null>(getDefaultExpirationDate);
   const [amount, setAmount] = useState(1);
@@ -199,8 +196,6 @@ export default function ProductScannerView({onRequestClose}: ProductScannerViewP
       if (!firstCode) {
         return;
       }
-
-      setLastCode(firstCode);
 
       if (!isValidEAN(firstCode)) {
         return;
@@ -414,6 +409,37 @@ export default function ProductScannerView({onRequestClose}: ProductScannerViewP
         ) : null}
       </Animated.View>
     </View>
+  );
+}
+
+export default function ProductScannerView({onRequestClose}: ProductScannerViewProps) {
+  if (!visionCamera) {
+    return <ScannerUnavailable onRequestClose={onRequestClose} />;
+  }
+
+  const {Camera, useCameraPermission, useCameraDevice, useCodeScanner} = visionCamera as Record<
+    string,
+    unknown
+  >;
+
+  if (
+    typeof Camera !== 'function' ||
+    typeof useCodeScanner !== 'function' ||
+    typeof useCameraPermission !== 'function' ||
+    typeof useCameraDevice !== 'function'
+  ) {
+    return <ScannerUnavailable onRequestClose={onRequestClose} />;
+  }
+
+  const visionModule: VisionCameraModule = {
+    Camera: Camera as VisionCameraModule['Camera'],
+    useCameraPermission: useCameraPermission as VisionCameraModule['useCameraPermission'],
+    useCameraDevice: useCameraDevice as VisionCameraModule['useCameraDevice'],
+    useCodeScanner: useCodeScanner as VisionCameraModule['useCodeScanner'],
+  };
+
+  return (
+    <ProductScannerVisionContent onRequestClose={onRequestClose} visionModule={visionModule} />
   );
 }
 

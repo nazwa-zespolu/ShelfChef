@@ -53,7 +53,7 @@ export default function HomeView({onOpenScan, onOpenRecipes, onOpenShopping}: Ho
   }, []);
 
   React.useEffect(() => {
-    void load();
+    load().catch(() => {});
   }, [load]);
 
   const filteredSorted = useMemo(() => {
@@ -85,13 +85,16 @@ export default function HomeView({onOpenScan, onOpenRecipes, onOpenShopping}: Ho
       setItems(prev => prev.filter(p => p.id !== id));
     } catch {
       // jeśli usuwanie nie przejdzie, wróć do spójnego stanu z bazą
-      void load();
+      load().catch(() => {});
     }
   }, [load]);
 
   const renderItem = useCallback(
     ({item}: {item: InventoryItem}) => (
-      <SwipeToDeleteCard onDelete={() => void deleteItem(item.id)}>
+      <SwipeToDeleteCard
+        onDelete={() => {
+          deleteItem(item.id).catch(() => {});
+        }}>
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Text style={styles.productName} numberOfLines={2}>
