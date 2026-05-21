@@ -32,9 +32,15 @@ type HomeViewProps = {
   onOpenScan: () => void;
   onOpenRecipes: () => void;
   onOpenShopping: () => void;
+  refreshToken?: number;
 };
 
-export default function HomeView({onOpenScan, onOpenRecipes, onOpenShopping}: HomeViewProps) {
+export default function HomeView({
+  onOpenScan,
+  onOpenRecipes,
+  onOpenShopping,
+  refreshToken,
+}: HomeViewProps) {
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,7 +60,7 @@ export default function HomeView({onOpenScan, onOpenRecipes, onOpenShopping}: Ho
 
   React.useEffect(() => {
     load().catch(() => {});
-  }, [load]);
+  }, [load, refreshToken]);
 
   const filteredSorted = useMemo(() => {
     const q = query.trim().toLowerCase();

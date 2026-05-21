@@ -2,45 +2,33 @@ import { ProductDefinition } from "../domain/types";
 
 export interface ScanToAddInput {
   ean: string;
-  expirationDate: Date;
-  count: number;
 }
 
-type ExistingProductLookup = ProductDefinition & {
-  id: string;
-};
-
-interface DatabaseService {
-  queryProductByEan: (ean: string) => Promise<ExistingProductLookup | null>;
-  insertTemplate: (template: ProductDefinition) => Promise<string>;
-  insertProduct: (product: {
-    templateId: string;
-    ean: string;
-    name: string;
-    expirationDate: Date;
-  }) => Promise<string>;
+export interface ScanToAddDatabaseService {
+  findDefinitionByEan: (ean: string) => Promise<ProductDefinition | null>;
+  saveDefinition: (template: ProductDefinition) => Promise<void>;
 }
 
-interface OpenFoodFactsService {
+export interface ScanToAddOpenFoodFactsService {
   fetchProductByEAN: (ean: string) => Promise<ProductDefinition>;
 }
 
-type ManualFallbackResult = {
+export type ManualFallbackResult = {
   fallback: "manual";
   ean: string;
 };
-type ScanToAddResult = ExistingProductLookup | string[] | ManualFallbackResult;
+export type ScanToAddResult = ProductDefinition | ManualFallbackResult;
 
 export class ScanToAdd {
   constructor(
-    private readonly databaseService: DatabaseService,
-    private readonly openFoodFactsService: OpenFoodFactsService,
+    private readonly databaseService: ScanToAddDatabaseService,
+    private readonly openFoodFactsService: ScanToAddOpenFoodFactsService,
   ) {}
 
   async execute(
     input: ScanToAddInput,
   ): Promise<ScanToAddResult> {
-    const existingProduct = await this.databaseService.queryProductByEan(input.ean);
+    const existingProduct = await this.databaseService.findDefinitionByEan(input.ean);
     if (existingProduct) {
       return existingProduct;
     }
@@ -52,21 +40,7 @@ export class ScanToAdd {
       return { fallback: "manual", ean: input.ean };
     }
 
-    const templateId = await this.databaseService.insertTemplate(fetchedDefinition);
-
-    const amount = input.count > 0 ? input.count : 1;
-    const insertedIds: string[] = [];
-
-    for (let i = 0; i < amount; i += 1) {
-      const id = await this.databaseService.insertProduct({
-        templateId,
-        ean: fetchedDefinition.ean,
-        name: fetchedDefinition.name,
-        expirationDate: input.expirationDate,
-      });
-      insertedIds.push(id);
-    }
-
-    return insertedIds;
+    await this.databaseService.saveDefinition(fetchedDefinition);
+    return fetchedDefinition;
   }
 }

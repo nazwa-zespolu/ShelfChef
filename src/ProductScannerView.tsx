@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Button,
@@ -12,6 +13,8 @@ import {
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import WheelPicker from './components/WheelPicker';
+import {ProductDefinition} from './domain/types';
+import {getProductRepository, getScanToAdd} from './app/services';
 import {colors} from './theme/colors';
 
 const visionCamera = (() => {
@@ -22,37 +25,6 @@ const visionCamera = (() => {
     return null;
   }
 })();
-
-type MockProduct = {
-  ean: string;
-  name: string;
-  producer: string;
-  imageUrl: string;
-};
-
-const MOCK_PRODUCTS: MockProduct[] = [
-  {
-    ean: '5901234123457',
-    name: 'Natural Yogurt 400g',
-    producer: 'Fresh Valley',
-    imageUrl:
-      'https://images.unsplash.com/photo-1571212515416-fef01fc43637?auto=format&fit=crop&w=640&q=80',
-  },
-  {
-    ean: '5902345234568',
-    name: 'Sourdough Bread',
-    producer: 'Golden Bakery',
-    imageUrl:
-      'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=640&q=80',
-  },
-  {
-    ean: '5903456345679',
-    name: 'Smoked Chicken Breast',
-    producer: 'Farm Kitchen',
-    imageUrl:
-      'https://images.unsplash.com/photo-1603048297172-c92544798d5a?auto=format&fit=crop&w=640&q=80',
-  },
-];
 
 const BOTTOM_SHEET_HEIGHT = 300;
 
@@ -70,6 +42,17 @@ function formatDate(day: number, month: number, year: number) {
   const dd = String(day).padStart(2, '0');
   const mm = String(month).padStart(2, '0');
   return `${dd}.${mm}.${year}`;
+}
+
+function formatExpiryForDb(date: Date) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function generateInventoryId(index: number) {
+  return `inv-${Date.now()}-${index}-${Math.floor(Math.random() * 1_000_000)}`;
 }
 
 function isValidEAN(code: string) {
@@ -91,16 +74,6 @@ function isValidEAN(code: string) {
   return calculatedChecksum === checksum;
 }
 
-function getMockProductByEAN(ean: string): MockProduct {
-  const exactMatch = MOCK_PRODUCTS.find(product => product.ean === ean);
-  if (exactMatch) {
-    return exactMatch;
-  }
-
-  const fallback = MOCK_PRODUCTS[Number(ean[ean.length - 1]) % MOCK_PRODUCTS.length];
-  return {...fallback, ean};
-}
-
 function ScannerUnavailable({onRequestClose}: {onRequestClose?: () => void}) {
   const insets = useSafeAreaInsets();
   return (
@@ -120,7 +93,8 @@ function ScannerUnavailable({onRequestClose}: {onRequestClose?: () => void}) {
 }
 
 type ProductScannerViewProps = {
-  onRequestClose?: () => void;
+  onRequestClose: () => void;
+  onProductAdded?: () => void;
 };
 
 type VisionCameraModule = {
@@ -138,20 +112,27 @@ type VisionCameraModule = {
 
 function ProductScannerVisionContent({
   onRequestClose,
+  onProductAdded,
   visionModule,
 }: {
-  onRequestClose?: () => void;
+  onRequestClose: () => void;
+  onProductAdded?: () => void;
   visionModule: VisionCameraModule;
 }) {
   const {Camera, useCameraPermission, useCameraDevice, useCodeScanner} = visionModule;
   const insets = useSafeAreaInsets();
   const {hasPermission, requestPermission} = useCameraPermission();
   const device = useCameraDevice('back');
-  const [scannedProduct, setScannedProduct] = useState<MockProduct | null>(null);
+  const [scannedProduct, setScannedProduct] = useState<ProductDefinition | null>(null);
   const [expirationDate, setExpirationDate] = useState<Date | null>(getDefaultExpirationDate);
   const [amount, setAmount] = useState(1);
+  const [resolving, setResolving] = useState(false);
+  const [adding, setAdding] = useState(false);
   const sheetTranslateY = useRef(new Animated.Value(BOTTOM_SHEET_HEIGHT)).current;
   const lastAcceptedScanRef = useRef<{code: string; scannedAt: number} | null>(null);
+  const resolveRequestIdRef = useRef(0);
+  const scanToAdd = useMemo(() => getScanToAdd(), []);
+  const repo = useMemo(() => getProductRepository(), []);
   const currentYear = useMemo(() => new Date().getFullYear(), []);
   const years = useMemo(
     () => Array.from({length: 11}, (_, index) => currentYear + index),
@@ -182,12 +163,34 @@ function ProductScannerVisionContent({
 
   useEffect(() => {
     Animated.timing(sheetTranslateY, {
-      toValue: scannedProduct ? 0 : BOTTOM_SHEET_HEIGHT,
+      toValue: scannedProduct || resolving ? 0 : BOTTOM_SHEET_HEIGHT,
       duration: 250,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
-  }, [scannedProduct, sheetTranslateY]);
+  }, [resolving, scannedProduct, sheetTranslateY]);
+
+  const resolveScannedProduct = async (ean: string) => {
+    const requestId = resolveRequestIdRef.current + 1;
+    resolveRequestIdRef.current = requestId;
+    setScannedProduct(null);
+    setExpirationDate(getDefaultExpirationDate());
+    setAmount(1);
+    setResolving(true);
+
+    const result = await scanToAdd.execute({ean});
+    if (resolveRequestIdRef.current !== requestId) {
+      return;
+    }
+
+    setResolving(false);
+    if ('fallback' in result) {
+      Alert.alert('Nie znaleziono produktu', `Brak danych dla EAN: ${ean}.`);
+      return;
+    }
+
+    setScannedProduct(result);
+  };
 
   const codeScanner = useCodeScanner({
     codeTypes: ['ean-13', 'ean-8', 'upc-a', 'upc-e', 'code-128'],
@@ -200,6 +203,9 @@ function ProductScannerVisionContent({
       if (!isValidEAN(firstCode)) {
         return;
       }
+      if (resolving || adding) {
+        return;
+      }
 
       const now = Date.now();
       const lastScan = lastAcceptedScanRef.current;
@@ -208,9 +214,11 @@ function ProductScannerVisionContent({
       }
 
       lastAcceptedScanRef.current = {code: firstCode, scannedAt: now};
-      setScannedProduct(getMockProductByEAN(firstCode));
-      setExpirationDate(getDefaultExpirationDate());
-      setAmount(1);
+      resolveScannedProduct(firstCode).catch(() => {
+        setResolving(false);
+        setScannedProduct(null);
+        Alert.alert('Błąd', 'Nie udało się odczytać produktu dla zeskanowanego EAN.');
+      });
     },
   });
 
@@ -249,24 +257,32 @@ function ProductScannerVisionContent({
     );
   }
 
-  const handleAddProduct = () => {
+  const handleAddProduct = async () => {
     if (!scannedProduct) {
       return;
     }
-    setScannedProduct(null);
-
-    Alert.alert(
-      'Product added (mock)',
-      `${scannedProduct.name}\nEAN: ${scannedProduct.ean}\nExpiration: ${
-        expirationDate
-          ? formatDate(
-              expirationDate.getDate(),
-              expirationDate.getMonth() + 1,
-              expirationDate.getFullYear(),
-            )
-          : 'No expiration date'
-      }\nAmount: ${amount}`,
-    );
+    setAdding(true);
+    try {
+      const expiry = expirationDate ?? getDefaultExpirationDate();
+      const expiryDate = formatExpiryForDb(expiry);
+      for (let i = 0; i < amount; i += 1) {
+        await repo.addToInventory(generateInventoryId(i), scannedProduct.ean, null, expiryDate);
+      }
+      setScannedProduct(null);
+      onProductAdded?.();
+      Alert.alert(
+        'Dodano produkt',
+        `${scannedProduct.name}\nEAN: ${scannedProduct.ean}\nWażność: ${
+          expirationDate
+            ? formatDate(expirationDate.getDate(), expirationDate.getMonth() + 1, expirationDate.getFullYear())
+            : 'ustawiono domyślnie (za 7 dni)'
+        }\nIlość: ${amount}`,
+      );
+    } catch {
+      Alert.alert('Błąd', 'Nie udało się dodać produktu do spiżarni.');
+    } finally {
+      setAdding(false);
+    }
   };
 
   return (
@@ -277,14 +293,12 @@ function ProductScannerVisionContent({
         isActive={true}
         codeScanner={codeScanner}
       />
-      {onRequestClose ? (
-        <Pressable
-          onPress={onRequestClose}
-          style={[styles.backOverlay, {top: Math.max(insets.top, 12)}]}
-          hitSlop={12}>
-          <Text style={styles.backText}>&#8592; Wróć</Text>
-        </Pressable>
-      ) : null}
+      <Pressable
+        onPress={onRequestClose}
+        style={[styles.backOverlay, {top: Math.max(insets.top, 12)}]}
+        hitSlop={12}>
+        <Text style={styles.backText}>&#8592; Wróć</Text>
+      </Pressable>
 
       <Animated.View
         style={[
@@ -294,13 +308,25 @@ function ProductScannerVisionContent({
             transform: [{translateY: sheetTranslateY}],
           },
         ]}>
+        {resolving ? (
+          <View style={styles.resolvingBox}>
+            <ActivityIndicator color={colors.success} />
+            <Text style={styles.info}>Pobieram dane produktu…</Text>
+          </View>
+        ) : null}
         {scannedProduct ? (
           <View style={styles.sheetContent}>
             <View style={styles.productRow}>
-              <Image source={{uri: scannedProduct.imageUrl}} style={styles.productImage} />
+              {scannedProduct.imageUrl ? (
+                <Image source={{uri: scannedProduct.imageUrl}} style={styles.productImage} />
+              ) : (
+                <View style={styles.productImage} />
+              )}
               <View style={styles.productMeta}>
                 <Text style={styles.productName}>{scannedProduct.name}</Text>
-                <Text style={styles.productProducer}>{scannedProduct.producer}</Text>
+                {scannedProduct.brand ? (
+                  <Text style={styles.productProducer}>{scannedProduct.brand}</Text>
+                ) : null}
                 <Text style={styles.productEan}>EAN: {scannedProduct.ean}</Text>
               </View>
             </View>
@@ -398,11 +424,19 @@ function ProductScannerVisionContent({
             <View style={styles.actions}>
               <Pressable
                 style={[styles.actionButtonBase, styles.secondaryButton]}
-                onPress={() => setScannedProduct(null)}>
+                onPress={() => setScannedProduct(null)}
+                disabled={adding}>
                 <Text style={[styles.actionButtonTextBase, styles.secondaryButtonText]}>Close</Text>
               </Pressable>
-              <Pressable style={[styles.actionButtonBase, styles.primaryButton]} onPress={handleAddProduct}>
-                <Text style={[styles.actionButtonTextBase, styles.primaryButtonText]}>Add</Text>
+              <Pressable
+                style={[styles.actionButtonBase, styles.primaryButton, adding && styles.buttonDisabled]}
+                onPress={() => {
+                  handleAddProduct().catch(() => {});
+                }}
+                disabled={adding || resolving}>
+                <Text style={[styles.actionButtonTextBase, styles.primaryButtonText]}>
+                  {adding ? 'Dodaję…' : 'Add'}
+                </Text>
               </Pressable>
             </View>
           </View>
@@ -412,7 +446,7 @@ function ProductScannerVisionContent({
   );
 }
 
-export default function ProductScannerView({onRequestClose}: ProductScannerViewProps) {
+export default function ProductScannerView({onRequestClose, onProductAdded}: ProductScannerViewProps) {
   if (!visionCamera) {
     return <ScannerUnavailable onRequestClose={onRequestClose} />;
   }
@@ -439,7 +473,11 @@ export default function ProductScannerView({onRequestClose}: ProductScannerViewP
   };
 
   return (
-    <ProductScannerVisionContent onRequestClose={onRequestClose} visionModule={visionModule} />
+    <ProductScannerVisionContent
+      onRequestClose={onRequestClose}
+      onProductAdded={onProductAdded}
+      visionModule={visionModule}
+    />
   );
 }
 
@@ -517,6 +555,12 @@ const styles = StyleSheet.create({
   },
   sheetContent: {
     gap: 14,
+  },
+  resolvingBox: {
+    minHeight: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
   },
   productRow: {
     flexDirection: 'row',
@@ -639,5 +683,8 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: colors.successText,
     fontWeight: '800',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
 });
