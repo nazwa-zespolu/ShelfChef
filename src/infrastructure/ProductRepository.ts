@@ -2,6 +2,7 @@ import { db } from './db/init';
 import { ProductDefinition, InventoryItem } from '../domain/types';
 
 export class ProductRepository {
+  private static readonly RECIPE_MODEL_CONSENT_KEY = 'recipe_model_download_consent';
 
   async findDefinitionByEan(ean: string): Promise<ProductDefinition | null> {
     const result = db.execute('SELECT * FROM product_definitions WHERE ean = ?', [ean]);
@@ -70,5 +71,23 @@ export class ProductRepository {
 
   async removeFromInventory(id: string): Promise<void> {
     db.execute('DELETE FROM inventory WHERE id = ?', [id]);
+  }
+
+  async getRecipeModelConsent(): Promise<boolean> {
+    const result = db.execute('SELECT value FROM app_settings WHERE key = ?', [
+      ProductRepository.RECIPE_MODEL_CONSENT_KEY,
+    ]);
+    if (!result.rows || result.rows.length === 0) {
+      return false;
+    }
+    const row = result.rows.item(0);
+    return row.value === '1';
+  }
+
+  async setRecipeModelConsent(granted: boolean): Promise<void> {
+    db.execute(
+      'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
+      [ProductRepository.RECIPE_MODEL_CONSENT_KEY, granted ? '1' : '0'],
+    );
   }
 }

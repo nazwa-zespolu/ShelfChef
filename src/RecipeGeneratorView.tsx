@@ -14,6 +14,7 @@ import {colors} from './theme/colors';
 import {ProductRepository} from './infrastructure/ProductRepository';
 import {InventoryItem} from './domain/types';
 import {QWEN2_5_3B_QUANTIZED, Message, useLLM} from 'react-native-executorch';
+import {BareResourceFetcher} from 'react-native-executorch-bare-resource-fetcher';
 
 type RecipeGeneratorViewProps = {
   onRequestClose: () => void;
@@ -134,6 +135,50 @@ const repo = new ProductRepository();
 export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorViewProps) {
   const insets = useSafeAreaInsets();
   const [consent, setConsent] = useState<ConsentState>('unknown');
+  const [consentBooting, setConsentBooting] = useState(true);
+
+  const checkModelDownloaded = useCallback(async () => {
+    try {
+      const downloaded = await BareResourceFetcher.listDownloadedModels();
+      const modelFileName = QWEN2_5_3B_QUANTIZED.modelSource.split('/').pop()?.toLowerCase();
+      if (!modelFileName) {
+        return false;
+      }
+      return downloaded.some(path => path.toLowerCase().includes(modelFileName));
+    } catch {
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    const bootstrapConsent = async () => {
+      try {
+        const savedConsent = await repo.getRecipeModelConsent();
+        if (!savedConsent) {
+          setConsent('unknown');
+          return;
+        }
+        const hasModel = await checkModelDownloaded();
+        setConsent(hasModel ? 'accepted' : 'unknown');
+      } finally {
+        setConsentBooting(false);
+      }
+    };
+    bootstrapConsent().catch(() => {
+      setConsent('unknown');
+      setConsentBooting(false);
+    });
+  }, [checkModelDownloaded]);
+
+  const acceptConsent = useCallback(() => {
+    repo.setRecipeModelConsent(true).catch(() => {});
+    setConsent('accepted');
+  }, []);
+
+  const declineConsent = useCallback(() => {
+    repo.setRecipeModelConsent(false).catch(() => {});
+    setConsent('declined');
+  }, []);
 
   return (
     <View style={[styles.root, {paddingTop: insets.top + 8, paddingBottom: insets.bottom + 12}]}>
@@ -146,7 +191,17 @@ export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorVie
         </Pressable>
       </View>
 
-      {consent === 'unknown' ? (
+      {consentBooting ? (
+        <View style={styles.body}>
+          <Text style={styles.title}>Generator przepisów</Text>
+          <View style={styles.row}>
+            <ActivityIndicator color={colors.success} />
+            <Text style={styles.cardLine}>Sprawdzam zapisane ustawienia i model…</Text>
+          </View>
+        </View>
+      ) : null}
+
+      {!consentBooting && consent === 'unknown' ? (
         <View style={styles.body}>
           <Text style={styles.title}>Generator przepisów</Text>
           <Text style={styles.hint}>
@@ -156,12 +211,12 @@ export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorVie
 
           <View style={styles.ctaRow}>
             <Pressable
-              onPress={() => setConsent('accepted')}
+              onPress={acceptConsent}
               style={({pressed}) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}>
               <Text style={styles.primaryButtonText}>Pobierz i uruchom</Text>
             </Pressable>
             <Pressable
-              onPress={() => setConsent('declined')}
+              onPress={declineConsent}
               style={({pressed}) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
               <Text style={styles.secondaryButtonText}>Nie, dziękuję</Text>
             </Pressable>
@@ -169,15 +224,15 @@ export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorVie
         </View>
       ) : null}
 
-      {consent === 'declined' ? (
+      {!consentBooting && consent === 'declined' ? (
         <View style={styles.body}>
           <Text style={styles.title}>Generator przepisów</Text>
           <Text style={styles.hint}>
-            Aby korzystać z generatora, potrzebujesz zgody na pobranie modelu AI na urządzenie.
+            Aby korzystać z generatora, potrzebujesz zgody na pobranie modelu AI na urządzenie (3GB).
           </Text>
           <View style={styles.ctaRow}>
             <Pressable
-              onPress={() => setConsent('accepted')}
+              onPress={acceptConsent}
               style={({pressed}) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}>
               <Text style={styles.primaryButtonText}>Zgadzam się</Text>
             </Pressable>
@@ -190,7 +245,7 @@ export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorVie
         </View>
       ) : null}
 
-      {consent === 'accepted' ? <RecipeGeneratorLLM onRequestClose={onRequestClose} /> : null}
+      {!consentBooting && consent === 'accepted' ? <RecipeGeneratorLLM onRequestClose={onRequestClose} /> : null}
     </View>
   );
 }

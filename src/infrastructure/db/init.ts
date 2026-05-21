@@ -62,6 +62,12 @@ export const setupDatabase = () => {
         FOREIGN KEY(product_ean) REFERENCES product_definitions(ean)
       );
     `);
+    db.execute(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `);
     MOCK_DATA_SQL.forEach(sql => {
       db.execute(sql);
     });
