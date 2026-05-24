@@ -10,7 +10,7 @@ type InventoryRow = {
   id: string;
   product_ean: string | null;
   custom_name: string | null;
-  expiry_date: string;
+  expiry_date: string | null;
   opened_at: string | null;
   is_opened: number;
 };
@@ -109,7 +109,18 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
           category: def?.category ?? null,
         };
       })
-      .sort((a, b) => a.expiry_date.localeCompare(b.expiry_date));
+      .sort((a, b) => {
+        if (a.expiry_date == null && b.expiry_date == null) {
+          return 0;
+        }
+        if (a.expiry_date == null) {
+          return 1;
+        }
+        if (b.expiry_date == null) {
+          return -1;
+        }
+        return a.expiry_date.localeCompare(b.expiry_date);
+      });
 
     return toRows(rows);
   }
@@ -227,5 +238,18 @@ describe('ProductRepository + database integration', () => {
 
     const items: InventoryItem[] = await repository.getFullInventory();
     expect(items).toHaveLength(0);
+  });
+
+  it('zapisuje null jako brak daty ważności', async () => {
+    await repository.addToInventory('inv-no-expiry', null, 'Sól', null);
+
+    const items: InventoryItem[] = await repository.getFullInventory();
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      id: 'inv-no-expiry',
+      name: 'Sól',
+      expiryDate: null,
+    });
   });
 });

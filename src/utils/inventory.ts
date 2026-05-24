@@ -1,7 +1,7 @@
 import {InventoryItem} from '../domain/types';
 
-export function formatExpiryLine(iso: string): string {
-  if (!iso) {
+export function formatExpiryLine(iso: string | null): string {
+  if (iso == null || iso === '') {
     return '—';
   }
   const d = new Date(iso);
@@ -16,8 +16,8 @@ export function formatExpiryLine(iso: string): string {
 }
 
 export function compareExpiry(a: InventoryItem, b: InventoryItem): number {
-  const ta = new Date(a.expiryDate).getTime();
-  const tb = new Date(b.expiryDate).getTime();
+  const ta = a.expiryDate ? new Date(a.expiryDate).getTime() : Number.NaN;
+  const tb = b.expiryDate ? new Date(b.expiryDate).getTime() : Number.NaN;
   const aOk = !Number.isNaN(ta);
   const bOk = !Number.isNaN(tb);
   if (aOk && bOk) {

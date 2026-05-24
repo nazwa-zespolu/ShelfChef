@@ -27,6 +27,7 @@ try {
 function App() {
   //const isDarkMode = useColorScheme() === 'dark';
   const [screen, setScreen] = useState<AppScreen>('home');
+  const [inventoryTick, setInventoryTick] = useState(0);
 
   useEffect(() => {
     try {
@@ -42,13 +43,17 @@ function App() {
       <View style={styles.shell}>
         {screen === 'home' && (
           <HomeView
+            refreshToken={inventoryTick}
             onOpenScan={() => setScreen('scan')}
             onOpenRecipes={() => setScreen('recipes')}
             onOpenShopping={() => setScreen('shopping')}
           />
         )}
         {screen === 'scan' && (
-          <ProductScannerView onRequestClose={() => setScreen('home')} />
+          <ProductScannerView
+            onRequestClose={() => setScreen('home')}
+            onProductAdded={() => setInventoryTick(tick => tick + 1)}
+          />
         )}
         {screen === 'recipes' && (
           <RecipeGeneratorView onRequestClose={() => setScreen('home')} />

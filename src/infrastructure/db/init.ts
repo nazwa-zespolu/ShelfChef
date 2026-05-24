@@ -56,7 +56,7 @@ export const setupDatabase = () => {
         id TEXT PRIMARY KEY,
         product_ean TEXT,
         custom_name TEXT,
-        expiry_date TEXT NOT NULL,
+        expiry_date TEXT,
         opened_at TEXT,
         is_opened INTEGER DEFAULT 0,
         FOREIGN KEY(product_ean) REFERENCES product_definitions(ean)
@@ -71,7 +71,5 @@ export const setupDatabase = () => {
     MOCK_DATA_SQL.forEach(sql => {
       db.execute(sql);
     });
-
-    
   };
 
