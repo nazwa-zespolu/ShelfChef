@@ -26,7 +26,12 @@ export class ProductRepository {
     );
   }
 
-  async addToInventory(id: string, ean: string | null, customName: string | null, expiryDate: string): Promise<void> {
+  async addToInventory(
+    id: string,
+    ean: string | null,
+    customName: string | null,
+    expiryDate: string | null,
+  ): Promise<void> {
     db.execute(
       'INSERT INTO inventory (id, product_ean, custom_name, expiry_date) VALUES (?, ?, ?, ?)',
       [id, ean, customName, expiryDate]
@@ -56,7 +61,7 @@ export class ProductRepository {
           brand: row.brand,
           imageUrl: row.image_url,
           category: row.category,
-          expiryDate: row.expiry_date,
+          expiryDate: row.expiry_date ?? null,
           openedAt: row.opened_at,
           isOpened: row.is_opened === 1
         });

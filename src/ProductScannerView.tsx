@@ -263,8 +263,7 @@ function ProductScannerVisionContent({
     }
     setAdding(true);
     try {
-      const expiry = expirationDate ?? getDefaultExpirationDate();
-      const expiryDate = formatExpiryForDb(expiry);
+      const expiryDate = expirationDate ? formatExpiryForDb(expirationDate) : null;
       for (let i = 0; i < amount; i += 1) {
         await repo.addToInventory(generateInventoryId(i), scannedProduct.ean, null, expiryDate);
       }
@@ -275,7 +274,7 @@ function ProductScannerVisionContent({
         `${scannedProduct.name}\nEAN: ${scannedProduct.ean}\nWażność: ${
           expirationDate
             ? formatDate(expirationDate.getDate(), expirationDate.getMonth() + 1, expirationDate.getFullYear())
-            : 'ustawiono domyślnie (za 7 dni)'
+            : 'brak daty ważności'
         }\nIlość: ${amount}`,
       );
     } catch {
