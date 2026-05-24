@@ -269,14 +269,6 @@ function ProductScannerVisionContent({
       }
       setScannedProduct(null);
       onProductAdded?.();
-      Alert.alert(
-        'Dodano produkt',
-        `${scannedProduct.name}\nEAN: ${scannedProduct.ean}\nWażność: ${
-          expirationDate
-            ? formatDate(expirationDate.getDate(), expirationDate.getMonth() + 1, expirationDate.getFullYear())
-            : 'brak daty ważności'
-        }\nIlość: ${amount}`,
-      );
     } catch {
       Alert.alert('Błąd', 'Nie udało się dodać produktu do spiżarni.');
     } finally {
