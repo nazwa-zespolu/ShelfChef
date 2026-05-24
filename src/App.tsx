@@ -52,10 +52,7 @@ function App() {
         {screen === 'scan' && (
           <ProductScannerView
             onRequestClose={() => setScreen('home')}
-            onProductAdded={() => {
-              setInventoryTick(tick => tick + 1);
-              setScreen('home');
-            }}
+            onProductAdded={() => setInventoryTick(tick => tick + 1)}
           />
         )}
         {screen === 'recipes' && (
