@@ -12,3 +12,65 @@ export interface ProductDefinition {
     openedAt?: string;
     isOpened: boolean;
   }
+
+export type CatalogProductKind = 'generic' | 'concrete';
+
+export interface CatalogProduct {
+  id: string;
+  name: string;
+  normalizedName: string;
+  kind: CatalogProductKind;
+  productEan: string | null;
+  parentCatalogProductId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ShoppingListType = 'manual' | 'auto';
+
+export type ShoppingItemStatus = 'planned' | 'purchased' | 'unavailable' | 'stored';
+
+export type ShoppingItemSource = 'manual' | 'suggestion' | 'reactivated';
+
+export interface ShoppingListSummary {
+  id: string;
+  name: string;
+  type: ShoppingListType;
+  isLocked: boolean;
+  isArchived: boolean;
+  lockedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ShoppingListItem {
+  id: string;
+  listId: string;
+  catalogProductId: string | null;
+  label: string;
+  quantity: number;
+  status: ShoppingItemStatus;
+  source: ShoppingItemSource;
+  storedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AutoShoppingListItemState extends ShoppingListItem {
+  effectiveStatus: ShoppingItemStatus;
+  currentQuantity: number;
+  missingQuantity: number;
+}
+
+export interface ShoppingSuggestion {
+  catalogProductId: string;
+  name: string;
+  normalizedName: string;
+  missingQuantity: number;
+  currentQuantity: number;
+  targetQuantity: number;
+  reason: string;
+  priority: 'out' | 'low';
+  sourceAutoListIds: string[];
+  sourceAutoListNames: string[];
+}
