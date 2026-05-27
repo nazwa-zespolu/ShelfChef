@@ -2,6 +2,8 @@ import { open } from 'react-native-quick-sqlite';
 
 // Otwarcie bazy danych
 export const db = open({ name: 'shelfchef.db' });
+const SHOPPING_LISTS_SCHEMA_VERSION = 1;
+
 const MOCK_DATA_SQL = [
   // 1. Product definitions (in English) - expanded base for the LLM
   `INSERT OR IGNORE INTO product_definitions (ean, name, brand, image_url, category) VALUES 
@@ -38,9 +40,158 @@ const MOCK_DATA_SQL = [
     ('mock-14', NULL, 'Grandma''s homemade jam', '2026-12-31', 1);`
 ];
 
+function getUserVersion(): number {
+  const result = db.execute('PRAGMA user_version');
+  if (!result.rows || result.rows.length === 0) {
+    return 0;
+  }
+  const row = result.rows.item(0);
+  return Number(row.user_version ?? 0);
+}
+
+function runInTransaction(work: () => void) {
+  db.execute('BEGIN TRANSACTION');
+  try {
+    work();
+    db.execute('COMMIT');
+  } catch (e) {
+    db.execute('ROLLBACK');
+    throw e;
+  }
+}
+
+function migrateToShoppingListsSchema() {
+  db.execute(`
+      CREATE TABLE IF NOT EXISTS product_catalog (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        normalized_name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK(kind IN ('generic', 'concrete')),
+        product_ean TEXT,
+        parent_catalog_product_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(product_ean) REFERENCES product_definitions(ean),
+        FOREIGN KEY(parent_catalog_product_id) REFERENCES product_catalog(id)
+      );
+    `);
+
+  db.execute(`
+      CREATE TABLE IF NOT EXISTS shopping_lists (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('manual', 'auto')),
+        is_locked INTEGER NOT NULL DEFAULT 0,
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        locked_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+
+  db.execute(`
+      CREATE TABLE IF NOT EXISTS shopping_list_items (
+        id TEXT PRIMARY KEY,
+        list_id TEXT NOT NULL,
+        catalog_product_id TEXT,
+        label TEXT NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity > 0),
+        status TEXT NOT NULL CHECK(status IN ('planned', 'purchased', 'unavailable', 'stored')),
+        source TEXT NOT NULL CHECK(source IN ('manual', 'suggestion', 'reactivated')),
+        stored_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(list_id) REFERENCES shopping_lists(id),
+        FOREIGN KEY(catalog_product_id) REFERENCES product_catalog(id)
+      );
+    `);
+
+  db.execute(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_product_catalog_ean
+      ON product_catalog(product_ean)
+      WHERE product_ean IS NOT NULL;
+    `);
+
+  db.execute(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_product_catalog_generic_name
+      ON product_catalog(kind, normalized_name)
+      WHERE kind = 'generic';
+    `);
+
+  db.execute(`
+      CREATE INDEX IF NOT EXISTS idx_shopping_list_items_list_status
+      ON shopping_list_items(list_id, status);
+    `);
+
+  db.execute(`
+      CREATE INDEX IF NOT EXISTS idx_shopping_lists_type_locked
+      ON shopping_lists(type, is_locked);
+    `);
+
+  db.execute(`
+      INSERT OR IGNORE INTO product_catalog (
+        id,
+        name,
+        normalized_name,
+        kind,
+        product_ean,
+        parent_catalog_product_id,
+        created_at,
+        updated_at
+      )
+      SELECT
+        'catalog-concrete-' || ean,
+        name,
+        lower(trim(name)),
+        'concrete',
+        ean,
+        NULL,
+        datetime('now'),
+        datetime('now')
+      FROM product_definitions;
+    `);
+
+  db.execute(`
+      INSERT OR IGNORE INTO shopping_lists (
+        id,
+        name,
+        type,
+        is_locked,
+        is_archived,
+        locked_at,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        'default-auto-minimum',
+        'Moje minimum',
+        'auto',
+        0,
+        0,
+        NULL,
+        datetime('now'),
+        datetime('now')
+      );
+    `);
+}
+
+function runMigrations() {
+  const currentVersion = getUserVersion();
+  if (currentVersion >= SHOPPING_LISTS_SCHEMA_VERSION) {
+    return;
+  }
+
+  runInTransaction(() => {
+    if (currentVersion < 1) {
+      migrateToShoppingListsSchema();
+      db.execute(`PRAGMA user_version = ${SHOPPING_LISTS_SCHEMA_VERSION}`);
+    }
+  });
+}
+
 export const setupDatabase = () => {
-    // 1. Tabela cache
-    db.execute(`
+  // 1. Tabela cache
+  db.execute(`
       CREATE TABLE IF NOT EXISTS product_definitions (
         ean TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -50,8 +201,8 @@ export const setupDatabase = () => {
       );
     `);
   
-    // 2. Tabela zapasow
-    db.execute(`
+  // 2. Tabela zapasow
+  db.execute(`
       CREATE TABLE IF NOT EXISTS inventory (
         id TEXT PRIMARY KEY,
         product_ean TEXT,
@@ -62,14 +213,14 @@ export const setupDatabase = () => {
         FOREIGN KEY(product_ean) REFERENCES product_definitions(ean)
       );
     `);
-    db.execute(`
+  db.execute(`
       CREATE TABLE IF NOT EXISTS app_settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
     `);
-    MOCK_DATA_SQL.forEach(sql => {
-      db.execute(sql);
-    });
-  };
-
+  MOCK_DATA_SQL.forEach(sql => {
+    db.execute(sql);
+  });
+  runMigrations();
+};
