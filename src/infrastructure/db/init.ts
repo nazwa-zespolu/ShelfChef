@@ -2,7 +2,7 @@ import { open } from 'react-native-quick-sqlite';
 
 // Otwarcie bazy danych
 export const db = open({ name: 'shelfchef.db' });
-const SHOPPING_LISTS_SCHEMA_VERSION = 1;
+const SHOPPING_LISTS_SCHEMA_VERSION = 2;
 
 const MOCK_DATA_SQL = [
   // 1. Product definitions (in English) - expanded base for the LLM
@@ -49,11 +49,12 @@ function getUserVersion(): number {
   return Number(row.user_version ?? 0);
 }
 
-function runInTransaction(work: () => void) {
+export function runInTransaction<T>(work: () => T): T {
   db.execute('BEGIN TRANSACTION');
   try {
-    work();
+    const result = work();
     db.execute('COMMIT');
+    return result;
   } catch (e) {
     db.execute('ROLLBACK');
     throw e;
@@ -66,7 +67,7 @@ function migrateToShoppingListsSchema() {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         normalized_name TEXT NOT NULL,
-        kind TEXT NOT NULL CHECK(kind IN ('generic', 'concrete')),
+        kind TEXT NOT NULL CHECK(kind IN ('generic', 'specific')),
         product_ean TEXT,
         parent_catalog_product_id TEXT,
         created_at TEXT NOT NULL,
@@ -140,10 +141,10 @@ function migrateToShoppingListsSchema() {
         updated_at
       )
       SELECT
-        'catalog-concrete-' || ean,
+        'catalog-specific-' || ean,
         name,
         lower(trim(name)),
-        'concrete',
+        'specific',
         ean,
         NULL,
         datetime('now'),
@@ -175,6 +176,75 @@ function migrateToShoppingListsSchema() {
     `);
 }
 
+function migrateCatalogConcreteToSpecific() {
+  db.execute(`
+      CREATE TABLE product_catalog_v2 (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        normalized_name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK(kind IN ('generic', 'specific')),
+        product_ean TEXT,
+        parent_catalog_product_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(product_ean) REFERENCES product_definitions(ean),
+        FOREIGN KEY(parent_catalog_product_id) REFERENCES product_catalog_v2(id)
+      );
+    `);
+
+  db.execute(`
+      INSERT INTO product_catalog_v2 (
+        id,
+        name,
+        normalized_name,
+        kind,
+        product_ean,
+        parent_catalog_product_id,
+        created_at,
+        updated_at
+      )
+      SELECT
+        CASE
+          WHEN id LIKE 'catalog-concrete-%'
+            THEN 'catalog-specific-' || substr(id, length('catalog-concrete-') + 1)
+          ELSE id
+        END,
+        name,
+        normalized_name,
+        CASE WHEN kind = 'concrete' THEN 'specific' ELSE kind END,
+        product_ean,
+        CASE
+          WHEN parent_catalog_product_id LIKE 'catalog-concrete-%'
+            THEN 'catalog-specific-' || substr(parent_catalog_product_id, length('catalog-concrete-') + 1)
+          ELSE parent_catalog_product_id
+        END,
+        created_at,
+        updated_at
+      FROM product_catalog;
+    `);
+
+  db.execute(`
+      UPDATE shopping_list_items
+      SET catalog_product_id = 'catalog-specific-' || substr(catalog_product_id, length('catalog-concrete-') + 1)
+      WHERE catalog_product_id LIKE 'catalog-concrete-%';
+    `);
+
+  db.execute('DROP TABLE product_catalog');
+  db.execute('ALTER TABLE product_catalog_v2 RENAME TO product_catalog');
+
+  db.execute(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_product_catalog_ean
+      ON product_catalog(product_ean)
+      WHERE product_ean IS NOT NULL;
+    `);
+
+  db.execute(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_product_catalog_generic_name
+      ON product_catalog(kind, normalized_name)
+      WHERE kind = 'generic';
+    `);
+}
+
 function runMigrations() {
   const currentVersion = getUserVersion();
   if (currentVersion >= SHOPPING_LISTS_SCHEMA_VERSION) {
@@ -184,8 +254,11 @@ function runMigrations() {
   runInTransaction(() => {
     if (currentVersion < 1) {
       migrateToShoppingListsSchema();
-      db.execute(`PRAGMA user_version = ${SHOPPING_LISTS_SCHEMA_VERSION}`);
     }
+    if (currentVersion >= 1 && currentVersion < 2) {
+      migrateCatalogConcreteToSpecific();
+    }
+    db.execute(`PRAGMA user_version = ${SHOPPING_LISTS_SCHEMA_VERSION}`);
   });
 }
 

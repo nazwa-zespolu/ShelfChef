@@ -19,7 +19,7 @@ type ProductCatalogRow = {
   id: string;
   name: string;
   normalized_name: string;
-  kind: 'generic' | 'concrete';
+  kind: 'generic' | 'specific';
   product_ean: string | null;
   parent_catalog_product_id: string | null;
   created_at: string;
@@ -37,6 +37,19 @@ type ShoppingListRow = {
   updated_at: string;
 };
 
+type ShoppingListItemRow = {
+  id: string;
+  list_id: string;
+  catalog_product_id: string | null;
+  label: string;
+  quantity: number;
+  status: 'planned' | 'purchased' | 'unavailable' | 'stored';
+  source: 'manual' | 'suggestion' | 'reactivated';
+  stored_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type SQLiteResult = {
   rows: {
     length: number;
@@ -48,6 +61,7 @@ const productDefinitions = new Map<string, ProductDefinitionRow>();
 const inventory = new Map<string, InventoryRow>();
 const productCatalog = new Map<string, ProductCatalogRow>();
 const shoppingLists = new Map<string, ShoppingListRow>();
+const shoppingListItems = new Map<string, ShoppingListItemRow>();
 let userVersion = 0;
 
 const toRows = (data: Record<string, unknown>[]): SQLiteResult => ({
@@ -100,12 +114,42 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     return toRows([]);
   }
 
+  if (normalized.startsWith('DELETE FROM SHOPPING_LIST_ITEMS')) {
+    shoppingListItems.clear();
+    return toRows([]);
+  }
+
   if (normalized.startsWith('SELECT * FROM PRODUCT_CATALOG')) {
+    if (normalized.includes('WHERE PRODUCT_EAN = ?')) {
+      const row = Array.from(productCatalog.values()).find(item => item.product_ean === params[0]);
+      return toRows(row ? [row] : []);
+    }
     return toRows(Array.from(productCatalog.values()));
   }
 
   if (normalized.startsWith('SELECT * FROM SHOPPING_LISTS')) {
-    return toRows(Array.from(shoppingLists.values()));
+    if (normalized.includes('WHERE ID = ?')) {
+      const row = shoppingLists.get(params[0]);
+      return toRows(row ? [row] : []);
+    }
+    const includeArchived = params[0] === 1;
+    return toRows(
+      Array.from(shoppingLists.values())
+        .filter(row => includeArchived || row.is_archived === 0)
+        .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    );
+  }
+
+  if (normalized.startsWith('SELECT * FROM SHOPPING_LIST_ITEMS')) {
+    if (normalized.includes('WHERE LIST_ID = ?')) {
+      const [listId] = params;
+      return toRows(
+        Array.from(shoppingListItems.values())
+          .filter(item => item.list_id === listId)
+          .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+      );
+    }
+    return toRows(Array.from(shoppingListItems.values()));
   }
 
   if (normalized.startsWith('SELECT * FROM PRODUCT_DEFINITIONS WHERE EAN = ?')) {
@@ -130,6 +174,22 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     return toRows([]);
   }
 
+  if (normalized.startsWith('INSERT OR REPLACE INTO PRODUCT_CATALOG')) {
+    const [, fallbackId, name, normalizedName, ean] = params;
+    const existing = Array.from(productCatalog.values()).find(item => item.product_ean === ean);
+    productCatalog.set(existing?.id ?? fallbackId, {
+      id: existing?.id ?? fallbackId,
+      name,
+      normalized_name: normalizedName,
+      kind: 'specific',
+      product_ean: ean,
+      parent_catalog_product_id: existing?.parent_catalog_product_id ?? null,
+      created_at: existing?.created_at ?? '2026-05-27T00:00:00.000Z',
+      updated_at: '2026-05-27T00:00:00.000Z',
+    });
+    return toRows([]);
+  }
+
   if (normalized.startsWith('INSERT OR IGNORE INTO PRODUCT_DEFINITIONS')) {
     // Sample seed SQL is intentionally ignored by this lightweight mock.
     return toRows([]);
@@ -142,7 +202,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
 
   if (normalized.startsWith('INSERT OR IGNORE INTO PRODUCT_CATALOG')) {
     for (const row of productDefinitions.values()) {
-      const id = `catalog-concrete-${row.ean}`;
+      const id = `catalog-specific-${row.ean}`;
       const eanAlreadyExists = Array.from(productCatalog.values()).some(
         item => item.product_ean === row.ean,
       );
@@ -151,13 +211,87 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
           id,
           name: row.name,
           normalized_name: row.name.trim().toLowerCase(),
-          kind: 'concrete',
+          kind: 'specific',
           product_ean: row.ean,
           parent_catalog_product_id: null,
           created_at: '2026-05-27T00:00:00.000Z',
           updated_at: '2026-05-27T00:00:00.000Z',
         });
       }
+    }
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('INSERT INTO SHOPPING_LISTS')) {
+    const [id, name, type, createdAt, updatedAt] = params;
+    shoppingLists.set(id, {
+      id,
+      name,
+      type,
+      is_locked: 0,
+      is_archived: 0,
+      locked_at: null,
+      created_at: createdAt,
+      updated_at: updatedAt,
+    });
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('INSERT INTO SHOPPING_LIST_ITEMS')) {
+    const [
+      id,
+      listId,
+      catalogProductId,
+      label,
+      quantity,
+      statusOrCreatedAt,
+      sourceOrUpdatedAt,
+      maybeCreatedAt,
+      maybeUpdatedAt,
+    ] = params;
+    const hasExplicitStatus = maybeUpdatedAt !== undefined;
+    shoppingListItems.set(id, {
+      id,
+      list_id: listId,
+      catalog_product_id: catalogProductId ?? null,
+      label,
+      quantity,
+      status: hasExplicitStatus ? statusOrCreatedAt : 'planned',
+      source: hasExplicitStatus ? sourceOrUpdatedAt : 'suggestion',
+      stored_at: null,
+      created_at: hasExplicitStatus ? maybeCreatedAt : statusOrCreatedAt,
+      updated_at: hasExplicitStatus ? maybeUpdatedAt : sourceOrUpdatedAt,
+    });
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('SELECT I.ID, I.LABEL, I.QUANTITY')) {
+    const [listId] = params;
+    const rows = Array.from(shoppingListItems.values())
+      .filter(item => item.list_id === listId && item.status === 'purchased')
+      .map(item => {
+        const catalog = item.catalog_product_id
+          ? productCatalog.get(item.catalog_product_id)
+          : undefined;
+        return {
+          id: item.id,
+          label: item.label,
+          quantity: item.quantity,
+          catalog_product_id: item.catalog_product_id,
+          product_ean: catalog?.product_ean ?? null,
+        };
+      });
+    return toRows(rows);
+  }
+
+  if (normalized.startsWith('UPDATE SHOPPING_LIST_ITEMS SET STATUS = \'STORED\'')) {
+    const [storedAt, updatedAt, id] = params;
+    const row = shoppingListItems.get(id);
+    if (row) {
+      row.status = 'stored';
+      row.stored_at = storedAt;
+      row.updated_at = updatedAt;
+      shoppingListItems.set(id, row);
     }
     return toRows([]);
   }
@@ -260,19 +394,23 @@ jest.mock('react-native-quick-sqlite', () => ({
 
 import { setupDatabase, db } from '../../src/infrastructure/db/init';
 import { ProductRepository } from '../../src/infrastructure/ProductRepository';
+import { ShoppingListRepository } from '../../src/infrastructure/ShoppingListRepository';
 import { InventoryItem, ProductDefinition } from '../../src/domain/types';
 
 describe('ProductRepository + database integration', () => {
   let repository: ProductRepository;
+  let shoppingListRepository: ShoppingListRepository;
 
   beforeEach(() => {
     db.execute('DELETE FROM inventory');
     db.execute('DELETE FROM product_definitions');
     db.execute('DELETE FROM product_catalog');
     db.execute('DELETE FROM shopping_lists');
+    db.execute('DELETE FROM shopping_list_items');
     db.execute('PRAGMA user_version = 0');
     setupDatabase();
     repository = new ProductRepository();
+    shoppingListRepository = new ShoppingListRepository();
   });
 
   it('zapisuje i odczytuje definicje produktu po EAN', async () => {
@@ -289,6 +427,30 @@ describe('ProductRepository + database integration', () => {
     const found = await repository.findDefinitionByEan('5901234123457');
 
     expect(found).toEqual(definition);
+  });
+
+  it('synchronizuje zapisaną definicję produktu z katalogiem specific', async () => {
+    await repository.saveDefinition({
+      ean: '5901234123457',
+      name: 'Mleko 2%',
+      brand: 'Lacpol',
+      imageUrl: undefined,
+      category: 'Nabial',
+    });
+
+    const catalog = db.execute('SELECT * FROM product_catalog WHERE product_ean = ?', [
+      '5901234123457',
+    ]).rows!;
+
+    expect(catalog.length).toBe(1);
+    expect(catalog.item(0)).toMatchObject({
+      id: 'catalog-specific-5901234123457',
+      name: 'Mleko 2%',
+      normalized_name: 'mleko 2%',
+      kind: 'specific',
+      product_ean: '5901234123457',
+      parent_catalog_product_id: null,
+    });
   });
 
   it('zwraca null, gdy brak definicji dla EAN', async () => {
@@ -367,7 +529,7 @@ describe('ProductRepository + database integration', () => {
     const version = db.execute('PRAGMA user_version').rows!.item(0);
     const lists = db.execute('SELECT * FROM shopping_lists').rows!;
 
-    expect(version.user_version).toBe(1);
+    expect(version.user_version).toBe(2);
     expect(lists.length).toBe(1);
     expect(lists.item(0)).toMatchObject({
       id: 'default-auto-minimum',
@@ -395,30 +557,71 @@ describe('ProductRepository + database integration', () => {
 
     expect(catalog.length).toBe(1);
     expect(catalog.item(0)).toMatchObject({
-      id: 'catalog-concrete-5901234123457',
+      id: 'catalog-specific-5901234123457',
       name: 'Mleko 2%',
       normalized_name: 'mleko 2%',
-      kind: 'concrete',
+      kind: 'specific',
       product_ean: '5901234123457',
       parent_catalog_product_id: null,
     });
   });
 
-  it('nie duplikuje katalogu ani domyślnej listy przy ponownym setupDatabase', () => {
-    db.execute('DELETE FROM inventory');
-    db.execute('DELETE FROM product_definitions');
-    db.execute('DELETE FROM product_catalog');
-    db.execute('DELETE FROM shopping_lists');
-    db.execute('PRAGMA user_version = 0');
-    db.execute(
-      'INSERT OR REPLACE INTO product_definitions (ean, name, brand, image_url, category) VALUES (?, ?, ?, ?, ?)',
-      ['5901234123457', 'Mleko 2%', 'Lacpol', null, 'Nabial'],
-    );
+  it('tworzy listy zakupów i dodaje tekstową pozycję do listy manual', async () => {
+    const list = await shoppingListRepository.createList('Cotygodniowe', 'manual');
+    const item = await shoppingListRepository.addItem(list.id, {
+      label: 'Mleko',
+      quantity: 2,
+    });
 
-    setupDatabase();
-    setupDatabase();
+    const lists = await shoppingListRepository.getLists();
+    const items = await shoppingListRepository.getItems(list.id);
 
-    expect(db.execute('SELECT * FROM product_catalog').rows!.length).toBe(1);
-    expect(db.execute('SELECT * FROM shopping_lists').rows!.length).toBe(1);
+    expect(lists.map(l => l.name)).toContain('Cotygodniowe');
+    expect(item).toMatchObject({
+      listId: list.id,
+      catalogProductId: null,
+      label: 'Mleko',
+      quantity: 2,
+      status: 'planned',
+      source: 'manual',
+    });
+    expect(items).toHaveLength(1);
+  });
+
+  it('pozwala dodać tekstową pozycję do listy auto jako ręczny item', async () => {
+    const list = await shoppingListRepository.createList('Moje minimum 2', 'auto');
+
+    const item = await shoppingListRepository.addItem(list.id, {
+      label: 'Coś na deser',
+    });
+
+    expect(item).toMatchObject({
+      listId: list.id,
+      catalogProductId: null,
+      label: 'Coś na deser',
+      status: 'planned',
+      source: 'manual',
+    });
+  });
+
+  it('finalizuje kupione pozycje transakcyjnie do inventory', async () => {
+    const manual = await shoppingListRepository.createList('Cotygodniowe', 'manual');
+    const item = await shoppingListRepository.addItem(manual.id, {
+      label: 'Mleko',
+      quantity: 2,
+      status: 'purchased',
+    });
+
+    const result = await shoppingListRepository.completePurchase(manual.id, {
+      [item.id]: null,
+    });
+    const items = await shoppingListRepository.getItems(manual.id);
+    const inventoryItems = await repository.getFullInventory();
+
+    expect(result.inventoryIds).toHaveLength(2);
+    expect(result.storedItemIds).toEqual([item.id]);
+    expect(items[0]).toMatchObject({status: 'stored'});
+    expect(inventoryItems).toHaveLength(2);
+    expect(inventoryItems[0].name).toBe('Mleko');
   });
 });

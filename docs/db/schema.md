@@ -61,10 +61,10 @@ erDiagram
     }
 
     PRODUCT_DEFINITIONS ||--o{ INVENTORY : "defines scanned product"
-    PRODUCT_DEFINITIONS ||--o| PRODUCT_CATALOG : "backs concrete catalog item"
+    PRODUCT_DEFINITIONS ||--o| PRODUCT_CATALOG : "backs specific catalog product"
 
     PRODUCT_CATALOG ||--o{ SHOPPING_LIST_ITEMS : "used by"
-    PRODUCT_CATALOG ||--o{ PRODUCT_CATALOG : "generic parent of concrete"
+    PRODUCT_CATALOG ||--o{ PRODUCT_CATALOG : "generic parent of specific"
 
     SHOPPING_LISTS ||--o{ SHOPPING_LIST_ITEMS : "contains"
 ```
@@ -72,7 +72,7 @@ erDiagram
 ## Najwazniejsze relacje
 
 - `inventory.product_ean` wskazuje na `product_definitions.ean`, jesli produkt pochodzi ze skanu.
-- `product_catalog.product_ean` wskazuje na `product_definitions.ean` dla produktow konkretnych (`concrete`).
+- `product_catalog.product_ean` wskazuje na `product_definitions.ean` dla produktow konkretnych (`specific`).
 - `product_catalog.parent_catalog_product_id` laczy produkt konkretny z produktem ogolnym (`generic`).
 - `shopping_list_items.list_id` wskazuje liste zakupow.
 - `shopping_list_items.catalog_product_id` jest opcjonalne, bo zwykle pozycje tekstowe nie musza miec wpisu w katalogu.

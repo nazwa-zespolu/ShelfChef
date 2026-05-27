@@ -13,7 +13,7 @@ export interface ProductDefinition {
     isOpened: boolean;
   }
 
-export type CatalogProductKind = 'generic' | 'concrete';
+export type CatalogProductKind = 'generic' | 'specific';
 
 export interface CatalogProduct {
   id: string;
