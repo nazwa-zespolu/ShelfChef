@@ -98,7 +98,7 @@ describe("UC-06: ShoppingList - domain rules", () => {
     shoppingRepository.getItems.mockImplementation(async (listId: string) =>
       listId === lockedAutoList.id
         ? [{...milkItem, id: "locked-item", listId, quantity: 10}]
-        : [{...milkItem, id: `item-${listId}`, listId, quantity: 3}],
+        : [{...milkItem, id: `item-${listId}`, listId, quantity: listId === "auto-2" ? 5 : 3}],
     );
     const shoppingList = new ShoppingList(shoppingRepository as any, productRepository as any);
 
@@ -107,10 +107,10 @@ describe("UC-06: ShoppingList - domain rules", () => {
     expect(suggestions).toHaveLength(1);
     expect(suggestions[0]).toMatchObject({
       catalogProductId: "catalog-specific-111",
-      missingQuantity: 2,
+      missingQuantity: 4,
       currentQuantity: 1,
-      targetQuantity: 3,
-      reason: "Masz 1 z 3",
+      targetQuantity: 5,
+      reason: "Masz 1 z 5",
       sourceAutoListIds: ["auto-1", "auto-2"],
     });
   });

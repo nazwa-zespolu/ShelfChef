@@ -141,6 +141,27 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
   }
 
   if (normalized.startsWith('SELECT * FROM SHOPPING_LIST_ITEMS')) {
+    if (normalized.includes('WHERE LIST_ID = ? AND CATALOG_PRODUCT_ID = ?')) {
+      const [listId, catalogProductId] = params;
+      const row = Array.from(shoppingListItems.values())
+        .filter(item => item.list_id === listId && item.catalog_product_id === catalogProductId)
+        .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+      return toRows(row ? [row] : []);
+    }
+    if (
+      normalized.includes('WHERE LIST_ID = ? AND CATALOG_PRODUCT_ID IS NULL AND LOWER(TRIM(LABEL)) = ?')
+    ) {
+      const [listId, normalizedLabel] = params;
+      const row = Array.from(shoppingListItems.values())
+        .filter(
+          item =>
+            item.list_id === listId &&
+            item.catalog_product_id == null &&
+            item.label.trim().toLowerCase() === normalizedLabel,
+        )
+        .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+      return toRows(row ? [row] : []);
+    }
     if (normalized.includes('WHERE LIST_ID = ?')) {
       const [listId] = params;
       return toRows(
@@ -262,6 +283,31 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       created_at: hasExplicitStatus ? maybeCreatedAt : statusOrCreatedAt,
       updated_at: hasExplicitStatus ? maybeUpdatedAt : sourceOrUpdatedAt,
     });
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('UPDATE SHOPPING_LIST_ITEMS SET QUANTITY = ?')) {
+    const [quantity, updatedAt, id] = params;
+    const row = shoppingListItems.get(id);
+    if (row) {
+      row.quantity = quantity;
+      row.updated_at = updatedAt;
+      shoppingListItems.set(id, row);
+    }
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('UPDATE SHOPPING_LIST_ITEMS SET STATUS = \'PLANNED\'')) {
+    const [quantity, updatedAt, id] = params;
+    const row = shoppingListItems.get(id);
+    if (row) {
+      row.status = 'planned';
+      row.quantity = quantity;
+      row.source = 'reactivated';
+      row.stored_at = null;
+      row.updated_at = updatedAt;
+      shoppingListItems.set(id, row);
+    }
     return toRows([]);
   }
 
@@ -395,6 +441,7 @@ jest.mock('react-native-quick-sqlite', () => ({
 import { setupDatabase, db } from '../../src/infrastructure/db/init';
 import { ProductRepository } from '../../src/infrastructure/ProductRepository';
 import { ShoppingListRepository } from '../../src/infrastructure/ShoppingListRepository';
+import { ShoppingList } from '../../src/app/ShoppingList';
 import { InventoryItem, ProductDefinition } from '../../src/domain/types';
 
 describe('ProductRepository + database integration', () => {
@@ -602,6 +649,140 @@ describe('ProductRepository + database integration', () => {
       status: 'planned',
       source: 'manual',
     });
+  });
+
+  it('generuje sugestie z listy auto i merguje je z listą manual', async () => {
+    const definitions = [
+      {ean: '111', name: 'Mleko'},
+      {ean: '222', name: 'Chleb'},
+      {ean: '333', name: 'Ser'},
+      {ean: '444', name: 'Masło'},
+      {ean: '555', name: 'Jogurt'},
+    ];
+    for (const definition of definitions) {
+      await repository.saveDefinition({
+        ...definition,
+        brand: undefined,
+        imageUrl: undefined,
+        category: undefined,
+      });
+    }
+
+    const catalogByEan = (ean: string) =>
+      db.execute('SELECT * FROM product_catalog WHERE product_ean = ?', [ean]).rows!.item(0);
+
+    const milk = catalogByEan('111');
+    const bread = catalogByEan('222');
+    const cheese = catalogByEan('333');
+    const butter = catalogByEan('444');
+    const yogurt = catalogByEan('555');
+    const auto = await shoppingListRepository.createList('Moje minimum', 'auto');
+    const manual = await shoppingListRepository.createList('Cotygodniowe', 'manual');
+
+    await shoppingListRepository.addItem(auto.id, {
+      catalogProductId: milk.id as string,
+      label: 'Mleko',
+      quantity: 3,
+    });
+    await shoppingListRepository.addItem(auto.id, {
+      catalogProductId: bread.id as string,
+      label: 'Chleb',
+      quantity: 2,
+    });
+    await shoppingListRepository.addItem(auto.id, {
+      catalogProductId: cheese.id as string,
+      label: 'Ser',
+      quantity: 2,
+    });
+    await shoppingListRepository.addItem(auto.id, {
+      catalogProductId: butter.id as string,
+      label: 'Masło',
+      quantity: 2,
+    });
+    await shoppingListRepository.addItem(auto.id, {
+      catalogProductId: yogurt.id as string,
+      label: 'Jogurt',
+      quantity: 4,
+    });
+
+    await shoppingListRepository.addItem(manual.id, {
+      catalogProductId: milk.id as string,
+      label: 'Mleko',
+      quantity: 1,
+      status: 'planned',
+    });
+    await shoppingListRepository.addItem(manual.id, {
+      catalogProductId: bread.id as string,
+      label: 'Chleb',
+      quantity: 1,
+      status: 'stored',
+    });
+    await shoppingListRepository.addItem(manual.id, {
+      catalogProductId: cheese.id as string,
+      label: 'Ser',
+      quantity: 1,
+      status: 'unavailable',
+    });
+    await shoppingListRepository.addItem(manual.id, {
+      catalogProductId: butter.id as string,
+      label: 'Masło',
+      quantity: 1,
+      status: 'purchased',
+    });
+    await repository.addToInventory('inv-milk-1', '111', null, '2999-01-01');
+
+    const shoppingList = new ShoppingList(shoppingListRepository, repository);
+    const suggestions = await shoppingList.generateReplenishmentSuggestions();
+    const result = await shoppingList.addAllSuggestionsToList(manual.id);
+    const suggestionsByName = new Map(suggestions.map(suggestion => [suggestion.name, suggestion]));
+
+    const itemsByLabel = new Map(
+      (await shoppingListRepository.getItems(manual.id)).map(item => [item.label, item]),
+    );
+
+    expect(suggestions).toHaveLength(5);
+    expect(suggestionsByName.get('Mleko')).toMatchObject({
+      catalogProductId: milk.id,
+      currentQuantity: 1,
+      missingQuantity: 2,
+      targetQuantity: 3,
+      reason: 'Masz 1 z 3',
+      sourceAutoListIds: [auto.id],
+    });
+    expect(suggestionsByName.get('Jogurt')).toMatchObject({
+      catalogProductId: yogurt.id,
+      currentQuantity: 0,
+      missingQuantity: 4,
+      targetQuantity: 4,
+    });
+    expect(result).toEqual({added: 1, reactivated: 2, skipped: 2});
+    expect(itemsByLabel.get('Mleko')).toMatchObject({quantity: 2, status: 'planned'});
+    expect(itemsByLabel.get('Chleb')).toMatchObject({
+      quantity: 2,
+      status: 'planned',
+      source: 'reactivated',
+      storedAt: null,
+    });
+    expect(itemsByLabel.get('Ser')).toMatchObject({
+      quantity: 2,
+      status: 'planned',
+      source: 'reactivated',
+    });
+    expect(itemsByLabel.get('Masło')).toMatchObject({quantity: 1, status: 'purchased'});
+    expect(itemsByLabel.get('Jogurt')).toMatchObject({
+      catalogProductId: yogurt.id,
+      quantity: 4,
+      status: 'planned',
+      source: 'suggestion',
+    });
+  });
+
+  it('odrzuca merge sugestii do listy auto', async () => {
+    const auto = await shoppingListRepository.createList('Moje minimum 2', 'auto');
+
+    await expect(
+      shoppingListRepository.addAllSuggestionsToManualList(auto.id, []),
+    ).rejects.toThrow('Suggestions can only be added to manual lists');
   });
 
   it('finalizuje kupione pozycje i dodaje wiele sztuk jako osobne rekordy inventory', async () => {
