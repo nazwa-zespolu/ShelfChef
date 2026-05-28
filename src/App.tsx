@@ -59,7 +59,10 @@ function App() {
           <RecipeGeneratorView onRequestClose={() => setScreen('home')} />
         )}
         {screen === 'shopping' && (
-          <ShoppingListView onRequestClose={() => setScreen('home')} />
+          <ShoppingListView
+            onRequestClose={() => setScreen('home')}
+            onInventoryChanged={() => setInventoryTick(tick => tick + 1)}
+          />
         )}
       </View>
     </SafeAreaProvider>

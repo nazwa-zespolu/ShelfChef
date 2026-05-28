@@ -264,6 +264,22 @@ export class ShoppingListRepository {
     );
   }
 
+  async updateItemQuantity(id: string, quantity: number): Promise<void> {
+    db.execute(
+      `
+        UPDATE shopping_list_items
+        SET quantity = ?,
+            updated_at = ?
+        WHERE id = ?
+      `,
+      [Math.max(1, quantity), nowIso(), id],
+    );
+  }
+
+  async deleteItem(id: string): Promise<void> {
+    db.execute('DELETE FROM shopping_list_items WHERE id = ?', [id]);
+  }
+
   async createGenericCatalogProduct(name: string): Promise<CatalogProduct> {
     const timestamp = nowIso();
     const normalizedName = normalizeProductName(name);
