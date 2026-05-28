@@ -132,7 +132,6 @@ function ProductScannerVisionContent({
   const [manualName, setManualName] = useState('');
   const [manualBrand, setManualBrand] = useState('');
   const [manualCategory, setManualCategory] = useState('');
-  const [manualImageUrl, setManualImageUrl] = useState('');
   const [manualCustomName, setManualCustomName] = useState('');
   const [expirationDate, setExpirationDate] = useState<Date | null>(getDefaultExpirationDate);
   const [amount, setAmount] = useState(1);
@@ -169,7 +168,6 @@ function ProductScannerVisionContent({
     setManualName('');
     setManualBrand('');
     setManualCategory('');
-    setManualImageUrl('');
   };
 
   const openManualWithEanForm = (ean: string) => {
@@ -339,7 +337,6 @@ function ProductScannerVisionContent({
         name: normalizedName,
         brand: manualBrand.trim() || undefined,
         category: manualCategory.trim() || undefined,
-        imageUrl: manualImageUrl.trim() || undefined,
       });
       const expiryDate = expirationDate ? formatExpiryForDb(expirationDate) : null;
       for (let i = 0; i < amount; i += 1) {
@@ -572,16 +569,6 @@ function ProductScannerVisionContent({
               style={styles.textInput}
               placeholder="Np. Dry Goods"
               placeholderTextColor={colors.textMuted}
-            />
-            <Text style={styles.inputLabel}>URL zdjęcia (opcjonalnie)</Text>
-            <TextInput
-              value={manualImageUrl}
-              onChangeText={setManualImageUrl}
-              style={styles.textInput}
-              placeholder="https://..."
-              placeholderTextColor={colors.textMuted}
-              autoCapitalize="none"
-              autoCorrect={false}
             />
             <View style={styles.expirationSection}>
               <Text style={styles.inputLabel}>
