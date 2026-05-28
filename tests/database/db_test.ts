@@ -604,7 +604,7 @@ describe('ProductRepository + database integration', () => {
     });
   });
 
-  it('finalizuje kupione pozycje transakcyjnie do inventory', async () => {
+  it('finalizuje kupione pozycje i dodaje wiele sztuk jako osobne rekordy inventory', async () => {
     const manual = await shoppingListRepository.createList('Cotygodniowe', 'manual');
     const item = await shoppingListRepository.addItem(manual.id, {
       label: 'Mleko',
@@ -619,9 +619,11 @@ describe('ProductRepository + database integration', () => {
     const inventoryItems = await repository.getFullInventory();
 
     expect(result.inventoryIds).toHaveLength(2);
+    expect(new Set(result.inventoryIds).size).toBe(2);
     expect(result.storedItemIds).toEqual([item.id]);
     expect(items[0]).toMatchObject({status: 'stored'});
     expect(inventoryItems).toHaveLength(2);
     expect(inventoryItems[0].name).toBe('Mleko');
+    expect(inventoryItems[1].name).toBe('Mleko');
   });
 });

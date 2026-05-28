@@ -1,0 +1,332 @@
+import {
+  AutoShoppingListItemState,
+  CatalogProduct,
+  InventoryItem,
+  ShoppingItemStatus,
+  ShoppingListItem,
+  ShoppingListSummary,
+  ShoppingListType,
+  ShoppingSuggestion,
+} from '../domain/types';
+import type {ProductRepository} from '../infrastructure/ProductRepository';
+import type {
+  AddAllSuggestionsSummary,
+  AddShoppingItemInput,
+  CompletePurchaseResult,
+  ShoppingListRepository,
+} from '../infrastructure/ShoppingListRepository';
+
+declare const require: any;
+
+type ShoppingListDetails = {
+  list: ShoppingListSummary;
+  items: AutoShoppingListItemState[];
+};
+
+type CompletePurchasePayload = Record<string, string | null>;
+
+type CatalogIndex = {
+  byId: Map<string, CatalogProduct>;
+  specificByEan: Map<string, CatalogProduct>;
+};
+
+export class ShoppingList {
+  private shoppingRepository?: ShoppingListRepository;
+  private productRepository?: ProductRepository;
+
+  constructor(
+    shoppingRepository?: ShoppingListRepository,
+    productRepository?: ProductRepository,
+  ) {
+    this.shoppingRepository = shoppingRepository;
+    this.productRepository = productRepository;
+  }
+
+  async createList(name: string, type: ShoppingListType): Promise<ShoppingListSummary> {
+    return this.requireShoppingRepository().createList(name, type);
+  }
+
+  async addItem(listId: string, input: AddShoppingItemInput): Promise<ShoppingListItem> {
+    return this.requireShoppingRepository().addItem(listId, input);
+  }
+
+  async getListWithEffectiveStatuses(listId: string): Promise<ShoppingListDetails> {
+    const list = await this.requireList(listId);
+    const items = await this.requireShoppingRepository().getItems(listId);
+    if (list.type !== 'auto' || list.isLocked) {
+      return {
+        list,
+        items: items.map(item => this.toStaticItemState(item)),
+      };
+    }
+
+    const catalogIndex = await this.loadCatalogIndex();
+    const inventory = await this.loadFreshInventory();
+    const usedInventoryIds = new Set<string>();
+    return {
+      list,
+      items: items.map(item =>
+        this.toEffectiveAutoItemState(item, catalogIndex, inventory, usedInventoryIds),
+      ),
+    };
+  }
+
+  async setListLocked(listId: string, locked: boolean): Promise<void> {
+    const list = await this.requireList(listId);
+    if (list.type !== 'auto') {
+      throw new Error('Only auto shopping lists can be locked');
+    }
+
+    if (locked && !list.isLocked) {
+      const details = await this.getListWithEffectiveStatuses(listId);
+      for (const item of details.items) {
+        if (item.status !== 'purchased' && this.isLockSnapshotStatus(item.effectiveStatus)) {
+          await this.requireShoppingRepository().updateItemStatusSnapshot(
+            item.id,
+            item.effectiveStatus,
+          );
+        }
+      }
+    }
+
+    await this.requireShoppingRepository().setListLocked(listId, locked);
+  }
+
+  async generateReplenishmentSuggestions(): Promise<ShoppingSuggestion[]> {
+    const lists = (await this.requireShoppingRepository().getLists()).filter(
+      list => list.type === 'auto' && !list.isLocked,
+    );
+    if (lists.length === 0) {
+      return [];
+    }
+
+    const catalogIndex = await this.loadCatalogIndex();
+    const inventory = await this.loadFreshInventory();
+    const usedInventoryIds = new Set<string>();
+    const currentQuantityByCatalogId = new Map<string, number>();
+    const grouped = new Map<string, ShoppingSuggestion>();
+
+    for (const list of lists) {
+      const items = await this.requireShoppingRepository().getItems(list.id);
+      for (const item of items) {
+        if (item.status === 'purchased' || !item.catalogProductId) {
+          continue;
+        }
+
+        const catalogProduct = catalogIndex.byId.get(item.catalogProductId);
+        if (!catalogProduct) {
+          continue;
+        }
+
+        let currentQuantity = currentQuantityByCatalogId.get(catalogProduct.id);
+        if (currentQuantity == null) {
+          currentQuantity = this.consumeFreshInventory(
+            catalogProduct,
+            catalogIndex,
+            inventory,
+            usedInventoryIds,
+            item.quantity,
+          );
+          currentQuantityByCatalogId.set(catalogProduct.id, currentQuantity);
+        }
+        const missingQuantity = Math.max(0, item.quantity - currentQuantity);
+        if (missingQuantity === 0) {
+          continue;
+        }
+
+        const existing = grouped.get(catalogProduct.id);
+        if (!existing) {
+          grouped.set(catalogProduct.id, {
+            catalogProductId: catalogProduct.id,
+            name: catalogProduct.name,
+            normalizedName: catalogProduct.normalizedName,
+            missingQuantity,
+            currentQuantity,
+            targetQuantity: item.quantity,
+            reason: this.buildMissingReason(currentQuantity, item.quantity),
+            priority: currentQuantity === 0 ? 'out' : 'low',
+            sourceAutoListIds: [list.id],
+            sourceAutoListNames: [list.name],
+          });
+          continue;
+        }
+
+        if (!existing.sourceAutoListIds.includes(list.id)) {
+          existing.sourceAutoListIds.push(list.id);
+          existing.sourceAutoListNames.push(list.name);
+        }
+        if (missingQuantity > existing.missingQuantity) {
+          existing.missingQuantity = missingQuantity;
+          existing.currentQuantity = currentQuantity;
+          existing.targetQuantity = item.quantity;
+          existing.reason = this.buildMissingReason(currentQuantity, item.quantity);
+          existing.priority = currentQuantity === 0 ? 'out' : 'low';
+        }
+      }
+    }
+
+    return Array.from(grouped.values()).sort(
+      (a, b) =>
+        b.missingQuantity - a.missingQuantity ||
+        a.name.localeCompare(b.name),
+    );
+  }
+
+  async addAllSuggestionsToList(
+    targetManualListId: string,
+  ): Promise<AddAllSuggestionsSummary> {
+    const suggestions = await this.generateReplenishmentSuggestions();
+    return this.requireShoppingRepository().addAllSuggestionsToManualList(
+      targetManualListId,
+      suggestions,
+    );
+  }
+
+  async updateItemStatus(itemId: string, status: ShoppingItemStatus): Promise<void> {
+    return this.requireShoppingRepository().updateItemStatus(itemId, status);
+  }
+
+  async completePurchase(
+    listId: string,
+    payload: CompletePurchasePayload = {},
+  ): Promise<CompletePurchaseResult> {
+    return this.requireShoppingRepository().completePurchase(listId, payload);
+  }
+
+  private async requireList(listId: string): Promise<ShoppingListSummary> {
+    const list = await this.requireShoppingRepository().getListById(listId);
+    if (!list) {
+      throw new Error(`Shopping list not found: ${listId}`);
+    }
+    return list;
+  }
+
+  private async loadCatalogIndex(): Promise<CatalogIndex> {
+    const products = await this.requireShoppingRepository().getCatalogProducts();
+    return {
+      byId: new Map(products.map(product => [product.id, product])),
+      specificByEan: new Map(
+        products
+          .filter(product => product.kind === 'specific' && product.productEan)
+          .map(product => [product.productEan as string, product]),
+      ),
+    };
+  }
+
+  private async loadFreshInventory(): Promise<InventoryItem[]> {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const inventory = await this.requireProductRepository().getFullInventory();
+    return inventory.filter(
+      item => item.expiryDate == null || item.expiryDate >= todayIso,
+    );
+  }
+
+  private toEffectiveAutoItemState(
+    item: ShoppingListItem,
+    catalogIndex: CatalogIndex,
+    inventory: InventoryItem[],
+    usedInventoryIds: Set<string>,
+  ): AutoShoppingListItemState {
+    if (item.status === 'purchased' || !item.catalogProductId) {
+      return this.toStaticItemState(item);
+    }
+
+    const catalogProduct = catalogIndex.byId.get(item.catalogProductId);
+    if (!catalogProduct) {
+      return this.toStaticItemState(item);
+    }
+
+    const currentQuantity = this.consumeFreshInventory(
+      catalogProduct,
+      catalogIndex,
+      inventory,
+      usedInventoryIds,
+      item.quantity,
+    );
+    const missingQuantity = Math.max(0, item.quantity - currentQuantity);
+    return {
+      ...item,
+      effectiveStatus: missingQuantity === 0 ? 'stored' : 'planned',
+      currentQuantity,
+      missingQuantity,
+    };
+  }
+
+  private toStaticItemState(item: ShoppingListItem): AutoShoppingListItemState {
+    const currentQuantity = item.status === 'stored' ? item.quantity : 0;
+    return {
+      ...item,
+      effectiveStatus: item.status,
+      currentQuantity,
+      missingQuantity: item.status === 'planned' ? item.quantity : 0,
+    };
+  }
+
+  private consumeFreshInventory(
+    catalogProduct: CatalogProduct,
+    catalogIndex: CatalogIndex,
+    inventory: InventoryItem[],
+    usedInventoryIds: Set<string>,
+    maxQuantity: number,
+  ): number {
+    let count = 0;
+    for (const item of inventory) {
+      if (count >= maxQuantity) {
+        break;
+      }
+      if (usedInventoryIds.has(item.id)) {
+        continue;
+      }
+      if (!this.inventoryMatchesCatalogProduct(item, catalogProduct, catalogIndex)) {
+        continue;
+      }
+      usedInventoryIds.add(item.id);
+      count += 1;
+    }
+    return count;
+  }
+
+  private inventoryMatchesCatalogProduct(
+    item: InventoryItem,
+    catalogProduct: CatalogProduct,
+    catalogIndex: CatalogIndex,
+  ): boolean {
+    if (catalogProduct.kind === 'specific') {
+      return catalogProduct.productEan != null && item.ean === catalogProduct.productEan;
+    }
+
+    if (item.ean) {
+      return catalogIndex.specificByEan.get(item.ean)?.parentCatalogProductId === catalogProduct.id;
+    }
+
+    return normalizeProductName(item.name) === catalogProduct.normalizedName;
+  }
+
+  private isLockSnapshotStatus(status: ShoppingItemStatus): status is 'planned' | 'stored' {
+    return status === 'planned' || status === 'stored';
+  }
+
+  private buildMissingReason(currentQuantity: number, targetQuantity: number): string {
+    return `Masz ${currentQuantity} z ${targetQuantity}`;
+  }
+
+  private requireShoppingRepository(): ShoppingListRepository {
+    if (!this.shoppingRepository) {
+      this.shoppingRepository =
+        new (require('../infrastructure/ShoppingListRepository').ShoppingListRepository)();
+    }
+    return this.shoppingRepository as ShoppingListRepository;
+  }
+
+  private requireProductRepository(): ProductRepository {
+    if (!this.productRepository) {
+      this.productRepository =
+        new (require('../infrastructure/ProductRepository').ProductRepository)();
+    }
+    return this.productRepository as ProductRepository;
+  }
+}
+
+function normalizeProductName(name: string): string {
+  return name.trim().toLowerCase();
+}

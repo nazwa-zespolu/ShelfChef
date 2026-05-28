@@ -170,6 +170,23 @@ export class ShoppingListRepository {
     return items;
   }
 
+  async getCatalogProducts(): Promise<CatalogProduct[]> {
+    const result = db.execute(
+      `
+        SELECT *
+        FROM product_catalog
+        ORDER BY kind ASC, name ASC
+      `,
+    );
+    const products: CatalogProduct[] = [];
+    if (result.rows) {
+      for (let i = 0; i < result.rows.length; i++) {
+        products.push(mapCatalogProduct(result.rows.item(i)));
+      }
+    }
+    return products;
+  }
+
   async addItem(listId: string, input: AddShoppingItemInput): Promise<ShoppingListItem> {
     const list = await this.getListById(listId);
     if (!list) {
@@ -232,6 +249,18 @@ export class ShoppingListRepository {
         WHERE id = ?
       `,
       [status, status, nowIso(), nowIso(), id],
+    );
+  }
+
+  async updateItemStatusSnapshot(id: string, status: 'planned' | 'stored'): Promise<void> {
+    db.execute(
+      `
+        UPDATE shopping_list_items
+        SET status = ?,
+            updated_at = ?
+        WHERE id = ?
+      `,
+      [status, nowIso(), id],
     );
   }
 
