@@ -9,6 +9,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -110,6 +111,8 @@ type VisionCameraModule = {
   }) => any;
 };
 
+type SheetMode = 'none' | 'details' | 'manualWithEan' | 'manualNoEan';
+
 function ProductScannerVisionContent({
   onRequestClose,
   onProductAdded,
@@ -124,6 +127,13 @@ function ProductScannerVisionContent({
   const {hasPermission, requestPermission} = useCameraPermission();
   const device = useCameraDevice('back');
   const [scannedProduct, setScannedProduct] = useState<ProductDefinition | null>(null);
+  const [sheetMode, setSheetMode] = useState<SheetMode>('none');
+  const [manualEan, setManualEan] = useState('');
+  const [manualName, setManualName] = useState('');
+  const [manualBrand, setManualBrand] = useState('');
+  const [manualCategory, setManualCategory] = useState('');
+  const [manualImageUrl, setManualImageUrl] = useState('');
+  const [manualCustomName, setManualCustomName] = useState('');
   const [expirationDate, setExpirationDate] = useState<Date | null>(getDefaultExpirationDate);
   const [amount, setAmount] = useState(1);
   const [resolving, setResolving] = useState(false);
@@ -149,6 +159,38 @@ function ProductScannerVisionContent({
     [activeDate],
   );
 
+  const resetCommonFormState = () => {
+    setExpirationDate(getDefaultExpirationDate());
+    setAmount(1);
+  };
+
+  const resetManualWithEanForm = (ean: string) => {
+    setManualEan(ean);
+    setManualName('');
+    setManualBrand('');
+    setManualCategory('');
+    setManualImageUrl('');
+  };
+
+  const openManualWithEanForm = (ean: string) => {
+    setScannedProduct(null);
+    resetCommonFormState();
+    resetManualWithEanForm(ean);
+    setSheetMode('manualWithEan');
+  };
+
+  const openManualNoEanForm = () => {
+    setScannedProduct(null);
+    resetCommonFormState();
+    setManualCustomName('');
+    setSheetMode('manualNoEan');
+  };
+
+  const closeBottomSheet = () => {
+    setSheetMode('none');
+    setScannedProduct(null);
+  };
+
   const updateDatePart = (part: 'day' | 'month' | 'year', value: number) => {
     setExpirationDate(currentDate => {
       const nextDate = new Date(currentDate ?? getDefaultExpirationDate());
@@ -163,19 +205,19 @@ function ProductScannerVisionContent({
 
   useEffect(() => {
     Animated.timing(sheetTranslateY, {
-      toValue: scannedProduct || resolving ? 0 : BOTTOM_SHEET_HEIGHT,
+      toValue: sheetMode !== 'none' || resolving ? 0 : BOTTOM_SHEET_HEIGHT,
       duration: 250,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
-  }, [resolving, scannedProduct, sheetTranslateY]);
+  }, [resolving, sheetMode, sheetTranslateY]);
 
   const resolveScannedProduct = async (ean: string) => {
     const requestId = resolveRequestIdRef.current + 1;
     resolveRequestIdRef.current = requestId;
     setScannedProduct(null);
-    setExpirationDate(getDefaultExpirationDate());
-    setAmount(1);
+    setSheetMode('none');
+    resetCommonFormState();
     setResolving(true);
 
     const result = await scanToAdd.execute({ean});
@@ -185,11 +227,12 @@ function ProductScannerVisionContent({
 
     setResolving(false);
     if ('fallback' in result) {
-      Alert.alert('Nie znaleziono produktu', `Brak danych dla EAN: ${ean}.`);
+      openManualWithEanForm(ean);
       return;
     }
 
     setScannedProduct(result);
+    setSheetMode('details');
   };
 
   const codeScanner = useCodeScanner({
@@ -203,7 +246,7 @@ function ProductScannerVisionContent({
       if (!isValidEAN(firstCode)) {
         return;
       }
-      if (resolving || adding) {
+      if (resolving || adding || sheetMode !== 'none') {
         return;
       }
 
@@ -217,6 +260,7 @@ function ProductScannerVisionContent({
       resolveScannedProduct(firstCode).catch(() => {
         setResolving(false);
         setScannedProduct(null);
+        setSheetMode('none');
         Alert.alert('Błąd', 'Nie udało się odczytać produktu dla zeskanowanego EAN.');
       });
     },
@@ -267,10 +311,66 @@ function ProductScannerVisionContent({
       for (let i = 0; i < amount; i += 1) {
         await repo.addToInventory(generateInventoryId(i), scannedProduct.ean, null, expiryDate);
       }
-      setScannedProduct(null);
+      closeBottomSheet();
       onProductAdded?.();
     } catch {
       Alert.alert('Błąd', 'Nie udało się dodać produktu do spiżarni.');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleSaveManualWithEan = async () => {
+    const normalizedName = manualName.trim();
+    const normalizedEan = manualEan.trim();
+    if (!normalizedName) {
+      Alert.alert('Brak nazwy', 'Podaj nazwę produktu.');
+      return;
+    }
+    if (!isValidEAN(normalizedEan)) {
+      Alert.alert('Nieprawidłowy EAN', 'Nie udało się zapisać produktu bez poprawnego EAN.');
+      return;
+    }
+
+    setAdding(true);
+    try {
+      await repo.saveDefinition({
+        ean: normalizedEan,
+        name: normalizedName,
+        brand: manualBrand.trim() || undefined,
+        category: manualCategory.trim() || undefined,
+        imageUrl: manualImageUrl.trim() || undefined,
+      });
+      const expiryDate = expirationDate ? formatExpiryForDb(expirationDate) : null;
+      for (let i = 0; i < amount; i += 1) {
+        await repo.addToInventory(generateInventoryId(i), normalizedEan, null, expiryDate);
+      }
+      closeBottomSheet();
+      onProductAdded?.();
+    } catch {
+      Alert.alert('Błąd', 'Nie udało się zapisać produktu manualnie.');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleSaveManualNoEan = async () => {
+    const normalizedName = manualCustomName.trim();
+    if (!normalizedName) {
+      Alert.alert('Brak nazwy', 'Podaj nazwę produktu.');
+      return;
+    }
+
+    setAdding(true);
+    try {
+      const expiryDate = expirationDate ? formatExpiryForDb(expirationDate) : null;
+      for (let i = 0; i < amount; i += 1) {
+        await repo.addToInventory(generateInventoryId(i), null, normalizedName, expiryDate);
+      }
+      closeBottomSheet();
+      onProductAdded?.();
+    } catch {
+      Alert.alert('Błąd', 'Nie udało się dodać produktu bez EAN.');
     } finally {
       setAdding(false);
     }
@@ -290,6 +390,12 @@ function ProductScannerVisionContent({
         hitSlop={12}>
         <Text style={styles.backText}>&#8592; Wróć</Text>
       </Pressable>
+      <Pressable
+        onPress={openManualNoEanForm}
+        style={[styles.manualOverlayButton, {top: Math.max(insets.top, 12)}]}
+        disabled={resolving || adding}>
+        <Text style={styles.manualOverlayButtonText}>Nie mam EAN</Text>
+      </Pressable>
 
       <Animated.View
         style={[
@@ -305,7 +411,7 @@ function ProductScannerVisionContent({
             <Text style={styles.info}>Pobieram dane produktu…</Text>
           </View>
         ) : null}
-        {scannedProduct ? (
+        {sheetMode === 'details' && scannedProduct ? (
           <View style={styles.sheetContent}>
             <View style={styles.productRow}>
               {scannedProduct.imageUrl ? (
@@ -415,7 +521,7 @@ function ProductScannerVisionContent({
             <View style={styles.actions}>
               <Pressable
                 style={[styles.actionButtonBase, styles.secondaryButton]}
-                onPress={() => setScannedProduct(null)}
+                onPress={closeBottomSheet}
                 disabled={adding}>
                 <Text style={[styles.actionButtonTextBase, styles.secondaryButtonText]}>Close</Text>
               </Pressable>
@@ -427,6 +533,277 @@ function ProductScannerVisionContent({
                 disabled={adding || resolving}>
                 <Text style={[styles.actionButtonTextBase, styles.primaryButtonText]}>
                   {adding ? 'Dodaję…' : 'Add'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+        {sheetMode === 'manualWithEan' ? (
+          <View style={styles.sheetContent}>
+            <Text style={styles.productName}>Dodaj produkt ręcznie (EAN)</Text>
+            <Text style={styles.inputLabel}>EAN</Text>
+            <TextInput
+              value={manualEan}
+              onChangeText={setManualEan}
+              style={styles.textInput}
+              editable={false}
+              selectTextOnFocus={false}
+            />
+            <Text style={styles.inputLabel}>Nazwa produktu</Text>
+            <TextInput
+              value={manualName}
+              onChangeText={setManualName}
+              style={styles.textInput}
+              placeholder="Np. Makaron pełnoziarnisty"
+              placeholderTextColor={colors.textMuted}
+            />
+            <Text style={styles.inputLabel}>Marka (opcjonalnie)</Text>
+            <TextInput
+              value={manualBrand}
+              onChangeText={setManualBrand}
+              style={styles.textInput}
+              placeholder="Np. Barilla"
+              placeholderTextColor={colors.textMuted}
+            />
+            <Text style={styles.inputLabel}>Kategoria (opcjonalnie)</Text>
+            <TextInput
+              value={manualCategory}
+              onChangeText={setManualCategory}
+              style={styles.textInput}
+              placeholder="Np. Dry Goods"
+              placeholderTextColor={colors.textMuted}
+            />
+            <Text style={styles.inputLabel}>URL zdjęcia (opcjonalnie)</Text>
+            <TextInput
+              value={manualImageUrl}
+              onChangeText={setManualImageUrl}
+              style={styles.textInput}
+              placeholder="https://..."
+              placeholderTextColor={colors.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <View style={styles.expirationSection}>
+              <Text style={styles.inputLabel}>
+                Expiration date: {expirationDate
+                  ? formatDate(
+                      expirationDate.getDate(),
+                      expirationDate.getMonth() + 1,
+                      expirationDate.getFullYear(),
+                    )
+                  : 'not set'}
+              </Text>
+              <View style={styles.expirationToggleRow}>
+                <Pressable
+                  style={[
+                    styles.expirationToggleButton,
+                    expirationDate && styles.expirationToggleButtonActive,
+                  ]}
+                  onPress={() => setExpirationDate(current => current ?? getDefaultExpirationDate())}>
+                  <Text
+                    style={[
+                      styles.expirationToggleText,
+                      expirationDate && styles.expirationToggleTextActive,
+                    ]}>
+                    Set expiration date
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.expirationToggleButton,
+                    !expirationDate && styles.expirationToggleButtonActive,
+                  ]}
+                  onPress={() => setExpirationDate(null)}>
+                  <Text
+                    style={[
+                      styles.expirationToggleText,
+                      !expirationDate && styles.expirationToggleTextActive,
+                    ]}>
+                    No expiration date
+                  </Text>
+                </Pressable>
+              </View>
+              {expirationDate ? (
+                <View style={styles.wheelsRow}>
+                  <WheelPicker
+                    label="Day"
+                    values={days}
+                    selectedValue={expirationDate.getDate()}
+                    onValueChange={value => updateDatePart('day', value)}
+                  />
+                  <WheelPicker
+                    label="Month"
+                    values={months}
+                    selectedValue={expirationDate.getMonth() + 1}
+                    onValueChange={value => updateDatePart('month', value)}
+                  />
+                  <WheelPicker
+                    label="Year"
+                    values={years}
+                    selectedValue={expirationDate.getFullYear()}
+                    onValueChange={value => updateDatePart('year', value)}
+                  />
+                </View>
+              ) : null}
+
+              <Text style={styles.inputLabel}>Amount</Text>
+              <View style={styles.amountRow}>
+                <Pressable
+                  style={[styles.amountButtonBase, styles.amountButtonWide]}
+                  onPress={() => setAmount(current => Math.max(1, current - 5))}>
+                  <Text style={styles.amountButtonText}>-5</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.amountButtonBase, styles.amountButtonRound]}
+                  onPress={() => setAmount(current => Math.max(1, current - 1))}>
+                  <Text style={styles.amountButtonText}>-</Text>
+                </Pressable>
+                <Text style={styles.amountValue}>{amount}</Text>
+                <Pressable
+                  style={[styles.amountButtonBase, styles.amountButtonRound]}
+                  onPress={() => setAmount(current => Math.min(999, current + 1))}>
+                  <Text style={styles.amountButtonText}>+</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.amountButtonBase, styles.amountButtonWide]}
+                  onPress={() => setAmount(current => Math.min(999, current + 5))}>
+                  <Text style={styles.amountButtonText}>+5</Text>
+                </Pressable>
+              </View>
+            </View>
+            <View style={styles.actions}>
+              <Pressable
+                style={[styles.actionButtonBase, styles.secondaryButton]}
+                onPress={closeBottomSheet}
+                disabled={adding}>
+                <Text style={[styles.actionButtonTextBase, styles.secondaryButtonText]}>Close</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.actionButtonBase, styles.primaryButton, adding && styles.buttonDisabled]}
+                onPress={() => {
+                  handleSaveManualWithEan().catch(() => {});
+                }}
+                disabled={adding || resolving}>
+                <Text style={[styles.actionButtonTextBase, styles.primaryButtonText]}>
+                  {adding ? 'Zapisuję…' : 'Zapisz i dodaj'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+        {sheetMode === 'manualNoEan' ? (
+          <View style={styles.sheetContent}>
+            <Text style={styles.productName}>Dodaj produkt ręcznie (bez EAN)</Text>
+            <Text style={styles.inputLabel}>Nazwa produktu</Text>
+            <TextInput
+              value={manualCustomName}
+              onChangeText={setManualCustomName}
+              style={styles.textInput}
+              placeholder="Np. Domowy zakwas"
+              placeholderTextColor={colors.textMuted}
+            />
+            <View style={styles.expirationSection}>
+              <Text style={styles.inputLabel}>
+                Expiration date: {expirationDate
+                  ? formatDate(
+                      expirationDate.getDate(),
+                      expirationDate.getMonth() + 1,
+                      expirationDate.getFullYear(),
+                    )
+                  : 'not set'}
+              </Text>
+              <View style={styles.expirationToggleRow}>
+                <Pressable
+                  style={[
+                    styles.expirationToggleButton,
+                    expirationDate && styles.expirationToggleButtonActive,
+                  ]}
+                  onPress={() => setExpirationDate(current => current ?? getDefaultExpirationDate())}>
+                  <Text
+                    style={[
+                      styles.expirationToggleText,
+                      expirationDate && styles.expirationToggleTextActive,
+                    ]}>
+                    Set expiration date
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.expirationToggleButton,
+                    !expirationDate && styles.expirationToggleButtonActive,
+                  ]}
+                  onPress={() => setExpirationDate(null)}>
+                  <Text
+                    style={[
+                      styles.expirationToggleText,
+                      !expirationDate && styles.expirationToggleTextActive,
+                    ]}>
+                    No expiration date
+                  </Text>
+                </Pressable>
+              </View>
+              {expirationDate ? (
+                <View style={styles.wheelsRow}>
+                  <WheelPicker
+                    label="Day"
+                    values={days}
+                    selectedValue={expirationDate.getDate()}
+                    onValueChange={value => updateDatePart('day', value)}
+                  />
+                  <WheelPicker
+                    label="Month"
+                    values={months}
+                    selectedValue={expirationDate.getMonth() + 1}
+                    onValueChange={value => updateDatePart('month', value)}
+                  />
+                  <WheelPicker
+                    label="Year"
+                    values={years}
+                    selectedValue={expirationDate.getFullYear()}
+                    onValueChange={value => updateDatePart('year', value)}
+                  />
+                </View>
+              ) : null}
+              <Text style={styles.inputLabel}>Amount</Text>
+              <View style={styles.amountRow}>
+                <Pressable
+                  style={[styles.amountButtonBase, styles.amountButtonWide]}
+                  onPress={() => setAmount(current => Math.max(1, current - 5))}>
+                  <Text style={styles.amountButtonText}>-5</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.amountButtonBase, styles.amountButtonRound]}
+                  onPress={() => setAmount(current => Math.max(1, current - 1))}>
+                  <Text style={styles.amountButtonText}>-</Text>
+                </Pressable>
+                <Text style={styles.amountValue}>{amount}</Text>
+                <Pressable
+                  style={[styles.amountButtonBase, styles.amountButtonRound]}
+                  onPress={() => setAmount(current => Math.min(999, current + 1))}>
+                  <Text style={styles.amountButtonText}>+</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.amountButtonBase, styles.amountButtonWide]}
+                  onPress={() => setAmount(current => Math.min(999, current + 5))}>
+                  <Text style={styles.amountButtonText}>+5</Text>
+                </Pressable>
+              </View>
+            </View>
+            <View style={styles.actions}>
+              <Pressable
+                style={[styles.actionButtonBase, styles.secondaryButton]}
+                onPress={closeBottomSheet}
+                disabled={adding}>
+                <Text style={[styles.actionButtonTextBase, styles.secondaryButtonText]}>Close</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.actionButtonBase, styles.primaryButton, adding && styles.buttonDisabled]}
+                onPress={() => {
+                  handleSaveManualNoEan().catch(() => {});
+                }}
+                disabled={adding || resolving}>
+                <Text style={[styles.actionButtonTextBase, styles.primaryButtonText]}>
+                  {adding ? 'Dodaję…' : 'Dodaj'}
                 </Text>
               </Pressable>
             </View>
@@ -495,6 +872,22 @@ const styles = StyleSheet.create({
   backText: {
     color: colors.successAccent,
     fontSize: 16,
+    fontWeight: '700',
+  },
+  manualOverlayButton: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 20,
+    backgroundColor: colors.surfaceDark,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.borderDark,
+  },
+  manualOverlayButtonText: {
+    color: colors.textPrimary,
+    fontSize: 13,
     fontWeight: '700',
   },
   topOverlay: {
@@ -588,6 +981,15 @@ const styles = StyleSheet.create({
   inputLabel: {
     color: '#eef1f7',
     fontWeight: '600',
+  },
+  textInput: {
+    backgroundColor: colors.surfaceMid,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: colors.textPrimary,
+    borderWidth: 1,
+    borderColor: colors.borderDark,
   },
   wheelsRow: {
     flexDirection: 'row',
