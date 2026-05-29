@@ -1,3 +1,19 @@
+/*
+Naming guidelines:
+- Use semantic names only (what color does), never visual names (what color is).
+- `background` is page-level only (full-screen roots).
+- `surface*` is for containers:
+  - `surface` for primary cards/sheets/inputs,
+  - `surfaceSubtle` for secondary UI (chips, neutral buttons),
+  - `surfaceMuted` for placeholders and tertiary blocks.
+- `text*` controls readability hierarchy:
+  - `textPrimary` titles and key values,
+  - `textSecondary` descriptions and helper text,
+  - `textMuted` placeholders/disabled labels.
+- `accent` / `accentSoft` are for brand highlights and selected states.
+- `success` is for positive actions; `danger` only for destructive actions.
+- `tab*` is reserved for bottom navigation only.
+*/
 const lightTheme = {
   // App/page background.
   background: '#fffdf8',
@@ -63,6 +79,6 @@ export const themes = {
   dark: darkTheme,
 } as const;
 
-// Switch this to themes.dark to enable dark mode globally.
+// App-level forced scheme. Keep `light` until dark mode is intentionally enabled.
 const activeTheme = themes.light;
 export const colors = activeTheme;
