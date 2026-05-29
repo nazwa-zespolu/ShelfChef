@@ -17,7 +17,7 @@ import {QWEN2_5_3B_QUANTIZED, Message, useLLM} from 'react-native-executorch';
 import {BareResourceFetcher} from 'react-native-executorch-bare-resource-fetcher';
 
 type RecipeGeneratorViewProps = {
-  onRequestClose: () => void;
+  onRequestClose?: () => void;
 };
 
 type ConsentState = 'unknown' | 'accepted' | 'declined';
@@ -181,15 +181,7 @@ export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorVie
   }, []);
 
   return (
-    <View style={[styles.root, {paddingTop: insets.top + 8, paddingBottom: insets.bottom + 12}]}>
-      <View style={styles.header}>
-        <Pressable
-          onPress={onRequestClose}
-          style={({pressed}) => [styles.back, pressed && styles.backPressed]}
-          hitSlop={10}>
-          <Text style={styles.backText}>&#8592; Wróć</Text>
-        </Pressable>
-      </View>
+    <View style={[styles.root, {paddingTop: insets.top + 8}]}>
 
       {consentBooting ? (
         <View style={styles.body}>
@@ -237,9 +229,9 @@ export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorVie
               <Text style={styles.primaryButtonText}>Zgadzam się</Text>
             </Pressable>
             <Pressable
-              onPress={onRequestClose}
+              onPress={declineConsent}
               style={({pressed}) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
-              <Text style={styles.secondaryButtonText}>Wróć</Text>
+              <Text style={styles.secondaryButtonText}>Nie teraz</Text>
             </Pressable>
           </View>
         </View>
@@ -250,7 +242,7 @@ export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorVie
   );
 }
 
-function RecipeGeneratorLLM({onRequestClose}: {onRequestClose: () => void}) {
+function RecipeGeneratorLLM({onRequestClose}: {onRequestClose?: () => void}) {
   const llm = useLLM({model: QWEN2_5_3B_QUANTIZED});
   const [dishNames, setDishNames] = useState<string[]>([]);
   const [rawLlmOutput, setRawLlmOutput] = useState<string | null>(null);
@@ -264,6 +256,9 @@ function RecipeGeneratorLLM({onRequestClose}: {onRequestClose: () => void}) {
 
   const canClose = !llm.isGenerating;
   const requestClose = useCallback(() => {
+    if (!onRequestClose) {
+      return;
+    }
     if (llm.isGenerating) {
       pendingCloseRef.current = true;
       llm.interrupt();
@@ -273,6 +268,9 @@ function RecipeGeneratorLLM({onRequestClose}: {onRequestClose: () => void}) {
   }, [llm, onRequestClose]);
 
   useEffect(() => {
+    if (!onRequestClose) {
+      return;
+    }
     if (!llm.isGenerating && pendingCloseRef.current) {
       pendingCloseRef.current = false;
       onRequestClose();
@@ -391,16 +389,18 @@ function RecipeGeneratorLLM({onRequestClose}: {onRequestClose: () => void}) {
     <View style={styles.body} key={remountKey}>
       <View style={styles.sectionHeader}>
         <Text style={styles.title}>Generator przepisów</Text>
-        <Pressable
-          onPress={requestClose}
-          disabled={!canClose}
-          style={({pressed}) => [
-            styles.closeChip,
-            pressed && styles.closeChipPressed,
-            !canClose && styles.closeChipDisabled,
-          ]}>
-          <Text style={styles.closeChipText}>{canClose ? 'Zamknij' : 'Zatrzymuję…'}</Text>
-        </Pressable>
+        {onRequestClose ? (
+          <Pressable
+            onPress={requestClose}
+            disabled={!canClose}
+            style={({pressed}) => [
+              styles.closeChip,
+              pressed && styles.closeChipPressed,
+              !canClose && styles.closeChipDisabled,
+            ]}>
+            <Text style={styles.closeChipText}>{canClose ? 'Zamknij' : 'Zatrzymuję…'}</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <View style={styles.card}>
@@ -545,23 +545,7 @@ function RecipeGeneratorLLM({onRequestClose}: {onRequestClose: () => void}) {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.black,
-  },
-  header: {
-    paddingHorizontal: 8,
-  },
-  back: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  backPressed: {
-    opacity: 0.7,
-  },
-  backText: {
-    color: colors.successAccent,
-    fontSize: 16,
-    fontWeight: '700',
+    backgroundColor: colors.background,
   },
   body: {
     flex: 1,
@@ -612,9 +596,9 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   secondaryButton: {
-    backgroundColor: colors.surfaceSoft,
+    backgroundColor: colors.surfaceSubtle,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 12,
@@ -632,11 +616,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   card: {
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: colors.surface,
     borderRadius: 14,
     padding: 14,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
     marginBottom: 10,
   },
   cardTitle: {
@@ -665,11 +649,11 @@ const styles = StyleSheet.create({
   },
   errorBox: {
     marginTop: 10,
-    backgroundColor: colors.surfaceMid,
+    backgroundColor: colors.surfaceMuted,
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
   },
   errorTitle: {
     color: colors.textPrimary,
@@ -720,8 +704,8 @@ const styles = StyleSheet.create({
     maxHeight: 260,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: colors.borderDark,
-    backgroundColor: colors.surfaceMid,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
     padding: 10,
   },
   rawText: {
@@ -762,11 +746,11 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   dishRow: {
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: colors.surface,
     borderRadius: 14,
     padding: 14,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
     marginBottom: 10,
   },
   dishName: {
@@ -778,9 +762,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: colors.surfaceSoft,
+    backgroundColor: colors.surfaceSubtle,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
   },
   closeChipPressed: {
     opacity: 0.9,
