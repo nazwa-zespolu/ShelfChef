@@ -38,6 +38,7 @@ export interface ShoppingListSummary {
   type: ShoppingListType;
   isLocked: boolean;
   isArchived: boolean;
+  sortOrder: number;
   lockedAt: string | null;
   createdAt: string;
   updatedAt: string;

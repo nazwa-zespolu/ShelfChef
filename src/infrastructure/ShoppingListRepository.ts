@@ -58,6 +58,7 @@ function mapShoppingList(row: Record<string, any>): ShoppingListSummary {
     type: row.type,
     isLocked: row.is_locked === 1,
     isArchived: row.is_archived === 1,
+    sortOrder: Number(row.sort_order ?? 0),
     lockedAt: row.locked_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -83,6 +84,10 @@ export class ShoppingListRepository {
   async createList(name: string, type: ShoppingListType): Promise<ShoppingListSummary> {
     const timestamp = nowIso();
     const id = generateId('shopping-list');
+    const orderResult = db.execute(
+      'SELECT COALESCE(MAX(sort_order), -1) AS max_sort_order FROM shopping_lists',
+    );
+    const sortOrder = Number(orderResult.rows?.item(0)?.max_sort_order ?? -1) + 1;
     db.execute(
       `
         INSERT INTO shopping_lists (
@@ -91,13 +96,14 @@ export class ShoppingListRepository {
           type,
           is_locked,
           is_archived,
+          sort_order,
           locked_at,
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, 0, 0, NULL, ?, ?)
+        VALUES (?, ?, ?, 0, 0, ?, NULL, ?, ?)
       `,
-      [id, name.trim(), type, timestamp, timestamp],
+      [id, name.trim(), type, sortOrder, timestamp, timestamp],
     );
     return {
       id,
@@ -105,6 +111,7 @@ export class ShoppingListRepository {
       type,
       isLocked: false,
       isArchived: false,
+      sortOrder,
       lockedAt: null,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -117,7 +124,7 @@ export class ShoppingListRepository {
         SELECT *
         FROM shopping_lists
         WHERE (? = 1 OR is_archived = 0)
-        ORDER BY created_at ASC
+        ORDER BY sort_order ASC, created_at ASC
       `,
       [includeArchived ? 1 : 0],
     );
@@ -136,6 +143,30 @@ export class ShoppingListRepository {
       return null;
     }
     return mapShoppingList(result.rows.item(0));
+  }
+
+  async deleteList(id: string): Promise<void> {
+    runInTransaction(() => {
+      db.execute('DELETE FROM shopping_list_items WHERE list_id = ?', [id]);
+      db.execute('DELETE FROM shopping_lists WHERE id = ?', [id]);
+    });
+  }
+
+  async updateListOrder(listIds: string[]): Promise<void> {
+    runInTransaction(() => {
+      const timestamp = nowIso();
+      listIds.forEach((id, index) => {
+        db.execute(
+          `
+            UPDATE shopping_lists
+            SET sort_order = ?,
+                updated_at = ?
+            WHERE id = ?
+          `,
+          [index, timestamp, id],
+        );
+      });
+    });
   }
 
   async setListLocked(id: string, locked: boolean): Promise<void> {
@@ -476,7 +507,7 @@ export class ShoppingListRepository {
               [
                 inventoryId,
                 row.product_ean ?? null,
-                row.product_ean ? null : row.label,
+                row.label,
                 expiryDateByItemId[row.id] ?? null,
               ],
             );

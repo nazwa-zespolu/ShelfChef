@@ -2,7 +2,7 @@ import { open } from 'react-native-quick-sqlite';
 
 // Otwarcie bazy danych
 export const db = open({ name: 'shelfchef.db' });
-const SHOPPING_LISTS_SCHEMA_VERSION = 2;
+const SHOPPING_LISTS_SCHEMA_VERSION = 3;
 
 const MOCK_DATA_SQL = [
   // 1. Product definitions (in English) - expanded base for the LLM
@@ -84,6 +84,7 @@ function migrateToShoppingListsSchema() {
         type TEXT NOT NULL CHECK(type IN ('manual', 'auto')),
         is_locked INTEGER NOT NULL DEFAULT 0,
         is_archived INTEGER NOT NULL DEFAULT 0,
+        sort_order INTEGER NOT NULL DEFAULT 0,
         locked_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -159,6 +160,7 @@ function migrateToShoppingListsSchema() {
         type,
         is_locked,
         is_archived,
+        sort_order,
         locked_at,
         created_at,
         updated_at
@@ -169,11 +171,16 @@ function migrateToShoppingListsSchema() {
         'auto',
         0,
         0,
+        0,
         NULL,
         datetime('now'),
         datetime('now')
       );
     `);
+}
+
+function migrateShoppingListSortOrder() {
+  db.execute('ALTER TABLE shopping_lists ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
 }
 
 function migrateCatalogConcreteToSpecific() {
@@ -257,6 +264,9 @@ function runMigrations() {
     }
     if (currentVersion >= 1 && currentVersion < 2) {
       migrateCatalogConcreteToSpecific();
+    }
+    if (currentVersion >= 1 && currentVersion < 3) {
+      migrateShoppingListSortOrder();
     }
     db.execute(`PRAGMA user_version = ${SHOPPING_LISTS_SCHEMA_VERSION}`);
   });

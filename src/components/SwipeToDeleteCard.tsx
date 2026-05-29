@@ -8,9 +8,13 @@ const SWIPE_DELETE_THRESHOLD = 110;
 export function SwipeToDeleteCard({
   children,
   onDelete,
+  resetAfterDelete = false,
+  borderRadius = 14,
 }: {
   children: React.ReactNode;
   onDelete: () => void;
+  resetAfterDelete?: boolean;
+  borderRadius?: number;
 }) {
   const {width} = useWindowDimensions();
   const translateX = useRef(new Animated.Value(0)).current;
@@ -36,12 +40,15 @@ export function SwipeToDeleteCard({
       }).start(({finished}) => {
         if (finished) {
           onDelete();
+          if (resetAfterDelete) {
+            animateBack();
+          }
         } else {
           animateBack();
         }
       });
     },
-    [animateBack, onDelete, translateX, width],
+    [animateBack, onDelete, resetAfterDelete, translateX, width],
   );
 
   const panResponder = useMemo(
@@ -88,7 +95,11 @@ export function SwipeToDeleteCard({
         pointerEvents="none"
         style={[
           styles.deleteBg,
-          {backgroundColor: active ? DELETE_BG_ACTIVE : DELETE_BG, opacity: bgOpacity},
+          {
+            backgroundColor: active ? DELETE_BG_ACTIVE : DELETE_BG,
+            borderRadius,
+            opacity: bgOpacity,
+          },
         ]}>
         <Text style={styles.deleteBgText}>Usuń</Text>
       </Animated.View>
@@ -107,7 +118,6 @@ const styles = StyleSheet.create({
   },
   deleteBg: {
     ...StyleSheet.absoluteFill,
-    borderRadius: 14,
     justifyContent: 'center',
     paddingHorizontal: 18,
   },

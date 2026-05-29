@@ -1,8 +1,10 @@
-import React, {useCallback, useMemo, useState} from 'react';
+import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
   Modal,
+  PanResponder,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -23,6 +25,7 @@ import {
 import {ShoppingList} from './app/ShoppingList';
 import {ProductRepository} from './infrastructure/ProductRepository';
 import {ShoppingListRepository} from './infrastructure/ShoppingListRepository';
+import {SwipeToDeleteCard} from './components/SwipeToDeleteCard';
 import {colors} from './theme/colors';
 
 type ShoppingListViewProps = {
@@ -79,6 +82,7 @@ export default function ShoppingListView({
   const [completeOpen, setCompleteOpen] = useState(false);
   const [expiryDate, setExpiryDate] = useState('');
   const [targetListId, setTargetListId] = useState<string | null>(null);
+  const [pendingDeleteList, setPendingDeleteList] = useState<ShoppingListSummary | null>(null);
 
   const manualLists = useMemo(() => lists.filter(list => list.type === 'manual'), [lists]);
 
@@ -144,6 +148,38 @@ export default function ShoppingListView({
       setBusy(false);
     }
   }, [createName, createType, loadLists, openList]);
+
+  const moveList = useCallback(async (listId: string, direction: -1 | 1) => {
+    const currentIndex = lists.findIndex(list => list.id === listId);
+    const nextIndex = currentIndex + direction;
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= lists.length) {
+      return;
+    }
+    const nextLists = [...lists];
+    const [moved] = nextLists.splice(currentIndex, 1);
+    nextLists.splice(nextIndex, 0, moved);
+    const ordered = nextLists.map((list, index) => ({...list, sortOrder: index}));
+    setLists(ordered);
+    try {
+      await shoppingRepository.updateListOrder(ordered.map(list => list.id));
+    } catch {
+      loadLists().catch(() => {});
+    }
+  }, [lists, loadLists]);
+
+  const deleteList = useCallback(async () => {
+    if (!pendingDeleteList) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await shoppingRepository.deleteList(pendingDeleteList.id);
+      setPendingDeleteList(null);
+      await loadLists();
+    } finally {
+      setBusy(false);
+    }
+  }, [loadLists, pendingDeleteList]);
 
   const openAddItem = useCallback(() => {
     setAddMode('text');
@@ -333,21 +369,12 @@ export default function ShoppingListView({
   }, [expiryDate, items, loadSelectedList, onInventoryChanged, selectedList]);
 
   const renderListRow = ({item}: {item: ShoppingListSummary}) => (
-    <Pressable
-      onPress={() => openList(item)}
-      style={({pressed}) => [styles.card, pressed && styles.cardPressed]}>
-      <View style={styles.rowBetween}>
-        <View style={styles.rowText}>
-          <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
-          <Text style={styles.cardMeta}>{listTypeLabel(item.type)}</Text>
-        </View>
-        {item.type === 'auto' ? (
-          <View style={[styles.badge, item.isLocked && styles.badgeMuted]}>
-            <Text style={styles.badgeText}>{item.isLocked ? 'Lock' : 'Auto'}</Text>
-          </View>
-        ) : null}
-      </View>
-    </Pressable>
+    <SortableListRow
+      item={item}
+      onOpen={openList}
+      onMove={moveList}
+      onRequestDelete={setPendingDeleteList}
+    />
   );
 
   const renderItem = ({item}: {item: AutoShoppingListItemState}) => {
@@ -418,10 +445,11 @@ export default function ShoppingListView({
           onPress={mergeSuggestions}
           style={({pressed}) => [
             styles.primaryButton,
+            styles.mergeButton,
             (!targetListId || suggestions.length === 0 || busy) && styles.disabled,
             pressed && styles.pressed,
           ]}>
-          <Text style={styles.primaryButtonText}>Dodaj wszystko</Text>
+          <Text style={styles.primaryButtonText}>Dodaj do listy</Text>
         </Pressable>
       </View>
       <FlatList
@@ -526,7 +554,6 @@ export default function ShoppingListView({
         data={lists}
         keyExtractor={item => item.id}
         renderItem={renderListRow}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadLists} tintColor={colors.success} />}
         contentContainerStyle={[styles.listContent, lists.length === 0 && styles.emptyContent]}
         ListEmptyComponent={<EmptyState title="Brak list" />}
       />
@@ -581,7 +608,122 @@ export default function ShoppingListView({
         onClose={() => setCompleteOpen(false)}
         onSubmit={completePurchase}
       />
+      <DeleteListModal
+        list={pendingDeleteList}
+        busy={busy}
+        onClose={() => setPendingDeleteList(null)}
+        onSubmit={deleteList}
+      />
     </View>
+  );
+}
+
+function SortableListRow({
+  item,
+  onOpen,
+  onMove,
+  onRequestDelete,
+}: {
+  item: ShoppingListSummary;
+  onOpen: (item: ShoppingListSummary) => void;
+  onMove: (id: string, direction: -1 | 1) => void;
+  onRequestDelete: (item: ShoppingListSummary) => void;
+}) {
+  const translateY = useRef(new Animated.Value(0)).current;
+  const dragActive = useRef(false);
+  const dragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const movedAt = useRef(0);
+  const [dragging, setDragging] = useState(false);
+
+  const resetPosition = useCallback(() => {
+    if (dragTimer.current) {
+      clearTimeout(dragTimer.current);
+      dragTimer.current = null;
+    }
+    Animated.spring(translateY, {
+      toValue: 0,
+      useNativeDriver: true,
+      speed: 20,
+      bounciness: 4,
+    }).start();
+    dragActive.current = false;
+    setDragging(false);
+  }, [translateY]);
+
+  const dragResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => {
+          movedAt.current = 0;
+          dragTimer.current = setTimeout(() => {
+            dragActive.current = true;
+            setDragging(true);
+          }, 180);
+        },
+        onPanResponderMove: (_evt, gesture) => {
+          if (!dragActive.current) {
+            return;
+          }
+          translateY.setValue(gesture.dy);
+          const now = Date.now();
+          if (now - movedAt.current < 220) {
+            return;
+          }
+          if (gesture.dy > 46) {
+            movedAt.current = now;
+            translateY.setValue(0);
+            onMove(item.id, 1);
+          } else if (gesture.dy < -46) {
+            movedAt.current = now;
+            translateY.setValue(0);
+            onMove(item.id, -1);
+          }
+        },
+        onPanResponderRelease: resetPosition,
+        onPanResponderTerminate: resetPosition,
+      }),
+    [item.id, onMove, resetPosition, translateY],
+  );
+
+  return (
+    <SwipeToDeleteCard resetAfterDelete borderRadius={8} onDelete={() => onRequestDelete(item)}>
+      <Animated.View
+        style={[
+          {
+            transform: [{translateY}],
+          },
+        ]}>
+        <Pressable
+          onPress={() => {
+            if (!dragActive.current) {
+              onOpen(item);
+            }
+          }}
+          style={({pressed}) => [
+            styles.card,
+            styles.listCard,
+            dragging && styles.cardDragging,
+            pressed && styles.cardPressed,
+          ]}>
+          <View style={styles.rowBetween}>
+            <View style={styles.dragHandle} {...dragResponder.panHandlers}>
+              <Text style={styles.dragHandleText}>≡</Text>
+            </View>
+            <View style={styles.rowText}>
+              <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
+              <Text style={styles.cardMeta}>{listTypeLabel(item.type)}</Text>
+            </View>
+            {item.type === 'auto' ? (
+              <View style={[styles.badge, item.isLocked && styles.badgeMuted]}>
+                <Text style={styles.badgeText}>{item.isLocked ? 'Lock' : 'Auto'}</Text>
+              </View>
+            ) : null}
+          </View>
+        </Pressable>
+      </Animated.View>
+    </SwipeToDeleteCard>
   );
 }
 
@@ -818,6 +960,42 @@ function CompleteModal({
   );
 }
 
+function DeleteListModal({
+  list,
+  busy,
+  onClose,
+  onSubmit,
+}: {
+  list: ShoppingListSummary | null;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <Modal visible={list != null} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalSheet}>
+          <Text style={styles.modalTitle}>Usunąć listę?</Text>
+          <Text style={styles.confirmText} numberOfLines={3}>
+            {list?.name}
+          </Text>
+          <View style={styles.modalActions}>
+            <Pressable onPress={onClose} style={({pressed}) => [styles.secondaryButton, pressed && styles.pressed]}>
+              <Text style={styles.secondaryButtonText}>Anuluj</Text>
+            </Pressable>
+            <Pressable
+              disabled={busy}
+              onPress={onSubmit}
+              style={({pressed}) => [styles.dangerButton, busy && styles.disabled, pressed && styles.pressed]}>
+              <Text style={styles.dangerButtonText}>Usuń</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function ModalActions({
   busy,
   submitLabel,
@@ -933,8 +1111,26 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 10,
   },
+  listCard: {
+    minHeight: 72,
+    marginBottom: 0,
+  },
   cardPressed: {
     opacity: 0.86,
+  },
+  cardDragging: {
+    borderColor: colors.success,
+  },
+  dragHandle: {
+    width: 28,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dragHandleText: {
+    color: colors.textMuted,
+    fontSize: 23,
+    fontWeight: '900',
   },
   rowBetween: {
     flexDirection: 'row',
@@ -1088,6 +1284,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
   },
+  mergeButton: {
+    flex: 0,
+    minHeight: 46,
+    alignSelf: 'stretch',
+  },
   secondaryButton: {
     flex: 1,
     borderRadius: 8,
@@ -1099,6 +1300,20 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  dangerButton: {
+    flex: 1,
+    borderRadius: 8,
+    backgroundColor: '#7d252d',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dangerButtonText: {
+    color: '#ffd7d7',
     fontSize: 14,
     fontWeight: '900',
   },
@@ -1174,6 +1389,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '900',
     marginBottom: 12,
+  },
+  confirmText: {
+    color: colors.textSecondary,
+    fontSize: 15,
+    lineHeight: 21,
+    marginBottom: 14,
   },
   input: {
     backgroundColor: colors.surfaceMid,

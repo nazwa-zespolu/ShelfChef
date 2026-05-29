@@ -161,7 +161,8 @@ export class ProductRepository {
     const query = `
       SELECT 
         i.id, i.expiry_date, i.opened_at, i.is_opened, i.custom_name,
-        d.ean, d.name, d.brand, d.image_url, d.category
+        COALESCE(d.ean, i.product_ean) AS ean,
+        d.name, d.brand, d.image_url, d.category
       FROM inventory i
       LEFT JOIN product_definitions d ON i.product_ean = d.ean
       ORDER BY i.expiry_date ASC

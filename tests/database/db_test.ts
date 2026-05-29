@@ -32,6 +32,7 @@ type ShoppingListRow = {
   type: 'manual' | 'auto';
   is_locked: number;
   is_archived: number;
+  sort_order: number;
   locked_at: string | null;
   created_at: string;
   updated_at: string;
@@ -78,6 +79,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     normalized.startsWith('CREATE TABLE') ||
     normalized.startsWith('CREATE UNIQUE INDEX') ||
     normalized.startsWith('CREATE INDEX') ||
+    normalized.startsWith('ALTER TABLE') ||
     normalized === 'BEGIN TRANSACTION' ||
     normalized === 'COMMIT' ||
     normalized === 'ROLLBACK'
@@ -115,13 +117,34 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
   }
 
   if (normalized.startsWith('DELETE FROM SHOPPING_LIST_ITEMS')) {
+    if (normalized.includes('WHERE LIST_ID = ?')) {
+      const [listId] = params;
+      for (const [id, row] of shoppingListItems.entries()) {
+        if (row.list_id === listId) {
+          shoppingListItems.delete(id);
+        }
+      }
+      return toRows([]);
+    }
     shoppingListItems.clear();
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('DELETE FROM SHOPPING_LISTS WHERE ID = ?')) {
+    shoppingLists.delete(params[0]);
     return toRows([]);
   }
 
   if (normalized.startsWith('SELECT * FROM PRODUCT_CATALOG')) {
     if (normalized.includes('WHERE PRODUCT_EAN = ?')) {
       const row = Array.from(productCatalog.values()).find(item => item.product_ean === params[0]);
+      return toRows(row ? [row] : []);
+    }
+    if (normalized.includes('WHERE KIND = ? AND NORMALIZED_NAME = ?')) {
+      const [kind, normalizedName] = params;
+      const row = Array.from(productCatalog.values()).find(
+        item => item.kind === kind && item.normalized_name === normalizedName,
+      );
       return toRows(row ? [row] : []);
     }
     return toRows(Array.from(productCatalog.values()));
@@ -136,7 +159,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     return toRows(
       Array.from(shoppingLists.values())
         .filter(row => includeArchived || row.is_archived === 0)
-        .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+        .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at)),
     );
   }
 
@@ -222,6 +245,26 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
   }
 
   if (normalized.startsWith('INSERT OR IGNORE INTO PRODUCT_CATALOG')) {
+    if (normalized.includes("'GENERIC'")) {
+      const [id, name, normalizedName, createdAt, updatedAt] = params;
+      const exists = Array.from(productCatalog.values()).some(
+        item => item.kind === 'generic' && item.normalized_name === normalizedName,
+      );
+      if (!exists) {
+        productCatalog.set(id, {
+          id,
+          name,
+          normalized_name: normalizedName,
+          kind: 'generic',
+          product_ean: null,
+          parent_catalog_product_id: null,
+          created_at: createdAt,
+          updated_at: updatedAt,
+        });
+      }
+      return toRows([]);
+    }
+
     for (const row of productDefinitions.values()) {
       const id = `catalog-specific-${row.ean}`;
       const eanAlreadyExists = Array.from(productCatalog.values()).some(
@@ -243,18 +286,38 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     return toRows([]);
   }
 
+  if (normalized.startsWith('SELECT COALESCE(MAX(SORT_ORDER), -1) AS MAX_SORT_ORDER')) {
+    const maxSortOrder = Array.from(shoppingLists.values()).reduce(
+      (max, row) => Math.max(max, row.sort_order),
+      -1,
+    );
+    return toRows([{max_sort_order: maxSortOrder}]);
+  }
+
   if (normalized.startsWith('INSERT INTO SHOPPING_LISTS')) {
-    const [id, name, type, createdAt, updatedAt] = params;
+    const [id, name, type, sortOrder, createdAt, updatedAt] = params;
     shoppingLists.set(id, {
       id,
       name,
       type,
       is_locked: 0,
       is_archived: 0,
+      sort_order: sortOrder,
       locked_at: null,
       created_at: createdAt,
       updated_at: updatedAt,
     });
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('UPDATE SHOPPING_LISTS SET SORT_ORDER = ?')) {
+    const [sortOrder, updatedAt, id] = params;
+    const row = shoppingLists.get(id);
+    if (row) {
+      row.sort_order = sortOrder;
+      row.updated_at = updatedAt;
+      shoppingLists.set(id, row);
+    }
     return toRows([]);
   }
 
@@ -291,6 +354,20 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     const row = shoppingListItems.get(id);
     if (row) {
       row.quantity = quantity;
+      row.updated_at = updatedAt;
+      shoppingListItems.set(id, row);
+    }
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('UPDATE SHOPPING_LIST_ITEMS SET STATUS = ?')) {
+    const [status, , storedAt, updatedAt, id] = params;
+    const row = shoppingListItems.get(id);
+    if (row) {
+      row.status = status;
+      if (status === 'stored') {
+        row.stored_at = row.stored_at ?? storedAt;
+      }
       row.updated_at = updatedAt;
       shoppingListItems.set(id, row);
     }
@@ -350,6 +427,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
         type: 'auto',
         is_locked: 0,
         is_archived: 0,
+        sort_order: 0,
         locked_at: null,
         created_at: '2026-05-27T00:00:00.000Z',
         updated_at: '2026-05-27T00:00:00.000Z',
@@ -376,9 +454,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
   }
 
   if (
-    normalized.startsWith(
-      'SELECT I.ID, I.EXPIRY_DATE, I.OPENED_AT, I.IS_OPENED, I.CUSTOM_NAME, D.EAN, D.NAME, D.BRAND, D.IMAGE_URL, D.CATEGORY FROM INVENTORY I LEFT JOIN PRODUCT_DEFINITIONS D ON I.PRODUCT_EAN = D.EAN ORDER BY I.EXPIRY_DATE ASC',
-    )
+    normalized.startsWith('SELECT I.ID, I.EXPIRY_DATE, I.OPENED_AT, I.IS_OPENED, I.CUSTOM_NAME')
   ) {
     const rows = Array.from(inventory.values())
       .map(row => {
@@ -389,7 +465,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
           opened_at: row.opened_at,
           is_opened: row.is_opened,
           custom_name: row.custom_name,
-          ean: def?.ean ?? null,
+          ean: def?.ean ?? row.product_ean,
           name: def?.name ?? null,
           brand: def?.brand ?? null,
           image_url: def?.image_url ?? null,
@@ -576,7 +652,7 @@ describe('ProductRepository + database integration', () => {
     const version = db.execute('PRAGMA user_version').rows!.item(0);
     const lists = db.execute('SELECT * FROM shopping_lists').rows!;
 
-    expect(version.user_version).toBe(2);
+    expect(version.user_version).toBe(3);
     expect(lists.length).toBe(1);
     expect(lists.item(0)).toMatchObject({
       id: 'default-auto-minimum',
@@ -633,6 +709,26 @@ describe('ProductRepository + database integration', () => {
       source: 'manual',
     });
     expect(items).toHaveLength(1);
+  });
+
+  it('zapisuje kolejność list i usuwa listę razem z jej pozycjami', async () => {
+    const first = await shoppingListRepository.createList('Pierwsza', 'manual');
+    const second = await shoppingListRepository.createList('Druga', 'manual');
+    await shoppingListRepository.addItem(second.id, {
+      label: 'Mleko',
+      quantity: 1,
+    });
+
+    await shoppingListRepository.updateListOrder([second.id, first.id, 'default-auto-minimum']);
+    let lists = await shoppingListRepository.getLists();
+    expect(lists.map(list => list.id).slice(0, 2)).toEqual([second.id, first.id]);
+
+    await shoppingListRepository.deleteList(second.id);
+    lists = await shoppingListRepository.getLists();
+
+    expect(lists.map(list => list.id)).not.toContain(second.id);
+    expect((await shoppingListRepository.getLists(true)).map(list => list.id)).not.toContain(second.id);
+    expect(await shoppingListRepository.getItems(second.id)).toHaveLength(0);
   });
 
   it('pozwala dodać tekstową pozycję do listy auto jako ręczny item', async () => {
@@ -806,5 +902,34 @@ describe('ProductRepository + database integration', () => {
     expect(inventoryItems).toHaveLength(2);
     expect(inventoryItems[0].name).toBe('Mleko');
     expect(inventoryItems[1].name).toBe('Mleko');
+  });
+
+  it('po finalizacji produktów z sugestii przestaje pokazywać je w Do uzupełnienia', async () => {
+    const auto = await shoppingListRepository.createList('Minimum', 'auto');
+    const manual = await shoppingListRepository.createList('Zakupy', 'manual');
+    const genericMilk = await shoppingListRepository.createGenericCatalogProduct('Mleko');
+    const shoppingList = new ShoppingList(shoppingListRepository, repository);
+
+    await shoppingListRepository.addItem(auto.id, {
+      catalogProductId: genericMilk.id,
+      label: genericMilk.name,
+      quantity: 2,
+    });
+
+    expect(await shoppingList.generateReplenishmentSuggestions()).toMatchObject([
+      {
+        catalogProductId: genericMilk.id,
+        missingQuantity: 2,
+        currentQuantity: 0,
+      },
+    ]);
+
+    await shoppingList.addAllSuggestionsToList(manual.id);
+    const [suggestedItem] = await shoppingListRepository.getItems(manual.id);
+    await shoppingList.updateItemStatus(suggestedItem.id, 'purchased');
+    await shoppingList.completePurchase(manual.id, {[suggestedItem.id]: null});
+
+    expect(await repository.getFullInventory()).toHaveLength(2);
+    expect(await shoppingList.generateReplenishmentSuggestions()).toEqual([]);
   });
 });
