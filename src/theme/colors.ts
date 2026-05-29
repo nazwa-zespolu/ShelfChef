@@ -13,6 +13,7 @@ Naming guidelines:
 - `accent` / `accentSoft` are for brand highlights and selected states.
 - `success` is for positive actions; `danger` only for destructive actions.
 - `tab*` is reserved for bottom navigation only.
+- `modalBackdrop` is for dimming the app behind modal sheets.
 */
 const lightTheme = {
   // App/page background.
@@ -52,6 +53,8 @@ const lightTheme = {
 
   // Shadows and overlays that need black base.
   shadow: '#000000',
+  // Modal backdrop overlay.
+  modalBackdrop: '#000000B8',
 } as const;
 
 const darkTheme = {
@@ -72,6 +75,7 @@ const darkTheme = {
   tabInactive: '#9aa6ba',
   tabBackground: '#12171f',
   shadow: '#000000',
+  modalBackdrop: '#000000B8',
 } as const;
 
 export const themes = {

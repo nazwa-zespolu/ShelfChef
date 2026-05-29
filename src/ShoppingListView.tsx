@@ -38,6 +38,23 @@ type ShoppingListViewProps = {
 
 type ScreenMode = 'lists' | 'suggestions' | 'details';
 type AddMode = 'text' | 'catalog' | 'generic';
+type ListFilter = 'all' | 'manual' | 'auto';
+
+type ShoppingListCardStats = {
+  itemCount: number;
+  purchasedCount: number;
+};
+
+const LIST_FILTERS: {key: ListFilter; label: string}[] = [
+  {key: 'all', label: 'Wszystkie'},
+  {key: 'manual', label: 'Manualne'},
+  {key: 'auto', label: 'Auto'},
+];
+
+const EMPTY_LIST_STATS: ShoppingListCardStats = {
+  itemCount: 0,
+  purchasedCount: 0,
+};
 
 const shoppingRepository = new ShoppingListRepository();
 const productRepository = new ProductRepository();
@@ -58,6 +75,31 @@ function statusLabel(status: ShoppingItemStatus) {
 
 function listTypeLabel(type: ShoppingListType) {
   return type === 'auto' ? 'Lista uzupełniania' : 'Lista zakupów';
+}
+
+function listTypeBadge(type: ShoppingListType) {
+  return type === 'auto' ? 'Auto' : 'Manualna';
+}
+
+function pluralizeItems(count: number) {
+  if (count === 1) {
+    return '1 pozycja';
+  }
+  if (count > 1 && count < 5) {
+    return `${count} pozycje`;
+  }
+  return `${count} pozycji`;
+}
+
+function purchasedLabel(count: number) {
+  if (count === 1) {
+    return '1 kupiona';
+  }
+  return `${count} kupionych`;
+}
+
+function listIconSymbol(list: ShoppingListSummary) {
+  return list.type === 'auto' ? '↻' : '▤';
 }
 
 function parseQuantityInput(value: string): number | null {
@@ -104,8 +146,23 @@ export default function ShoppingListView({
   const [selectedCatalog, setSelectedCatalog] = useState<CatalogProduct | null>(null);
   const [targetListId, setTargetListId] = useState<string | null>(null);
   const [pendingDeleteList, setPendingDeleteList] = useState<ShoppingListSummary | null>(null);
+  const [listSearch, setListSearch] = useState('');
+  const [listFilter, setListFilter] = useState<ListFilter>('all');
+  const [listStats, setListStats] = useState<Record<string, ShoppingListCardStats>>({});
 
   const manualLists = useMemo(() => lists.filter(list => list.type === 'manual'), [lists]);
+  const filteredLists = useMemo(() => {
+    const query = listSearch.trim().toLowerCase();
+    return lists.filter(list => {
+      if (listFilter !== 'all' && list.type !== listFilter) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+      return list.name.toLowerCase().includes(query);
+    });
+  }, [listFilter, listSearch, lists]);
 
   const loadLists = useCallback(async () => {
     setLoading(true);
@@ -114,8 +171,21 @@ export default function ShoppingListView({
         shoppingRepository.getLists(),
         shoppingList.generateReplenishmentSuggestions(),
       ]);
+      const statsEntries = await Promise.all(
+        nextLists.map(async list => {
+          const listItems = await shoppingRepository.getItems(list.id);
+          return [
+            list.id,
+            {
+              itemCount: listItems.length,
+              purchasedCount: listItems.filter(item => item.status === 'purchased').length,
+            },
+          ] as const;
+        }),
+      );
       setLists(nextLists);
       setSuggestions(nextSuggestions);
+      setListStats(Object.fromEntries(statsEntries));
     } finally {
       setLoading(false);
     }
@@ -446,6 +516,7 @@ export default function ShoppingListView({
   const renderListRow = ({item}: {item: ShoppingListSummary}) => (
     <SortableListRow
       item={item}
+      stats={listStats[item.id] ?? EMPTY_LIST_STATS}
       onOpen={openList}
       onMove={moveList}
       onRequestDelete={setPendingDeleteList}
@@ -614,38 +685,83 @@ export default function ShoppingListView({
     );
   };
 
+  const renderReplenishmentTile = () => (
+    <Pressable
+      onPress={openSuggestions}
+      style={({pressed}) => [styles.replenishmentTile, pressed && styles.cardPressed]}>
+      <View style={styles.replenishmentIcon}>
+        <Text style={styles.replenishmentIconText}>↻</Text>
+      </View>
+      <View style={styles.replenishmentText}>
+        <View style={styles.titleBadgeRow}>
+          <Text style={styles.suggestionTitle}>Do uzupełnienia</Text>
+          <View style={styles.suggestionBadge}>
+            <Text style={styles.suggestionBadgeText}>Sugestie</Text>
+          </View>
+        </View>
+        <Text style={styles.suggestionMeta}>
+          {suggestions.length === 1 ? '1 brak' : `${suggestions.length} braków`} z list auto
+        </Text>
+      </View>
+      <Text style={styles.suggestionArrow}>›</Text>
+    </Pressable>
+  );
+
   const renderLists = () => (
     <View style={styles.content}>
-      <View style={styles.topBar}>
-        <Pressable onPress={goBackOneLevel} style={({pressed}) => [styles.back, pressed && styles.pressed]} hitSlop={10}>
-          <Text style={styles.backText}>← Wróć</Text>
-        </Pressable>
-        <Pressable onPress={() => setCreateOpen(true)} style={({pressed}) => [styles.headerButton, pressed && styles.pressed]}>
-          <Text style={styles.headerButtonText}>Nowa</Text>
-        </Pressable>
-      </View>
-      <Text style={styles.screenTitle}>Listy zakupów</Text>
-      <Pressable
-        onPress={openSuggestions}
-        style={({pressed}) => [styles.suggestionTile, pressed && styles.cardPressed]}>
-        <View>
-          <Text style={styles.suggestionTitle}>Do uzupełnienia</Text>
-          <Text style={styles.suggestionMeta}>{suggestions.length} sugestii</Text>
+      <View style={styles.listsHero}>
+        <Text style={styles.screenTitle}>Listy zakupów</Text>
+        <Text style={styles.screenSubtitle}>Zarządzaj wieloma listami w jednym miejscu</Text>
+        <View style={styles.searchCreateRow}>
+          <View style={styles.searchBox}>
+            <Text style={styles.searchIcon}>⌕</Text>
+            <TextInput
+              value={listSearch}
+              onChangeText={setListSearch}
+              placeholder="Szukaj listy..."
+              placeholderTextColor={colors.textMuted}
+              style={styles.searchInput}
+            />
+          </View>
+          <Pressable
+            onPress={() => setCreateOpen(true)}
+            style={({pressed}) => [styles.newListButton, pressed && styles.pressed]}>
+            <Text style={styles.newListButtonText}>Nowa</Text>
+          </Pressable>
         </View>
-        <Text style={styles.suggestionArrow}>›</Text>
-      </Pressable>
+        <View style={styles.filterBar}>
+          {LIST_FILTERS.map(filter => {
+            const active = filter.key === listFilter;
+            return (
+              <Pressable
+                key={filter.key}
+                onPress={() => setListFilter(filter.key)}
+                style={({pressed}) => [
+                  styles.filterSegment,
+                  active && styles.filterSegmentActive,
+                  pressed && styles.pressed,
+                ]}>
+                <Text style={[styles.filterSegmentText, active && styles.filterSegmentTextActive]}>
+                  {filter.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
       <FlatList
-        data={lists}
+        data={filteredLists}
         keyExtractor={item => item.id}
         renderItem={renderListRow}
-        contentContainerStyle={[styles.listContent, lists.length === 0 && styles.emptyContent]}
-        ListEmptyComponent={<EmptyState title="Brak list" />}
+        ListHeaderComponent={renderReplenishmentTile}
+        contentContainerStyle={styles.listContent}
+        ListEmptyComponent={<EmptyState title={lists.length === 0 ? 'Brak list' : 'Brak pasujących list'} />}
       />
     </View>
   );
 
   return (
-    <View style={[styles.root, {paddingTop: insets.top + 8}]}>
+    <View style={[styles.root, {paddingTop: insets.top + 2}]}>
       {mode === 'lists' ? renderLists() : null}
       {mode === 'suggestions' ? renderSuggestions() : null}
       {mode === 'details' ? renderDetails() : null}
@@ -696,11 +812,13 @@ export default function ShoppingListView({
 
 function SortableListRow({
   item,
+  stats,
   onOpen,
   onMove,
   onRequestDelete,
 }: {
   item: ShoppingListSummary;
+  stats: ShoppingListCardStats;
   onOpen: (item: ShoppingListSummary) => void;
   onMove: (id: string, direction: -1 | 1) => void;
   onRequestDelete: (item: ShoppingListSummary) => void;
@@ -788,18 +906,30 @@ function SortableListRow({
             pressed && styles.cardPressed,
           ]}>
           <View style={styles.rowBetween}>
-            <View style={styles.dragHandle} {...dragResponder.panHandlers}>
-              <Text style={styles.dragHandleText}>≡</Text>
+            <View style={styles.listIconBubble} {...dragResponder.panHandlers}>
+              <Text style={styles.listIconText}>{listIconSymbol(item)}</Text>
             </View>
             <View style={styles.rowText}>
               <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
-              <Text style={styles.cardMeta}>{listTypeLabel(item.type)}</Text>
+              <Text style={styles.cardMeta}>
+                {pluralizeItems(stats.itemCount)} · {purchasedLabel(stats.purchasedCount)}
+              </Text>
             </View>
-            {item.type === 'auto' ? (
-              <View style={[styles.badge, item.isLocked && styles.badgeMuted]}>
-                <Text style={styles.badgeText}>{item.isLocked ? 'Lock' : 'Auto'}</Text>
+            <View style={styles.listTrailing}>
+              {item.type === 'auto' && item.isLocked ? (
+                <View style={[styles.badge, styles.badgeMuted]}>
+                  <Text style={[styles.badgeText, styles.badgeMutedText]}>Lock</Text>
+                </View>
+              ) : null}
+              <View style={styles.listTrailingRow}>
+                <View style={[styles.listTypePill, item.type === 'auto' && styles.listTypePillAuto]}>
+                  <Text style={[styles.listTypePillText, item.type === 'auto' && styles.listTypePillTextAuto]}>
+                    {listTypeBadge(item.type)}
+                  </Text>
+                </View>
+                <Text style={styles.suggestionArrow}>›</Text>
               </View>
-            ) : null}
+            </View>
           </View>
         </Pressable>
       </Animated.View>
@@ -1115,45 +1245,149 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginLeft: 12,
   },
-  headerButton: {
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  headerButtonText: {
-    color: colors.textPrimary,
-    fontWeight: '800',
+  listsHero: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 14,
   },
   screenTitle: {
     color: colors.textPrimary,
-    fontSize: 22,
-    fontWeight: '800',
-    paddingHorizontal: 16,
-    marginTop: 8,
+    fontSize: 30,
+    fontWeight: '900',
+    marginBottom: 4,
+  },
+  screenSubtitle: {
+    color: colors.textSecondary,
+    fontSize: 15,
+    marginBottom: 18,
+  },
+  searchCreateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     marginBottom: 12,
   },
-  suggestionTile: {
-    marginHorizontal: 16,
+  searchBox: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+  },
+  searchIcon: {
+    color: colors.textMuted,
+    fontSize: 25,
+    lineHeight: 28,
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontSize: 16,
+    paddingVertical: 0,
+  },
+  newListButton: {
+    minHeight: 52,
+    minWidth: 92,
+    borderRadius: 8,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  newListButtonText: {
+    color: colors.successText,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  filterBar: {
+    minHeight: 48,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSubtle,
+    flexDirection: 'row',
+    padding: 5,
+    gap: 4,
+  },
+  filterSegment: {
+    flex: 1,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterSegmentActive: {
+    backgroundColor: colors.success,
+  },
+  filterSegmentText: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  filterSegmentTextActive: {
+    color: colors.successText,
+  },
+  replenishmentTile: {
     marginBottom: 12,
     borderRadius: 8,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.success,
-    padding: 14,
+    borderColor: colors.border,
+    padding: 16,
+    minHeight: 126,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 14,
+  },
+  replenishmentIcon: {
+    width: 86,
+    height: 86,
+    borderRadius: 8,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  replenishmentIconText: {
+    color: colors.accent,
+    fontSize: 42,
+    fontWeight: '700',
+  },
+  replenishmentText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  titleBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
   },
   suggestionTitle: {
     color: colors.textPrimary,
-    fontSize: 17,
-    fontWeight: '800',
+    fontSize: 23,
+    fontWeight: '900',
   },
   suggestionMeta: {
     color: colors.textSecondary,
-    marginTop: 3,
-    fontSize: 13,
+    marginTop: 8,
+    fontSize: 15,
+  },
+  suggestionBadge: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSubtle,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  suggestionBadgeText: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '900',
   },
   suggestionArrow: {
     color: colors.accent,
@@ -1169,11 +1403,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     marginBottom: 10,
   },
   listCard: {
-    minHeight: 72,
+    minHeight: 74,
     marginBottom: 0,
   },
   cardPressed: {
@@ -1181,17 +1416,6 @@ const styles = StyleSheet.create({
   },
   cardDragging: {
     borderColor: colors.success,
-  },
-  dragHandle: {
-    width: 28,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dragHandleText: {
-    color: colors.textMuted,
-    fontSize: 23,
-    fontWeight: '900',
   },
   rowBetween: {
     flexDirection: 'row',
@@ -1203,15 +1427,57 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  cardTitle: {
-    color: colors.textPrimary,
-    fontSize: 16,
+  listIconBubble: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  listIconText: {
+    color: colors.accent,
+    fontSize: 25,
     fontWeight: '800',
   },
+  cardTitle: {
+    color: colors.textPrimary,
+    fontSize: 17,
+    fontWeight: '900',
+  },
   cardMeta: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     marginTop: 3,
-    fontSize: 12,
+    fontSize: 13,
+  },
+  listTypePill: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSubtle,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  listTypePillAuto: {
+    backgroundColor: colors.surfaceSubtle,
+  },
+  listTypePillText: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  listTypePillTextAuto: {
+    color: colors.accent,
+  },
+  listTrailing: {
+    minHeight: 50,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  listTrailingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   badge: {
     borderRadius: 8,
@@ -1221,11 +1487,16 @@ const styles = StyleSheet.create({
   },
   badgeMuted: {
     backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   badgeText: {
     color: colors.successText,
     fontWeight: '900',
     fontSize: 11,
+  },
+  badgeMutedText: {
+    color: colors.textSecondary,
   },
   detailToolbar: {
     paddingHorizontal: 16,
@@ -1436,7 +1707,7 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.72)',
+    backgroundColor: colors.modalBackdrop,
     justifyContent: 'flex-end',
   },
   modalSheet: {
