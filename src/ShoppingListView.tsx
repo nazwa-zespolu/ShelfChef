@@ -1076,7 +1076,7 @@ function ModalActions({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.black,
+    backgroundColor: colors.background,
   },
   content: {
     flex: 1,
@@ -1093,7 +1093,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   backText: {
-    color: colors.successAccent,
+    color: colors.accent,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -1106,7 +1106,7 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   headerButton: {
-    backgroundColor: colors.surfaceSoft,
+    backgroundColor: colors.surfaceSubtle,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -1127,7 +1127,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 12,
     borderRadius: 8,
-    backgroundColor: colors.surfaceMid,
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.success,
     padding: 14,
@@ -1146,7 +1146,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   suggestionArrow: {
-    color: colors.successAccent,
+    color: colors.accent,
     fontSize: 30,
     fontWeight: '400',
   },
@@ -1156,9 +1156,9 @@ const styles = StyleSheet.create({
   },
   card: {
     borderRadius: 8,
-    backgroundColor: colors.surfaceMid,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
     padding: 14,
     marginBottom: 10,
   },
@@ -1210,7 +1210,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   badgeMuted: {
-    backgroundColor: colors.surfaceSoft,
+    backgroundColor: colors.surfaceSubtle,
   },
   badgeText: {
     color: colors.successText,
@@ -1228,7 +1228,7 @@ const styles = StyleSheet.create({
   listBadge: {
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
@@ -1238,9 +1238,9 @@ const styles = StyleSheet.create({
   },
   itemCard: {
     borderRadius: 8,
-    backgroundColor: colors.surfaceMid,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
     padding: 12,
     marginBottom: 10,
   },
@@ -1268,14 +1268,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
   },
   stepButton: {
     width: 34,
     height: 34,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.surfaceSoft,
+    backgroundColor: colors.surfaceSubtle,
   },
   stepText: {
     color: colors.textPrimary,
@@ -1298,10 +1298,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 7,
-    backgroundColor: colors.surfaceSoft,
+    backgroundColor: colors.surfaceSubtle,
   },
   actionButtonDanger: {
-    backgroundColor: '#3a2428',
+    backgroundColor: colors.danger,
   },
   actionButtonText: {
     color: colors.textPrimary,
@@ -1309,7 +1309,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   actionButtonTextDanger: {
-    color: '#ff9c9c',
+    color: colors.successText,
   },
   bottomBar: {
     position: 'absolute',
@@ -1318,9 +1318,9 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingHorizontal: 16,
     paddingTop: 10,
-    backgroundColor: colors.black,
+    backgroundColor: colors.background,
     borderTopWidth: 1,
-    borderTopColor: colors.borderDark,
+    borderTopColor: colors.border,
     flexDirection: 'row',
     gap: 10,
   },
@@ -1346,7 +1346,7 @@ const styles = StyleSheet.create({
   secondaryButton: {
     flex: 1,
     borderRadius: 8,
-    backgroundColor: colors.surfaceSoft,
+    backgroundColor: colors.surfaceSubtle,
     paddingVertical: 12,
     paddingHorizontal: 12,
     alignItems: 'center',
@@ -1360,14 +1360,14 @@ const styles = StyleSheet.create({
   dangerButton: {
     flex: 1,
     borderRadius: 8,
-    backgroundColor: '#7d252d',
+    backgroundColor: colors.danger,
     paddingVertical: 12,
     paddingHorizontal: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   dangerButtonText: {
-    color: '#ffd7d7',
+    color: colors.successText,
     fontSize: 14,
     fontWeight: '900',
   },
@@ -1407,8 +1407,8 @@ const styles = StyleSheet.create({
   targetChip: {
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.borderDark,
-    backgroundColor: colors.surfaceMid,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
@@ -1430,12 +1430,12 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalSheet: {
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 8,
     borderTopRightRadius: 8,
     padding: 16,
     borderTopWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
     maxHeight: '88%',
   },
   modalTitle: {
@@ -1451,10 +1451,10 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   input: {
-    backgroundColor: colors.surfaceMid,
+    backgroundColor: colors.surface,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
     color: colors.textPrimary,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -1462,10 +1462,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   inputError: {
-    borderColor: '#d64545',
+    borderColor: colors.danger,
   },
   fieldError: {
-    color: '#ff9c9c',
+    color: colors.danger,
     fontSize: 12,
     fontWeight: '700',
     marginTop: -4,
@@ -1479,9 +1479,9 @@ const styles = StyleSheet.create({
   segment: {
     flex: 1,
     borderRadius: 8,
-    backgroundColor: colors.surfaceMid,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
     paddingVertical: 9,
     alignItems: 'center',
   },
@@ -1504,10 +1504,10 @@ const styles = StyleSheet.create({
   catalogRow: {
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
     padding: 10,
     marginBottom: 8,
-    backgroundColor: colors.surfaceMid,
+    backgroundColor: colors.surface,
   },
   catalogRowActive: {
     borderColor: colors.success,

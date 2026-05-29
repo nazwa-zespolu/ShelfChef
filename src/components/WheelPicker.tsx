@@ -18,6 +18,8 @@ type WheelPickerProps = {
   values: number[];
   selectedValue: number;
   onValueChange: (value: number) => void;
+  onInteractionStart?: () => void;
+  onInteractionEnd?: () => void;
 };
 
 export default function WheelPicker({
@@ -25,6 +27,8 @@ export default function WheelPicker({
   values,
   selectedValue,
   onValueChange,
+  onInteractionStart,
+  onInteractionEnd,
 }: WheelPickerProps) {
   const scrollRef = useRef<ScrollView>(null);
 
@@ -44,6 +48,7 @@ export default function WheelPicker({
     if (value !== selectedValue) {
       onValueChange(value);
     }
+    onInteractionEnd?.();
   };
 
   return (
@@ -56,6 +61,8 @@ export default function WheelPicker({
           showsVerticalScrollIndicator={false}
           snapToInterval={WHEEL_ITEM_HEIGHT}
           decelerationRate="fast"
+          nestedScrollEnabled
+          onScrollBeginDrag={() => onInteractionStart?.()}
           onMomentumScrollEnd={handleScrollEnd}
           onScrollEndDrag={handleScrollEnd}
           contentContainerStyle={styles.wheelContent}>
@@ -88,8 +95,8 @@ const styles = StyleSheet.create({
     height: WHEEL_HEIGHT,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: colors.borderDark,
-    backgroundColor: colors.surfaceMid,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
     overflow: 'hidden',
     position: 'relative',
   },
@@ -103,7 +110,8 @@ const styles = StyleSheet.create({
     top: WHEEL_ITEM_HEIGHT,
     height: WHEEL_ITEM_HEIGHT,
     borderRadius: 8,
-    backgroundColor: 'rgba(71, 209, 107, 0.30)',
+    backgroundColor: colors.success,
+    opacity: 0.3,
     zIndex: 1,
   },
   wheelItem: {

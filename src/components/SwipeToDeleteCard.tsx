@@ -1,10 +1,7 @@
 import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {Animated, PanResponder, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
+import {colors} from '../theme/colors';
 
-const DELETE_BG = '#d64545';
-const DELETE_BG_ACTIVE = '#b93535';
-const DONE_BG = '#47d16b';
-const DONE_BG_ACTIVE = '#35b65a';
 const SWIPE_DELETE_THRESHOLD = 110;
 
 export function SwipeToDeleteCard({
@@ -109,9 +106,7 @@ export function SwipeToDeleteCard({
     extrapolate: 'clamp',
   });
   const showsRightAction = direction === 1 && onSwipeRight != null;
-  const bgColor = showsRightAction
-    ? active ? DONE_BG_ACTIVE : DONE_BG
-    : active ? DELETE_BG_ACTIVE : DELETE_BG;
+  const bgColor = showsRightAction ? colors.success : colors.danger;
   const bgText = showsRightAction ? rightLabel : 'Usuń';
 
   return (
@@ -124,7 +119,7 @@ export function SwipeToDeleteCard({
           {
             backgroundColor: bgColor,
             borderRadius,
-            opacity: bgOpacity,
+            opacity: active ? 0.92 : bgOpacity,
           },
         ]}>
         <Text style={[styles.deleteBgText, showsRightAction && styles.doneBgText]}>
@@ -156,12 +151,12 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   deleteBgText: {
-    color: '#fff',
+    color: colors.successText,
     fontWeight: '900',
     fontSize: 16,
     letterSpacing: 0.2,
   },
   doneBgText: {
-    color: '#102014',
+    color: colors.successText,
   },
 });

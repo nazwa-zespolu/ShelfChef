@@ -15,8 +15,8 @@ import ShoppingListView from './ShoppingListView';
 import {setupDatabase} from './infrastructure/db/init';
 import {initExecutorch} from 'react-native-executorch';
 import {BareResourceFetcher} from 'react-native-executorch-bare-resource-fetcher';
-
-type AppScreen = 'home' | 'scan' | 'recipes' | 'shopping';
+import BottomNav, {AppTab} from './components/BottomNav';
+import {colors} from './theme/colors';
 
 try {
   initExecutorch({resourceFetcher: BareResourceFetcher});
@@ -26,7 +26,7 @@ try {
 
 function App() {
   //const isDarkMode = useColorScheme() === 'dark';
-  const [screen, setScreen] = useState<AppScreen>('home');
+  const [activeTab, setActiveTab] = useState<AppTab>('pantry');
   const [inventoryTick, setInventoryTick] = useState(0);
 
   useEffect(() => {
@@ -39,42 +39,33 @@ function App() {
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (screen === 'home') {
+      if (activeTab === 'pantry') {
         return false;
       }
-      setScreen('home');
+      setActiveTab('pantry');
       return true;
     });
     return () => subscription.remove();
-  }, [screen]);
+  }, [activeTab]);
 
   return (
     <SafeAreaProvider>
       {/* <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} /> */}
       <View style={styles.shell}>
-        {screen === 'home' && (
-          <HomeView
-            refreshToken={inventoryTick}
-            onOpenScan={() => setScreen('scan')}
-            onOpenRecipes={() => setScreen('recipes')}
-            onOpenShopping={() => setScreen('shopping')}
-          />
-        )}
-        {screen === 'scan' && (
-          <ProductScannerView
-            onRequestClose={() => setScreen('home')}
-            onProductAdded={() => setInventoryTick(tick => tick + 1)}
-          />
-        )}
-        {screen === 'recipes' && (
-          <RecipeGeneratorView onRequestClose={() => setScreen('home')} />
-        )}
-        {screen === 'shopping' && (
-          <ShoppingListView
-            onRequestClose={() => setScreen('home')}
-            onInventoryChanged={() => setInventoryTick(tick => tick + 1)}
-          />
-        )}
+        <View style={styles.content}>
+          {activeTab === 'pantry' ? <HomeView refreshToken={inventoryTick} /> : null}
+          {activeTab === 'scan' ? (
+            <ProductScannerView onProductAdded={() => setInventoryTick(tick => tick + 1)} />
+          ) : null}
+          {activeTab === 'recipes' ? <RecipeGeneratorView /> : null}
+          {activeTab === 'shopping' ? (
+            <ShoppingListView
+              onRequestClose={() => setActiveTab('pantry')}
+              onInventoryChanged={() => setInventoryTick(tick => tick + 1)}
+            />
+          ) : null}
+        </View>
+        <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
       </View>
     </SafeAreaProvider>
   );
@@ -84,6 +75,10 @@ export default App;
 
 const styles = StyleSheet.create({
   shell: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
     flex: 1,
   },
 });
