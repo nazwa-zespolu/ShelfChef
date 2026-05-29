@@ -33,6 +33,7 @@ import {colors} from './theme/colors';
 type ShoppingListViewProps = {
   onRequestClose: () => void;
   onInventoryChanged?: () => void;
+  setBottomNavVisible?: (visible: boolean) => void;
 };
 
 type ScreenMode = 'lists' | 'suggestions' | 'details';
@@ -81,6 +82,7 @@ function getErrorMessage(error: unknown): string {
 export default function ShoppingListView({
   onRequestClose,
   onInventoryChanged,
+  setBottomNavVisible,
 }: ShoppingListViewProps) {
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<ScreenMode>('lists');
@@ -162,6 +164,14 @@ export default function ShoppingListView({
       loadLists().catch(() => setLoading(false));
     }
   }, [loadLists, mode]);
+
+  React.useEffect(() => {
+    setBottomNavVisible?.(mode !== 'details');
+  }, [mode, setBottomNavVisible]);
+
+  React.useEffect(() => {
+    return () => setBottomNavVisible?.(true);
+  }, [setBottomNavVisible]);
 
   const openList = useCallback(
     (list: ShoppingListSummary) => {

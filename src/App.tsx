@@ -27,6 +27,7 @@ try {
 function App() {
   //const isDarkMode = useColorScheme() === 'dark';
   const [activeTab, setActiveTab] = useState<AppTab>('pantry');
+  const [bottomNavVisible, setBottomNavVisible] = useState(true);
   const [inventoryTick, setInventoryTick] = useState(0);
 
   useEffect(() => {
@@ -42,6 +43,7 @@ function App() {
       if (activeTab === 'pantry') {
         return false;
       }
+      setBottomNavVisible(true);
       setActiveTab('pantry');
       return true;
     });
@@ -60,12 +62,26 @@ function App() {
           {activeTab === 'recipes' ? <RecipeGeneratorView /> : null}
           {activeTab === 'shopping' ? (
             <ShoppingListView
-              onRequestClose={() => setActiveTab('pantry')}
+              onRequestClose={() => {
+                setBottomNavVisible(true);
+                setActiveTab('pantry');
+              }}
               onInventoryChanged={() => setInventoryTick(tick => tick + 1)}
+              setBottomNavVisible={setBottomNavVisible}
             />
           ) : null}
         </View>
-        <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
+        {bottomNavVisible ? (
+          <BottomNav
+            activeTab={activeTab}
+            onTabChange={tab => {
+              if (tab !== 'shopping') {
+                setBottomNavVisible(true);
+              }
+              setActiveTab(tab);
+            }}
+          />
+        ) : null}
       </View>
     </SafeAreaProvider>
   );
