@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import React, {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -6,10 +6,14 @@ import {
   Button,
   Easing,
   Image,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -113,6 +117,166 @@ type VisionCameraModule = {
 
 type SheetMode = 'none' | 'details' | 'manualWithEan' | 'manualNoEan';
 
+const SheetFormScrollContext = createContext<{
+  lockParentScroll: (locked: boolean) => void;
+} | null>(null);
+
+function SheetScrollableForm({
+  children,
+  maxHeight,
+  keyboardVerticalOffset = 0,
+}: {
+  children: React.ReactNode;
+  maxHeight: number;
+  keyboardVerticalOffset?: number;
+}) {
+  const [scrollEnabled, setScrollEnabled] = useState(true);
+  const wheelLockCountRef = useRef(0);
+  const lockParentScroll = useCallback((locked: boolean) => {
+    if (locked) {
+      wheelLockCountRef.current += 1;
+    } else {
+      wheelLockCountRef.current = Math.max(0, wheelLockCountRef.current - 1);
+    }
+    setScrollEnabled(wheelLockCountRef.current === 0);
+  }, []);
+
+  return (
+    <SheetFormScrollContext.Provider value={{lockParentScroll}}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={[styles.sheetKeyboardAvoid, {maxHeight}]}
+        keyboardVerticalOffset={keyboardVerticalOffset}>
+        <ScrollView
+          style={styles.sheetScroll}
+          contentContainerStyle={styles.sheetScrollContent}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+          scrollEnabled={scrollEnabled}
+          showsVerticalScrollIndicator
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}>
+          {children}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SheetFormScrollContext.Provider>
+  );
+}
+
+type ManualFormFooterProps = {
+  expirationDate: Date | null;
+  days: number[];
+  months: number[];
+  years: number[];
+  updateDatePart: (part: 'day' | 'month' | 'year', value: number) => void;
+  amount: number;
+  setAmount: React.Dispatch<React.SetStateAction<number>>;
+  adding: boolean;
+  resolving: boolean;
+  onClose: () => void;
+  onSave: () => void;
+  saveLabel: string;
+  savingLabel: string;
+};
+
+function ManualFormFooter({
+  expirationDate,
+  days,
+  months,
+  years,
+  updateDatePart,
+  amount,
+  setAmount,
+  adding,
+  resolving,
+  onClose,
+  onSave,
+  saveLabel,
+  savingLabel,
+}: ManualFormFooterProps) {
+  const sheetScroll = useContext(SheetFormScrollContext);
+  const lockParentScroll = sheetScroll?.lockParentScroll;
+  const wheelInteraction = useMemo(
+    () => ({
+      onInteractionStart: () => lockParentScroll?.(true),
+      onInteractionEnd: () => lockParentScroll?.(false),
+    }),
+    [lockParentScroll],
+  );
+
+  return (
+    <>
+      {expirationDate ? (
+        <View style={styles.wheelsRow}>
+          <WheelPicker
+            label="Day"
+            values={days}
+            selectedValue={expirationDate.getDate()}
+            onValueChange={value => updateDatePart('day', value)}
+            onInteractionStart={wheelInteraction.onInteractionStart}
+            onInteractionEnd={wheelInteraction.onInteractionEnd}
+          />
+          <WheelPicker
+            label="Month"
+            values={months}
+            selectedValue={expirationDate.getMonth() + 1}
+            onValueChange={value => updateDatePart('month', value)}
+            onInteractionStart={wheelInteraction.onInteractionStart}
+            onInteractionEnd={wheelInteraction.onInteractionEnd}
+          />
+          <WheelPicker
+            label="Year"
+            values={years}
+            selectedValue={expirationDate.getFullYear()}
+            onValueChange={value => updateDatePart('year', value)}
+            onInteractionStart={wheelInteraction.onInteractionStart}
+            onInteractionEnd={wheelInteraction.onInteractionEnd}
+          />
+        </View>
+      ) : null}
+      <Text style={styles.inputLabel}>Amount</Text>
+      <View style={styles.amountRow}>
+        <Pressable
+          style={[styles.amountButtonBase, styles.amountButtonWide]}
+          onPress={() => setAmount(current => Math.max(1, current - 5))}>
+          <Text style={styles.amountButtonText}>-5</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.amountButtonBase, styles.amountButtonRound]}
+          onPress={() => setAmount(current => Math.max(1, current - 1))}>
+          <Text style={styles.amountButtonText}>-</Text>
+        </Pressable>
+        <Text style={styles.amountValue}>{amount}</Text>
+        <Pressable
+          style={[styles.amountButtonBase, styles.amountButtonRound]}
+          onPress={() => setAmount(current => Math.min(999, current + 1))}>
+          <Text style={styles.amountButtonText}>+</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.amountButtonBase, styles.amountButtonWide]}
+          onPress={() => setAmount(current => Math.min(999, current + 5))}>
+          <Text style={styles.amountButtonText}>+5</Text>
+        </Pressable>
+      </View>
+      <View style={styles.actions}>
+        <Pressable
+          style={[styles.actionButtonBase, styles.secondaryButton]}
+          onPress={onClose}
+          disabled={adding}>
+          <Text style={[styles.actionButtonTextBase, styles.secondaryButtonText]}>Close</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.actionButtonBase, styles.primaryButton, adding && styles.buttonDisabled]}
+          onPress={onSave}
+          disabled={adding || resolving}>
+          <Text style={[styles.actionButtonTextBase, styles.primaryButtonText]}>
+            {adding ? savingLabel : saveLabel}
+          </Text>
+        </Pressable>
+      </View>
+    </>
+  );
+}
+
 function ProductScannerVisionContent({
   onRequestClose,
   onProductAdded,
@@ -124,6 +288,9 @@ function ProductScannerVisionContent({
 }) {
   const {Camera, useCameraPermission, useCameraDevice, useCodeScanner} = visionModule;
   const insets = useSafeAreaInsets();
+  const {height: windowHeight} = useWindowDimensions();
+  const sheetFormMaxHeight = Math.round(windowHeight * 0.88);
+  const sheetKeyboardOffset = Math.max(insets.top, 12);
   const {hasPermission, requestPermission} = useCameraPermission();
   const device = useCameraDevice('back');
   const [scannedProduct, setScannedProduct] = useState<ProductDefinition | null>(null);
@@ -397,6 +564,9 @@ function ProductScannerVisionContent({
       <Animated.View
         style={[
           styles.bottomSheet,
+          (sheetMode === 'manualWithEan' || sheetMode === 'manualNoEan') && {
+            maxHeight: sheetFormMaxHeight,
+          },
           {
             paddingBottom: Math.max(insets.bottom, 12),
             transform: [{translateY: sheetTranslateY}],
@@ -536,7 +706,9 @@ function ProductScannerVisionContent({
           </View>
         ) : null}
         {sheetMode === 'manualWithEan' ? (
-          <View style={styles.sheetContent}>
+          <SheetScrollableForm
+            maxHeight={sheetFormMaxHeight - Math.max(insets.bottom, 12) - 14}
+            keyboardVerticalOffset={sheetKeyboardOffset}>
             <Text style={styles.productName}>Dodaj produkt ręcznie (EAN)</Text>
             <Text style={styles.inputLabel}>EAN</Text>
             <TextInput
@@ -610,76 +782,30 @@ function ProductScannerVisionContent({
                   </Text>
                 </Pressable>
               </View>
-              {expirationDate ? (
-                <View style={styles.wheelsRow}>
-                  <WheelPicker
-                    label="Day"
-                    values={days}
-                    selectedValue={expirationDate.getDate()}
-                    onValueChange={value => updateDatePart('day', value)}
-                  />
-                  <WheelPicker
-                    label="Month"
-                    values={months}
-                    selectedValue={expirationDate.getMonth() + 1}
-                    onValueChange={value => updateDatePart('month', value)}
-                  />
-                  <WheelPicker
-                    label="Year"
-                    values={years}
-                    selectedValue={expirationDate.getFullYear()}
-                    onValueChange={value => updateDatePart('year', value)}
-                  />
-                </View>
-              ) : null}
-
-              <Text style={styles.inputLabel}>Amount</Text>
-              <View style={styles.amountRow}>
-                <Pressable
-                  style={[styles.amountButtonBase, styles.amountButtonWide]}
-                  onPress={() => setAmount(current => Math.max(1, current - 5))}>
-                  <Text style={styles.amountButtonText}>-5</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.amountButtonBase, styles.amountButtonRound]}
-                  onPress={() => setAmount(current => Math.max(1, current - 1))}>
-                  <Text style={styles.amountButtonText}>-</Text>
-                </Pressable>
-                <Text style={styles.amountValue}>{amount}</Text>
-                <Pressable
-                  style={[styles.amountButtonBase, styles.amountButtonRound]}
-                  onPress={() => setAmount(current => Math.min(999, current + 1))}>
-                  <Text style={styles.amountButtonText}>+</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.amountButtonBase, styles.amountButtonWide]}
-                  onPress={() => setAmount(current => Math.min(999, current + 5))}>
-                  <Text style={styles.amountButtonText}>+5</Text>
-                </Pressable>
-              </View>
             </View>
-            <View style={styles.actions}>
-              <Pressable
-                style={[styles.actionButtonBase, styles.secondaryButton]}
-                onPress={closeBottomSheet}
-                disabled={adding}>
-                <Text style={[styles.actionButtonTextBase, styles.secondaryButtonText]}>Close</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.actionButtonBase, styles.primaryButton, adding && styles.buttonDisabled]}
-                onPress={() => {
-                  handleSaveManualWithEan().catch(() => {});
-                }}
-                disabled={adding || resolving}>
-                <Text style={[styles.actionButtonTextBase, styles.primaryButtonText]}>
-                  {adding ? 'Zapisuję…' : 'Zapisz i dodaj'}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
+            <ManualFormFooter
+              expirationDate={expirationDate}
+              days={days}
+              months={months}
+              years={years}
+              updateDatePart={updateDatePart}
+              amount={amount}
+              setAmount={setAmount}
+              adding={adding}
+              resolving={resolving}
+              onClose={closeBottomSheet}
+              onSave={() => {
+                handleSaveManualWithEan().catch(() => {});
+              }}
+              saveLabel="Zapisz i dodaj"
+              savingLabel="Zapisuję…"
+            />
+          </SheetScrollableForm>
         ) : null}
         {sheetMode === 'manualNoEan' ? (
-          <View style={styles.sheetContent}>
+          <SheetScrollableForm
+            maxHeight={sheetFormMaxHeight - Math.max(insets.bottom, 12) - 14}
+            keyboardVerticalOffset={sheetKeyboardOffset}>
             <Text style={styles.productName}>Dodaj produkt ręcznie (bez EAN)</Text>
             <Text style={styles.inputLabel}>Nazwa produktu</Text>
             <TextInput
@@ -729,72 +855,25 @@ function ProductScannerVisionContent({
                   </Text>
                 </Pressable>
               </View>
-              {expirationDate ? (
-                <View style={styles.wheelsRow}>
-                  <WheelPicker
-                    label="Day"
-                    values={days}
-                    selectedValue={expirationDate.getDate()}
-                    onValueChange={value => updateDatePart('day', value)}
-                  />
-                  <WheelPicker
-                    label="Month"
-                    values={months}
-                    selectedValue={expirationDate.getMonth() + 1}
-                    onValueChange={value => updateDatePart('month', value)}
-                  />
-                  <WheelPicker
-                    label="Year"
-                    values={years}
-                    selectedValue={expirationDate.getFullYear()}
-                    onValueChange={value => updateDatePart('year', value)}
-                  />
-                </View>
-              ) : null}
-              <Text style={styles.inputLabel}>Amount</Text>
-              <View style={styles.amountRow}>
-                <Pressable
-                  style={[styles.amountButtonBase, styles.amountButtonWide]}
-                  onPress={() => setAmount(current => Math.max(1, current - 5))}>
-                  <Text style={styles.amountButtonText}>-5</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.amountButtonBase, styles.amountButtonRound]}
-                  onPress={() => setAmount(current => Math.max(1, current - 1))}>
-                  <Text style={styles.amountButtonText}>-</Text>
-                </Pressable>
-                <Text style={styles.amountValue}>{amount}</Text>
-                <Pressable
-                  style={[styles.amountButtonBase, styles.amountButtonRound]}
-                  onPress={() => setAmount(current => Math.min(999, current + 1))}>
-                  <Text style={styles.amountButtonText}>+</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.amountButtonBase, styles.amountButtonWide]}
-                  onPress={() => setAmount(current => Math.min(999, current + 5))}>
-                  <Text style={styles.amountButtonText}>+5</Text>
-                </Pressable>
-              </View>
             </View>
-            <View style={styles.actions}>
-              <Pressable
-                style={[styles.actionButtonBase, styles.secondaryButton]}
-                onPress={closeBottomSheet}
-                disabled={adding}>
-                <Text style={[styles.actionButtonTextBase, styles.secondaryButtonText]}>Close</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.actionButtonBase, styles.primaryButton, adding && styles.buttonDisabled]}
-                onPress={() => {
-                  handleSaveManualNoEan().catch(() => {});
-                }}
-                disabled={adding || resolving}>
-                <Text style={[styles.actionButtonTextBase, styles.primaryButtonText]}>
-                  {adding ? 'Dodaję…' : 'Dodaj'}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
+            <ManualFormFooter
+              expirationDate={expirationDate}
+              days={days}
+              months={months}
+              years={years}
+              updateDatePart={updateDatePart}
+              amount={amount}
+              setAmount={setAmount}
+              adding={adding}
+              resolving={resolving}
+              onClose={closeBottomSheet}
+              onSave={() => {
+                handleSaveManualNoEan().catch(() => {});
+              }}
+              saveLabel="Dodaj"
+              savingLabel="Dodaję…"
+            />
+          </SheetScrollableForm>
         ) : null}
       </Animated.View>
     </View>
@@ -926,6 +1005,18 @@ const styles = StyleSheet.create({
   },
   sheetContent: {
     gap: 14,
+  },
+  sheetKeyboardAvoid: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  sheetScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  sheetScrollContent: {
+    gap: 14,
+    paddingBottom: 8,
   },
   resolvingBox: {
     minHeight: 120,
