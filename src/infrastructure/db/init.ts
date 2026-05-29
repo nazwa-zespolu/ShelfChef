@@ -2,7 +2,7 @@ import { open } from 'react-native-quick-sqlite';
 
 // Otwarcie bazy danych
 export const db = open({ name: 'shelfchef.db' });
-const SHOPPING_LISTS_SCHEMA_VERSION = 3;
+const SHOPPING_LISTS_SCHEMA_VERSION = 4;
 
 const MOCK_DATA_SQL = [
   // 1. Product definitions (in English) - expanded base for the LLM
@@ -183,6 +183,42 @@ function migrateShoppingListSortOrder() {
   db.execute('ALTER TABLE shopping_lists ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
 }
 
+function migrateInventoryExpiryNullable() {
+  db.execute(`
+      CREATE TABLE inventory_v4 (
+        id TEXT PRIMARY KEY,
+        product_ean TEXT,
+        custom_name TEXT,
+        expiry_date TEXT,
+        opened_at TEXT,
+        is_opened INTEGER DEFAULT 0,
+        FOREIGN KEY(product_ean) REFERENCES product_definitions(ean)
+      );
+    `);
+
+  db.execute(`
+      INSERT INTO inventory_v4 (
+        id,
+        product_ean,
+        custom_name,
+        expiry_date,
+        opened_at,
+        is_opened
+      )
+      SELECT
+        id,
+        product_ean,
+        custom_name,
+        expiry_date,
+        opened_at,
+        COALESCE(is_opened, 0)
+      FROM inventory;
+    `);
+
+  db.execute('DROP TABLE inventory');
+  db.execute('ALTER TABLE inventory_v4 RENAME TO inventory');
+}
+
 function migrateCatalogConcreteToSpecific() {
   db.execute(`
       CREATE TABLE product_catalog_v2 (
@@ -267,6 +303,9 @@ function runMigrations() {
     }
     if (currentVersion >= 1 && currentVersion < 3) {
       migrateShoppingListSortOrder();
+    }
+    if (currentVersion < 4) {
+      migrateInventoryExpiryNullable();
     }
     db.execute(`PRAGMA user_version = ${SHOPPING_LISTS_SCHEMA_VERSION}`);
   });

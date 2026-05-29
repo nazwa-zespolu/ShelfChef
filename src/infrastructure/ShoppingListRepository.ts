@@ -486,9 +486,10 @@ export class ShoppingListRepository {
             i.label,
             i.quantity,
             i.catalog_product_id,
-            c.product_ean
+            d.ean AS product_ean
           FROM shopping_list_items i
           LEFT JOIN product_catalog c ON i.catalog_product_id = c.id
+          LEFT JOIN product_definitions d ON c.product_ean = d.ean
           WHERE i.list_id = ?
             AND i.status = 'purchased'
         `,

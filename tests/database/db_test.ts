@@ -60,6 +60,7 @@ type SQLiteResult = {
 
 const productDefinitions = new Map<string, ProductDefinitionRow>();
 const inventory = new Map<string, InventoryRow>();
+let inventoryV4: Map<string, InventoryRow> | null = null;
 const productCatalog = new Map<string, ProductCatalogRow>();
 const shoppingLists = new Map<string, ShoppingListRow>();
 const shoppingListItems = new Map<string, ShoppingListItemRow>();
@@ -74,6 +75,27 @@ const toRows = (data: Record<string, unknown>[]): SQLiteResult => ({
 
 const execute = (sql: string, params: any[] = []): SQLiteResult => {
   const normalized = sql.replace(/\s+/g, ' ').trim().toUpperCase();
+
+  if (normalized.startsWith('INSERT INTO INVENTORY_V4')) {
+    inventoryV4 = new Map(inventory);
+    return toRows([]);
+  }
+
+  if (normalized === 'DROP TABLE INVENTORY') {
+    inventory.clear();
+    return toRows([]);
+  }
+
+  if (normalized === 'ALTER TABLE INVENTORY_V4 RENAME TO INVENTORY') {
+    inventory.clear();
+    if (inventoryV4) {
+      for (const [id, row] of inventoryV4.entries()) {
+        inventory.set(id, row);
+      }
+    }
+    inventoryV4 = null;
+    return toRows([]);
+  }
 
   if (
     normalized.startsWith('CREATE TABLE') ||
@@ -103,6 +125,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
 
   if (normalized.startsWith('DELETE FROM INVENTORY')) {
     inventory.clear();
+    inventoryV4 = null;
     return toRows([]);
   }
 
@@ -396,12 +419,15 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
         const catalog = item.catalog_product_id
           ? productCatalog.get(item.catalog_product_id)
           : undefined;
+        const definition = catalog?.product_ean
+          ? productDefinitions.get(catalog.product_ean)
+          : undefined;
         return {
           id: item.id,
           label: item.label,
           quantity: item.quantity,
           catalog_product_id: item.catalog_product_id,
-          product_ean: catalog?.product_ean ?? null,
+          product_ean: definition?.ean ?? null,
         };
       });
     return toRows(rows);
@@ -652,7 +678,7 @@ describe('ProductRepository + database integration', () => {
     const version = db.execute('PRAGMA user_version').rows!.item(0);
     const lists = db.execute('SELECT * FROM shopping_lists').rows!;
 
-    expect(version.user_version).toBe(3);
+    expect(version.user_version).toBe(4);
     expect(lists.length).toBe(1);
     expect(lists.item(0)).toMatchObject({
       id: 'default-auto-minimum',

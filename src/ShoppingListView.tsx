@@ -2,6 +2,8 @@ import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Alert,
+  BackHandler,
   FlatList,
   Modal,
   PanResponder,
@@ -57,6 +59,25 @@ function listTypeLabel(type: ShoppingListType) {
   return type === 'auto' ? 'Lista uzupełniania' : 'Lista zakupów';
 }
 
+function parseQuantityInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return null;
+  }
+  const quantity = Number.parseInt(trimmed, 10);
+  return quantity > 0 ? quantity : null;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return 'Nieznany błąd';
+}
+
 export default function ShoppingListView({
   onRequestClose,
   onInventoryChanged,
@@ -79,8 +100,6 @@ export default function ShoppingListView({
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogResults, setCatalogResults] = useState<CatalogProduct[]>([]);
   const [selectedCatalog, setSelectedCatalog] = useState<CatalogProduct | null>(null);
-  const [completeOpen, setCompleteOpen] = useState(false);
-  const [expiryDate, setExpiryDate] = useState('');
   const [targetListId, setTargetListId] = useState<string | null>(null);
   const [pendingDeleteList, setPendingDeleteList] = useState<ShoppingListSummary | null>(null);
 
@@ -111,9 +130,38 @@ export default function ShoppingListView({
     }
   }, []);
 
+  const goBackOneLevel = useCallback(() => {
+    if (pendingDeleteList) {
+      setPendingDeleteList(null);
+      return true;
+    }
+    if (addOpen) {
+      setAddOpen(false);
+      return true;
+    }
+    if (createOpen) {
+      setCreateOpen(false);
+      return true;
+    }
+    if (mode === 'details' || mode === 'suggestions') {
+      setMode('lists');
+      return true;
+    }
+
+    onRequestClose();
+    return true;
+  }, [addOpen, createOpen, mode, onRequestClose, pendingDeleteList]);
+
   React.useEffect(() => {
-    loadLists().catch(() => setLoading(false));
-  }, [loadLists]);
+    const subscription = BackHandler.addEventListener('hardwareBackPress', goBackOneLevel);
+    return () => subscription.remove();
+  }, [goBackOneLevel]);
+
+  React.useEffect(() => {
+    if (mode === 'lists') {
+      loadLists().catch(() => setLoading(false));
+    }
+  }, [loadLists, mode]);
 
   const openList = useCallback(
     (list: ShoppingListSummary) => {
@@ -206,7 +254,10 @@ export default function ShoppingListView({
     if (!selectedList) {
       return;
     }
-    const quantity = Math.max(1, Number.parseInt(addQuantity, 10) || 1);
+    const quantity = parseQuantityInput(addQuantity);
+    if (quantity == null) {
+      return;
+    }
     const textLabel = addLabel.trim();
     const genericName = catalogQuery.trim();
     if (addMode === 'catalog' && !selectedCatalog) {
@@ -351,22 +402,36 @@ export default function ShoppingListView({
       return;
     }
     setBusy(true);
+    let completed = false;
     try {
       const purchased = items.filter(item => item.status === 'purchased');
-      const payload = Object.fromEntries(
-        purchased.map(item => [item.id, expiryDate.trim() || null]),
-      );
+      const payload: Record<string, string | null> = {};
+      for (const item of purchased) {
+        payload[item.id] = null;
+      }
       await shoppingList.completePurchase(selectedList.id, payload);
-      setCompleteOpen(false);
-      setExpiryDate('');
+      completed = true;
+    } catch (e) {
+      const message = getErrorMessage(e);
+      console.error('[ShelfChef] completePurchase failed', e);
+      Alert.alert('Błąd', `Nie udało się sfinalizować listy.\n\n${message}`);
+      return;
+    } finally {
+      if (!completed) {
+        setBusy(false);
+      }
+    }
+
+    try {
       await loadSelectedList(selectedList);
-      const nextSuggestions = await shoppingList.generateReplenishmentSuggestions();
-      setSuggestions(nextSuggestions);
+      await loadLists();
       onInventoryChanged?.();
+    } catch (e) {
+      console.error('[ShelfChef] refresh after completePurchase failed', e);
     } finally {
       setBusy(false);
     }
-  }, [expiryDate, items, loadSelectedList, onInventoryChanged, selectedList]);
+  }, [items, loadLists, loadSelectedList, onInventoryChanged, selectedList]);
 
   const renderListRow = ({item}: {item: ShoppingListSummary}) => (
     <SortableListRow
@@ -382,13 +447,22 @@ export default function ShoppingListView({
       ? item.effectiveStatus
       : item.status;
     return (
-      <View style={styles.itemCard}>
+      <SwipeToDeleteCard
+        borderRadius={8}
+        allowRightDelete={false}
+        onDelete={() => { deleteItem(item.id).catch(() => {}); }}
+        onSwipeRight={
+          selectedList?.type === 'manual'
+            ? () => { updateStatus(item.id, 'purchased').catch(() => {}); }
+            : undefined
+        }>
+        <View style={[styles.itemCard, styles.swipeItemCard]}>
         <View style={styles.rowBetween}>
           <View style={styles.rowText}>
             <Text style={styles.itemTitle} numberOfLines={2}>{item.label}</Text>
             <Text style={styles.itemMeta}>
               {statusLabel(shownStatus)} · ilość {item.quantity}
-              {selectedList?.type === 'auto' && item.catalogProductId
+              {selectedList?.type === 'auto'
                 ? ` · masz ${item.currentQuantity}`
                 : ''}
             </Text>
@@ -411,15 +485,15 @@ export default function ShoppingListView({
           <ActionButton label="Kupione" onPress={() => updateStatus(item.id, 'purchased')} />
           <ActionButton label="Nie było" onPress={() => updateStatus(item.id, 'unavailable')} />
           <ActionButton label="Cofnij" onPress={() => updateStatus(item.id, 'planned')} />
-          <ActionButton label="Usuń" danger onPress={() => deleteItem(item.id)} />
         </View>
-      </View>
+        </View>
+      </SwipeToDeleteCard>
     );
   };
 
   const renderSuggestions = () => (
     <View style={styles.content}>
-      <Header title="Do uzupełnienia" onBack={() => setMode('lists')} />
+      <Header title="Do uzupełnienia" onBack={goBackOneLevel} />
       <View style={styles.mergeBar}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.targetRow}>
           {manualLists.map(list => {
@@ -485,7 +559,7 @@ export default function ShoppingListView({
     const purchasedCount = items.filter(item => item.status === 'purchased').length;
     return (
       <View style={styles.content}>
-        <Header title={selectedList.name} onBack={() => { setMode('lists'); loadLists().catch(() => {}); }} />
+        <Header title={selectedList.name} onBack={goBackOneLevel} />
         <View style={styles.detailToolbar}>
           <View style={styles.listBadge}>
             <Text style={styles.listBadgeText}>{listTypeLabel(selectedList.type)}</Text>
@@ -517,7 +591,7 @@ export default function ShoppingListView({
           </Pressable>
           <Pressable
             disabled={purchasedCount === 0 || busy}
-            onPress={() => setCompleteOpen(true)}
+            onPress={() => { completePurchase().catch(() => {}); }}
             style={({pressed}) => [
               styles.secondaryButton,
               (purchasedCount === 0 || busy) && styles.disabled,
@@ -533,7 +607,7 @@ export default function ShoppingListView({
   const renderLists = () => (
     <View style={styles.content}>
       <View style={styles.topBar}>
-        <Pressable onPress={onRequestClose} style={({pressed}) => [styles.back, pressed && styles.pressed]} hitSlop={10}>
+        <Pressable onPress={goBackOneLevel} style={({pressed}) => [styles.back, pressed && styles.pressed]} hitSlop={10}>
           <Text style={styles.backText}>← Wróć</Text>
         </Pressable>
         <Pressable onPress={() => setCreateOpen(true)} style={({pressed}) => [styles.headerButton, pressed && styles.pressed]}>
@@ -599,14 +673,6 @@ export default function ShoppingListView({
         }}
         onClose={() => setAddOpen(false)}
         onSubmit={addItem}
-      />
-      <CompleteModal
-        visible={completeOpen}
-        expiryDate={expiryDate}
-        busy={busy}
-        onChangeExpiryDate={setExpiryDate}
-        onClose={() => setCompleteOpen(false)}
-        onSubmit={completePurchase}
       />
       <DeleteListModal
         list={pendingDeleteList}
@@ -688,7 +754,11 @@ function SortableListRow({
   );
 
   return (
-    <SwipeToDeleteCard resetAfterDelete borderRadius={8} onDelete={() => onRequestDelete(item)}>
+    <SwipeToDeleteCard
+      resetAfterDelete
+      borderRadius={8}
+      allowRightDelete={false}
+      onDelete={() => onRequestDelete(item)}>
       <Animated.View
         style={[
           {
@@ -856,6 +926,7 @@ function AddItemModal({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const quantityIsValid = parseQuantityInput(quantity) != null;
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
@@ -914,46 +985,20 @@ function AddItemModal({
           <TextInput
             value={quantity}
             onChangeText={onChangeQuantity}
-            keyboardType="number-pad"
             placeholder="Ilość"
             placeholderTextColor={colors.textMuted}
-            style={styles.input}
+            style={[styles.input, !quantityIsValid && styles.inputError]}
           />
-          <ModalActions busy={busy} onClose={onClose} onSubmit={onSubmit} submitLabel="Dodaj" />
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-function CompleteModal({
-  visible,
-  expiryDate,
-  busy,
-  onChangeExpiryDate,
-  onClose,
-  onSubmit,
-}: {
-  visible: boolean;
-  expiryDate: string;
-  busy: boolean;
-  onChangeExpiryDate: (value: string) => void;
-  onClose: () => void;
-  onSubmit: () => void;
-}) {
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalSheet}>
-          <Text style={styles.modalTitle}>Finalizacja</Text>
-          <TextInput
-            value={expiryDate}
-            onChangeText={onChangeExpiryDate}
-            placeholder="Data ważności YYYY-MM-DD"
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
+          {!quantityIsValid ? (
+            <Text style={styles.fieldError}>Ilość musi być liczbą większą od 0</Text>
+          ) : null}
+          <ModalActions
+            busy={busy}
+            submitDisabled={!quantityIsValid}
+            onClose={onClose}
+            onSubmit={onSubmit}
+            submitLabel="Dodaj"
           />
-          <ModalActions busy={busy} onClose={onClose} onSubmit={onSubmit} submitLabel="Zapisz" />
         </View>
       </View>
     </Modal>
@@ -998,11 +1043,13 @@ function DeleteListModal({
 
 function ModalActions({
   busy,
+  submitDisabled,
   submitLabel,
   onClose,
   onSubmit,
 }: {
   busy: boolean;
+  submitDisabled?: boolean;
   submitLabel: string;
   onClose: () => void;
   onSubmit: () => void;
@@ -1013,9 +1060,13 @@ function ModalActions({
         <Text style={styles.secondaryButtonText}>Anuluj</Text>
       </Pressable>
       <Pressable
-        disabled={busy}
+        disabled={busy || submitDisabled}
         onPress={onSubmit}
-        style={({pressed}) => [styles.primaryButton, busy && styles.disabled, pressed && styles.pressed]}>
+        style={({pressed}) => [
+          styles.primaryButton,
+          (busy || submitDisabled) && styles.disabled,
+          pressed && styles.pressed,
+        ]}>
         <Text style={styles.primaryButtonText}>{submitLabel}</Text>
       </Pressable>
     </View>
@@ -1192,6 +1243,9 @@ const styles = StyleSheet.create({
     borderColor: colors.borderDark,
     padding: 12,
     marginBottom: 10,
+  },
+  swipeItemCard: {
+    marginBottom: 0,
   },
   itemTitle: {
     color: colors.textPrimary,
@@ -1405,6 +1459,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
+    marginBottom: 10,
+  },
+  inputError: {
+    borderColor: '#d64545',
+  },
+  fieldError: {
+    color: '#ff9c9c',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: -4,
     marginBottom: 10,
   },
   segmentRow: {

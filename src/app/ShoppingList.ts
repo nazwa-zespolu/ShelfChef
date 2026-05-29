@@ -103,7 +103,8 @@ export class ShoppingList {
     const catalogIndex = await this.loadCatalogIndex();
     const inventory = await this.loadFreshInventory();
     const usedInventoryIds = new Set<string>();
-    const currentQuantityByCatalogId = new Map<string, number>();
+    const displayQuantityByCatalogId = new Map<string, number>();
+    const consumedQuantityByCatalogId = new Map<string, number>();
     const grouped = new Map<string, ShoppingSuggestion>();
 
     for (const list of lists) {
@@ -118,18 +119,28 @@ export class ShoppingList {
           continue;
         }
 
-        let currentQuantity = currentQuantityByCatalogId.get(catalogProduct.id);
-        if (currentQuantity == null) {
-          currentQuantity = this.consumeFreshInventory(
+        let displayQuantity = displayQuantityByCatalogId.get(catalogProduct.id);
+        if (displayQuantity == null) {
+          displayQuantity = this.countFreshInventory(
+            catalogProduct,
+            catalogIndex,
+            inventory,
+          );
+          displayQuantityByCatalogId.set(catalogProduct.id, displayQuantity);
+        }
+
+        let consumedQuantity = consumedQuantityByCatalogId.get(catalogProduct.id);
+        if (consumedQuantity == null) {
+          consumedQuantity = this.consumeFreshInventory(
             catalogProduct,
             catalogIndex,
             inventory,
             usedInventoryIds,
             item.quantity,
           );
-          currentQuantityByCatalogId.set(catalogProduct.id, currentQuantity);
+          consumedQuantityByCatalogId.set(catalogProduct.id, consumedQuantity);
         }
-        const missingQuantity = Math.max(0, item.quantity - currentQuantity);
+        const missingQuantity = Math.max(0, item.quantity - consumedQuantity);
         if (missingQuantity === 0) {
           continue;
         }
@@ -141,10 +152,10 @@ export class ShoppingList {
             name: catalogProduct.name,
             normalizedName: catalogProduct.normalizedName,
             missingQuantity,
-            currentQuantity,
+            currentQuantity: displayQuantity,
             targetQuantity: item.quantity,
-            reason: this.buildMissingReason(currentQuantity, item.quantity),
-            priority: currentQuantity === 0 ? 'out' : 'low',
+            reason: this.buildMissingReason(displayQuantity, item.quantity),
+            priority: displayQuantity === 0 ? 'out' : 'low',
             sourceAutoListIds: [list.id],
             sourceAutoListNames: [list.name],
           });
@@ -157,10 +168,10 @@ export class ShoppingList {
         }
         if (missingQuantity > existing.missingQuantity) {
           existing.missingQuantity = missingQuantity;
-          existing.currentQuantity = currentQuantity;
+          existing.currentQuantity = displayQuantity;
           existing.targetQuantity = item.quantity;
-          existing.reason = this.buildMissingReason(currentQuantity, item.quantity);
-          existing.priority = currentQuantity === 0 ? 'out' : 'low';
+          existing.reason = this.buildMissingReason(displayQuantity, item.quantity);
+          existing.priority = displayQuantity === 0 ? 'out' : 'low';
         }
       }
     }
@@ -227,8 +238,21 @@ export class ShoppingList {
     inventory: InventoryItem[],
     usedInventoryIds: Set<string>,
   ): AutoShoppingListItemState {
-    if (item.status === 'purchased' || !item.catalogProductId) {
-      return this.toStaticItemState(item);
+    if (!item.catalogProductId) {
+      const displayQuantity = this.countFreshInventoryByLabel(item.label, inventory);
+      const consumedQuantity = this.consumeFreshInventoryByLabel(
+        item.label,
+        inventory,
+        usedInventoryIds,
+        item.quantity,
+      );
+      const missingQuantity = Math.max(0, item.quantity - consumedQuantity);
+      return {
+        ...item,
+        effectiveStatus: this.resolveAutoEffectiveStatus(item.status, missingQuantity),
+        currentQuantity: displayQuantity,
+        missingQuantity: item.status === 'purchased' ? 0 : missingQuantity,
+      };
     }
 
     const catalogProduct = catalogIndex.byId.get(item.catalogProductId);
@@ -236,19 +260,24 @@ export class ShoppingList {
       return this.toStaticItemState(item);
     }
 
-    const currentQuantity = this.consumeFreshInventory(
+    const displayQuantity = this.countFreshInventory(
+      catalogProduct,
+      catalogIndex,
+      inventory,
+    );
+    const consumedQuantity = this.consumeFreshInventory(
       catalogProduct,
       catalogIndex,
       inventory,
       usedInventoryIds,
       item.quantity,
     );
-    const missingQuantity = Math.max(0, item.quantity - currentQuantity);
+    const missingQuantity = Math.max(0, item.quantity - consumedQuantity);
     return {
       ...item,
-      effectiveStatus: missingQuantity === 0 ? 'stored' : 'planned',
-      currentQuantity,
-      missingQuantity,
+      effectiveStatus: this.resolveAutoEffectiveStatus(item.status, missingQuantity),
+      currentQuantity: displayQuantity,
+      missingQuantity: item.status === 'purchased' ? 0 : missingQuantity,
     };
   }
 
@@ -286,6 +315,65 @@ export class ShoppingList {
     return count;
   }
 
+  private countFreshInventory(
+    catalogProduct: CatalogProduct,
+    catalogIndex: CatalogIndex,
+    inventory: InventoryItem[],
+  ): number {
+    let count = 0;
+    for (const item of inventory) {
+      if (this.inventoryMatchesCatalogProduct(item, catalogProduct, catalogIndex)) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  private consumeFreshInventoryByLabel(
+    label: string,
+    inventory: InventoryItem[],
+    usedInventoryIds: Set<string>,
+    maxQuantity: number,
+  ): number {
+    let count = 0;
+    const normalizedLabel = normalizeProductName(label);
+    for (const item of inventory) {
+      if (count >= maxQuantity) {
+        break;
+      }
+      if (usedInventoryIds.has(item.id)) {
+        continue;
+      }
+      if (normalizeProductName(item.name) !== normalizedLabel) {
+        continue;
+      }
+      usedInventoryIds.add(item.id);
+      count += 1;
+    }
+    return count;
+  }
+
+  private countFreshInventoryByLabel(label: string, inventory: InventoryItem[]): number {
+    const normalizedLabel = normalizeProductName(label);
+    let count = 0;
+    for (const item of inventory) {
+      if (normalizeProductName(item.name) === normalizedLabel) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  private resolveAutoEffectiveStatus(
+    status: ShoppingItemStatus,
+    missingQuantity: number,
+  ): ShoppingItemStatus {
+    if (status === 'purchased') {
+      return 'purchased';
+    }
+    return missingQuantity === 0 ? 'stored' : 'planned';
+  }
+
   private inventoryMatchesCatalogProduct(
     item: InventoryItem,
     catalogProduct: CatalogProduct,
@@ -296,7 +384,10 @@ export class ShoppingList {
     }
 
     if (item.ean) {
-      return catalogIndex.specificByEan.get(item.ean)?.parentCatalogProductId === catalogProduct.id;
+      const specificParentId = catalogIndex.specificByEan.get(item.ean)?.parentCatalogProductId;
+      if (specificParentId === catalogProduct.id) {
+        return true;
+      }
     }
 
     return normalizeProductName(item.name) === catalogProduct.normalizedName;

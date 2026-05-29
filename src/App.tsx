@@ -6,7 +6,7 @@
  */
 
 import React, {useEffect, useState} from 'react';
-import {StyleSheet, View} from 'react-native';
+import {BackHandler, StyleSheet, View} from 'react-native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import HomeView from './HomeView';
 import ProductScannerView from './ProductScannerView';
@@ -36,6 +36,17 @@ function App() {
       console.error('[ShelfChef] setupDatabase failed', e);
     }
   }, []);
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (screen === 'home') {
+        return false;
+      }
+      setScreen('home');
+      return true;
+    });
+    return () => subscription.remove();
+  }, [screen]);
 
   return (
     <SafeAreaProvider>

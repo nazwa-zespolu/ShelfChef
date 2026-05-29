@@ -1,4 +1,5 @@
 import { ShoppingList } from "../../src/app/ShoppingList";
+import { ShoppingListItem } from "../../src/domain/types";
 
 const autoList = {
   id: "auto-1",
@@ -30,7 +31,18 @@ const milk = {
   updatedAt: "2026-05-27T00:00:00.000Z",
 };
 
-const milkItem = {
+const genericMilk = {
+  id: "catalog-generic-milk",
+  name: "Mleko",
+  normalizedName: "mleko",
+  kind: "generic" as const,
+  productEan: null,
+  parentCatalogProductId: null,
+  createdAt: "2026-05-27T00:00:00.000Z",
+  updatedAt: "2026-05-27T00:00:00.000Z",
+};
+
+const milkItem: ShoppingListItem = {
   id: "item-milk",
   listId: "auto-1",
   catalogProductId: "catalog-specific-111",
@@ -54,7 +66,7 @@ function createRepositories(items = [milkItem]) {
         ? [{...milkItem, id: "locked-item", listId, quantity: 10}]
         : items,
     ),
-    getCatalogProducts: jest.fn(async () => [milk]),
+    getCatalogProducts: jest.fn(async () => [milk, genericMilk]),
     setListLocked: jest.fn(async () => undefined),
     updateItemStatusSnapshot: jest.fn(async () => undefined),
   };
@@ -76,16 +88,63 @@ function createRepositories(items = [milkItem]) {
 
 describe("UC-06: ShoppingList - domain rules", () => {
   it("recalculates effective statuses for unlocked auto lists", async () => {
-    const {shoppingRepository, productRepository} = createRepositories();
+    const {shoppingRepository, productRepository} = createRepositories([
+      {...milkItem, id: "item-milk-1", quantity: 1},
+      {...milkItem, id: "item-milk-2", quantity: 1},
+      {
+        ...milkItem,
+        id: "item-text-milk",
+        catalogProductId: null,
+        label: "Mleko",
+        quantity: 1,
+      },
+      {
+        ...milkItem,
+        id: "item-generic-milk",
+        catalogProductId: "catalog-generic-milk",
+        label: "Mleko",
+        quantity: 1,
+      },
+      {
+        ...milkItem,
+        id: "item-purchased-milk",
+        status: "purchased",
+        quantity: 1,
+      },
+    ]);
     const shoppingList = new ShoppingList(shoppingRepository as any, productRepository as any);
 
     const result = await shoppingList.getListWithEffectiveStatuses("auto-1");
 
     expect(result.items[0]).toMatchObject({
-      id: "item-milk",
+      id: "item-milk-1",
+      effectiveStatus: "stored",
+      currentQuantity: 1,
+      missingQuantity: 0,
+    });
+    expect(result.items[1]).toMatchObject({
+      id: "item-milk-2",
       effectiveStatus: "planned",
       currentQuantity: 1,
-      missingQuantity: 2,
+      missingQuantity: 1,
+    });
+    expect(result.items[2]).toMatchObject({
+      id: "item-text-milk",
+      effectiveStatus: "planned",
+      currentQuantity: 1,
+      missingQuantity: 1,
+    });
+    expect(result.items[3]).toMatchObject({
+      id: "item-generic-milk",
+      effectiveStatus: "planned",
+      currentQuantity: 1,
+      missingQuantity: 1,
+    });
+    expect(result.items[4]).toMatchObject({
+      id: "item-purchased-milk",
+      effectiveStatus: "purchased",
+      currentQuantity: 1,
+      missingQuantity: 0,
     });
   });
 
