@@ -1,21 +1,15 @@
 import React from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {colors} from './theme/colors';
 
 type ShoppingListViewProps = {
-  onRequestClose: () => void;
+  onRequestClose?: () => void;
 };
 
-export default function ShoppingListView({onRequestClose}: ShoppingListViewProps) {
+export default function ShoppingListView(_: ShoppingListViewProps) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.root, {paddingTop: insets.top + 8, paddingBottom: insets.bottom + 12}]}>
-      <View style={styles.header}>
-        <Pressable onPress={onRequestClose} style={({pressed}) => [styles.back, pressed && styles.backPressed]} hitSlop={10}>
-          <Text style={styles.backText}>&#8592; Wróć</Text>
-        </Pressable>
-      </View>
+    <View style={[styles.root, {paddingTop: insets.top + 8}]}>
       <View style={styles.body}>
         <Text style={styles.title}>Lista zakupów</Text>
         <Text style={styles.hint}>
@@ -30,36 +24,20 @@ export default function ShoppingListView({onRequestClose}: ShoppingListViewProps
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.black,
-  },
-  header: {
-    paddingHorizontal: 8,
-  },
-  back: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  backPressed: {
-    opacity: 0.7,
-  },
-  backText: {
-    color: colors.successAccent,
-    fontSize: 16,
-    fontWeight: '700',
+    backgroundColor: '#000000',
   },
   body: {
     flex: 1,
     padding: 20,
   },
   title: {
-    color: colors.textPrimary,
+    color: '#ffffff',
     fontSize: 22,
     fontWeight: '800',
     marginBottom: 12,
   },
   hint: {
-    color: colors.textSecondary,
+    color: '#c9ced8',
     fontSize: 15,
     lineHeight: 22,
   },

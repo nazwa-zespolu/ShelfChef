@@ -98,7 +98,7 @@ function ScannerUnavailable({onRequestClose}: {onRequestClose?: () => void}) {
 }
 
 type ProductScannerViewProps = {
-  onRequestClose: () => void;
+  onRequestClose?: () => void;
   onProductAdded?: () => void;
 };
 
@@ -282,7 +282,7 @@ function ProductScannerVisionContent({
   onProductAdded,
   visionModule,
 }: {
-  onRequestClose: () => void;
+  onRequestClose?: () => void;
   onProductAdded?: () => void;
   visionModule: VisionCameraModule;
 }) {
@@ -548,12 +548,14 @@ function ProductScannerVisionContent({
         isActive={true}
         codeScanner={codeScanner}
       />
-      <Pressable
-        onPress={onRequestClose}
-        style={[styles.backOverlay, {top: Math.max(insets.top, 12)}]}
-        hitSlop={12}>
-        <Text style={styles.backText}>&#8592; Wróć</Text>
-      </Pressable>
+      {onRequestClose ? (
+        <Pressable
+          onPress={onRequestClose}
+          style={[styles.backOverlay, {top: Math.max(insets.top, 12)}]}
+          hitSlop={12}>
+          <Text style={styles.backText}>&#8592; Wróć</Text>
+        </Pressable>
+      ) : null}
       <Pressable
         onPress={openManualNoEanForm}
         style={[styles.manualOverlayButton, {top: Math.max(insets.top, 12)}]}
