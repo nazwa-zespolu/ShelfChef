@@ -1,6 +1,7 @@
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {colors} from './theme/colors';
 
 type ShoppingListViewProps = {
   onRequestClose?: () => void;
@@ -24,20 +25,20 @@ export default function ShoppingListView(_: ShoppingListViewProps) {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: colors.background,
   },
   body: {
     flex: 1,
     padding: 20,
   },
   title: {
-    color: '#ffffff',
+    color: colors.textPrimary,
     fontSize: 22,
     fontWeight: '800',
     marginBottom: 12,
   },
   hint: {
-    color: '#c9ced8',
+    color: colors.textSecondary,
     fontSize: 15,
     lineHeight: 22,
   },

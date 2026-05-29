@@ -1,8 +1,7 @@
 import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {Animated, PanResponder, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
+import {colors} from '../theme/colors';
 
-const DELETE_BG = '#d64545';
-const DELETE_BG_ACTIVE = '#b93535';
 const SWIPE_DELETE_THRESHOLD = 110;
 
 export function SwipeToDeleteCard({
@@ -88,7 +87,7 @@ export function SwipeToDeleteCard({
         pointerEvents="none"
         style={[
           styles.deleteBg,
-          {backgroundColor: active ? DELETE_BG_ACTIVE : DELETE_BG, opacity: bgOpacity},
+          {backgroundColor: colors.danger, opacity: active ? 0.92 : bgOpacity},
         ]}>
         <Text style={styles.deleteBgText}>Usuń</Text>
       </Animated.View>
@@ -112,7 +111,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
   },
   deleteBgText: {
-    color: '#fff',
+    color: colors.successText,
     fontWeight: '900',
     fontSize: 16,
     letterSpacing: 0.2,

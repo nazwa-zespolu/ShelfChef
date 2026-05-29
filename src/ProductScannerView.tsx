@@ -920,11 +920,11 @@ export default function ProductScannerView({onRequestClose, onProductAdded}: Pro
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.black,
+    backgroundColor: colors.background,
   },
   center: {
     flex: 1,
-    backgroundColor: '#111',
+    backgroundColor: colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
@@ -938,7 +938,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   backText: {
-    color: colors.successAccent,
+    color: colors.accent,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -946,12 +946,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 16,
     zIndex: 20,
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: colors.surface,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
   },
   manualOverlayButtonText: {
     color: colors.textPrimary,
@@ -976,16 +976,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   info: {
-    color: '#ddd',
+    color: colors.textSecondary,
     textAlign: 'center',
   },
   overlayInfo: {
-    color: colors.infoText,
+    color: colors.textSecondary,
     fontSize: 13,
     marginBottom: 2,
   },
   scanValue: {
-    color: colors.successAccent,
+    color: colors.accent,
     fontWeight: '700',
   },
   bottomSheet: {
@@ -994,12 +994,12 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     minHeight: BOTTOM_SHEET_HEIGHT,
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 16,
     paddingTop: 14,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOpacity: 0.35,
     shadowRadius: 8,
     shadowOffset: {width: 0, height: -3},
@@ -1034,7 +1034,7 @@ const styles = StyleSheet.create({
     width: 84,
     height: 84,
     borderRadius: 10,
-    backgroundColor: '#2a2e37',
+    backgroundColor: colors.surfaceMuted,
   },
   productMeta: {
     flex: 1,
@@ -1051,7 +1051,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   productEan: {
-    color: colors.successAccent,
+    color: colors.accent,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -1059,17 +1059,17 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   inputLabel: {
-    color: '#eef1f7',
+    color: colors.textPrimary,
     fontWeight: '600',
   },
   textInput: {
-    backgroundColor: colors.surfaceMid,
+    backgroundColor: colors.surfaceMuted,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
     color: colors.textPrimary,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
   },
   wheelsRow: {
     flexDirection: 'row',
@@ -1083,7 +1083,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 36,
     borderRadius: 9,
-    backgroundColor: colors.surfaceSoft,
+    backgroundColor: colors.surfaceSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1091,7 +1091,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.success,
   },
   expirationToggleText: {
-    color: '#c9ced8',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   expirationToggleTextActive: {
@@ -1105,7 +1105,7 @@ const styles = StyleSheet.create({
   },
   amountButtonBase: {
     height: 42,
-    backgroundColor: colors.surfaceSoft,
+    backgroundColor: colors.surfaceSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1145,10 +1145,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   secondaryButton: {
-    backgroundColor: colors.surfaceSoft,
+    backgroundColor: colors.surfaceSubtle,
   },
   secondaryButtonText: {
-    color: '#e5e7eb',
+    color: colors.textPrimary,
   },
   primaryButton: {
     backgroundColor: colors.success,

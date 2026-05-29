@@ -46,7 +46,7 @@ const styles = StyleSheet.create({
   wrap: {
     backgroundColor: colors.tabBackground,
     borderTopWidth: 1,
-    borderTopColor: colors.borderDark,
+    borderTopColor: colors.border,
     paddingHorizontal: 10,
     paddingTop: 8,
   },

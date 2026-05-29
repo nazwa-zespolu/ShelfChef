@@ -209,7 +209,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
   },
   sortLabel: {
     color: colors.textMuted,
@@ -229,9 +229,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
-    backgroundColor: colors.surfaceMid,
+    backgroundColor: colors.surfaceMuted,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
     maxWidth: '48%',
   },
   sortChipActive: {
@@ -262,11 +262,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   card: {
-    backgroundColor: colors.surfaceDark,
+    backgroundColor: colors.surface,
     borderRadius: 14,
     padding: 12,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.border,
   },
   cardRow: {
     flexDirection: 'row',
@@ -296,7 +296,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   badgeOpen: {
-    backgroundColor: colors.surfaceSoft,
+    backgroundColor: colors.surfaceSubtle,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
@@ -320,7 +320,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   metaValue: {
-    color: colors.infoText,
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   emptyBox: {
