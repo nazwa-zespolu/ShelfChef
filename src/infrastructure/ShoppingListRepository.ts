@@ -479,6 +479,14 @@ export class ShoppingListRepository {
     const inventoryIds: string[] = [];
     const storedItemIds: string[] = [];
     runInTransaction(() => {
+      const listResult = db.execute(
+        'SELECT type FROM shopping_lists WHERE id = ?',
+        [listId],
+      );
+      if (!listResult.rows || listResult.rows.length === 0) {
+        throw new Error(`Shopping list not found: ${listId}`);
+      }
+      const listType = listResult.rows.item(0).type as ShoppingListType;
       const result = db.execute(
         `
           SELECT
@@ -514,17 +522,31 @@ export class ShoppingListRepository {
             );
           }
           storedItemIds.push(row.id);
-          db.execute(
-            `
-              UPDATE shopping_list_items
-              SET status = 'stored',
-                  stored_at = ?,
-                  updated_at = ?
-              WHERE id = ?
-            `,
-            [nowIso(), nowIso(), row.id],
-          );
+          if (listType === 'auto') {
+            db.execute(
+              `
+                UPDATE shopping_list_items
+                SET status = 'stored',
+                    stored_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+              `,
+              [nowIso(), nowIso(), row.id],
+            );
+          }
         }
+      }
+      if (listType === 'manual') {
+        db.execute(
+          `
+            UPDATE shopping_list_items
+            SET status = 'planned',
+                stored_at = NULL,
+                updated_at = ?
+            WHERE list_id = ?
+          `,
+          [nowIso(), listId],
+        );
       }
     });
     return {inventoryIds, storedItemIds};

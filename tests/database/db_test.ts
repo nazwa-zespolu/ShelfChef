@@ -397,7 +397,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     return toRows([]);
   }
 
-  if (normalized.startsWith('UPDATE SHOPPING_LIST_ITEMS SET STATUS = \'PLANNED\'')) {
+  if (normalized.startsWith('UPDATE SHOPPING_LIST_ITEMS SET STATUS = \'PLANNED\', QUANTITY = ?')) {
     const [quantity, updatedAt, id] = params;
     const row = shoppingListItems.get(id);
     if (row) {
@@ -441,6 +441,24 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       row.stored_at = storedAt;
       row.updated_at = updatedAt;
       shoppingListItems.set(id, row);
+    }
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('SELECT TYPE FROM SHOPPING_LISTS WHERE ID = ?')) {
+    const [id] = params;
+    const row = shoppingLists.get(id);
+    return toRows(row ? [{type: row.type}] : []);
+  }
+
+  if (normalized.startsWith('UPDATE SHOPPING_LIST_ITEMS SET STATUS = \'PLANNED\'')) {
+    const [updatedAt, listId] = params;
+    for (const row of shoppingListItems.values()) {
+      if (row.list_id === listId) {
+        row.status = 'planned';
+        row.stored_at = null;
+        row.updated_at = updatedAt;
+      }
     }
     return toRows([]);
   }
@@ -924,7 +942,7 @@ describe('ProductRepository + database integration', () => {
     expect(result.inventoryIds).toHaveLength(2);
     expect(new Set(result.inventoryIds).size).toBe(2);
     expect(result.storedItemIds).toEqual([item.id]);
-    expect(items[0]).toMatchObject({status: 'stored'});
+    expect(items[0]).toMatchObject({status: 'planned', storedAt: null});
     expect(inventoryItems).toHaveLength(2);
     expect(inventoryItems[0].name).toBe('Mleko');
     expect(inventoryItems[1].name).toBe('Mleko');

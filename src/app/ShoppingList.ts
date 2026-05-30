@@ -53,7 +53,16 @@ export class ShoppingList {
   async getListWithEffectiveStatuses(listId: string): Promise<ShoppingListDetails> {
     const list = await this.requireList(listId);
     const items = await this.requireShoppingRepository().getItems(listId);
-    if (list.type !== 'auto' || list.isLocked) {
+    if (list.type === 'manual') {
+      const catalogIndex = await this.loadCatalogIndex();
+      const inventory = await this.loadFreshInventory();
+      return {
+        list,
+        items: items.map(item => this.toManualItemState(item, catalogIndex, inventory)),
+      };
+    }
+
+    if (list.isLocked) {
       return {
         list,
         items: items.map(item => this.toStaticItemState(item)),
@@ -282,13 +291,46 @@ export class ShoppingList {
   }
 
   private toStaticItemState(item: ShoppingListItem): AutoShoppingListItemState {
-    const currentQuantity = item.status === 'stored' ? item.quantity : 0;
+    const normalizedStatus = item.status === 'unavailable' ? 'planned' : item.status;
+    const currentQuantity = normalizedStatus === 'stored' ? item.quantity : 0;
     return {
       ...item,
-      effectiveStatus: item.status,
+      effectiveStatus: normalizedStatus,
       currentQuantity,
-      missingQuantity: item.status === 'planned' ? item.quantity : 0,
+      missingQuantity: normalizedStatus === 'planned' ? item.quantity : 0,
     };
+  }
+
+  private toManualItemState(
+    item: ShoppingListItem,
+    catalogIndex: CatalogIndex,
+    inventory: InventoryItem[],
+  ): AutoShoppingListItemState {
+    const currentQuantity = this.countInventoryForItem(item, catalogIndex, inventory);
+    const effectiveStatus = item.status === 'purchased' ? 'purchased' : 'planned';
+    return {
+      ...item,
+      effectiveStatus,
+      currentQuantity,
+      missingQuantity: effectiveStatus === 'planned'
+        ? Math.max(0, item.quantity - currentQuantity)
+        : 0,
+    };
+  }
+
+  private countInventoryForItem(
+    item: ShoppingListItem,
+    catalogIndex: CatalogIndex,
+    inventory: InventoryItem[],
+  ): number {
+    if (!item.catalogProductId) {
+      return this.countFreshInventoryByLabel(item.label, inventory);
+    }
+    const catalogProduct = catalogIndex.byId.get(item.catalogProductId);
+    if (!catalogProduct) {
+      return this.countFreshInventoryByLabel(item.label, inventory);
+    }
+    return this.countFreshInventory(catalogProduct, catalogIndex, inventory);
   }
 
   private consumeFreshInventory(

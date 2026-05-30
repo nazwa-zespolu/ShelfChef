@@ -63,13 +63,12 @@ const shoppingList = new ShoppingList(shoppingRepository, productRepository);
 function statusLabel(status: ShoppingItemStatus) {
   switch (status) {
     case 'planned':
+    case 'unavailable':
       return 'Do kupienia';
     case 'purchased':
       return 'Kupione';
-    case 'unavailable':
-      return 'Nie było';
     case 'stored':
-      return 'W zapasach';
+      return 'Masz w zapasach';
   }
 }
 
@@ -524,9 +523,9 @@ export default function ShoppingListView({
   );
 
   const renderItem = ({item}: {item: AutoShoppingListItemState}) => {
-    const shownStatus = selectedList?.type === 'auto' && !selectedList.isLocked
-      ? item.effectiveStatus
-      : item.status;
+    const shownStatus = item.effectiveStatus;
+    const isPurchased = shownStatus === 'purchased';
+    const nextToggleStatus: ShoppingItemStatus = isPurchased ? 'planned' : 'purchased';
     return (
       <SwipeToDeleteCard
         borderRadius={8}
@@ -534,18 +533,17 @@ export default function ShoppingListView({
         onDelete={() => { deleteItem(item.id).catch(() => {}); }}
         onSwipeRight={
           selectedList?.type === 'manual'
-            ? () => { updateStatus(item.id, 'purchased').catch(() => {}); }
+            ? () => { updateStatus(item.id, nextToggleStatus).catch(() => {}); }
             : undefined
-        }>
+        }
+        rightLabel={isPurchased ? 'Cofnij' : 'Kupione'}
+        rightActionTone={isPurchased ? 'warning' : 'success'}>
         <View style={[styles.itemCard, styles.swipeItemCard]}>
         <View style={styles.rowBetween}>
           <View style={styles.rowText}>
             <Text style={styles.itemTitle} numberOfLines={2}>{item.label}</Text>
             <Text style={styles.itemMeta}>
-              {statusLabel(shownStatus)} · ilość {item.quantity}
-              {selectedList?.type === 'auto'
-                ? ` · masz ${item.currentQuantity}`
-                : ''}
+              {statusLabel(shownStatus)} · masz {item.currentQuantity}
             </Text>
           </View>
           <View style={styles.quantityStepper}>
@@ -563,9 +561,11 @@ export default function ShoppingListView({
           </View>
         </View>
         <View style={styles.actionRow}>
-          <ActionButton label="Kupione" onPress={() => updateStatus(item.id, 'purchased')} />
-          <ActionButton label="Nie było" onPress={() => updateStatus(item.id, 'unavailable')} />
-          <ActionButton label="Cofnij" onPress={() => updateStatus(item.id, 'planned')} />
+          <ActionButton
+            label={isPurchased ? 'Cofnij' : 'Kupione'}
+            tone={isPurchased ? 'warning' : 'success'}
+            onPress={() => updateStatus(item.id, nextToggleStatus)}
+          />
         </View>
         </View>
       </SwipeToDeleteCard>
@@ -711,7 +711,6 @@ export default function ShoppingListView({
     <View style={styles.content}>
       <View style={styles.listsHero}>
         <Text style={styles.screenTitle}>Listy zakupów</Text>
-        <Text style={styles.screenSubtitle}>Zarządzaj wieloma listami w jednym miejscu</Text>
         <View style={styles.searchCreateRow}>
           <View style={styles.searchBox}>
             <Text style={styles.searchIcon}>⌕</Text>
@@ -951,10 +950,12 @@ function Header({title, onBack}: {title: string; onBack: () => void}) {
 function ActionButton({
   label,
   danger,
+  tone = 'neutral',
   onPress,
 }: {
   label: string;
   danger?: boolean;
+  tone?: 'neutral' | 'success' | 'warning';
   onPress: () => void;
 }) {
   return (
@@ -962,10 +963,18 @@ function ActionButton({
       onPress={onPress}
       style={({pressed}) => [
         styles.actionButton,
+        tone === 'success' && styles.actionButtonSuccess,
+        tone === 'warning' && styles.actionButtonWarning,
         danger && styles.actionButtonDanger,
         pressed && styles.pressed,
       ]}>
-      <Text style={[styles.actionButtonText, danger && styles.actionButtonTextDanger]}>
+      <Text
+        style={[
+          styles.actionButtonText,
+          tone === 'success' && styles.actionButtonTextSuccess,
+          tone === 'warning' && styles.actionButtonTextWarning,
+          danger && styles.actionButtonTextDanger,
+        ]}>
         {label}
       </Text>
     </Pressable>
@@ -1254,12 +1263,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: 30,
     fontWeight: '900',
-    marginBottom: 4,
-  },
-  screenSubtitle: {
-    color: colors.textSecondary,
-    fontSize: 15,
-    marginBottom: 18,
+    marginBottom: 16,
   },
   searchCreateRow: {
     flexDirection: 'row',
@@ -1581,6 +1585,12 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     backgroundColor: colors.surfaceSubtle,
   },
+  actionButtonSuccess: {
+    backgroundColor: colors.success,
+  },
+  actionButtonWarning: {
+    backgroundColor: colors.warning,
+  },
   actionButtonDanger: {
     backgroundColor: colors.danger,
   },
@@ -1588,6 +1598,12 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: 12,
     fontWeight: '800',
+  },
+  actionButtonTextSuccess: {
+    color: colors.successText,
+  },
+  actionButtonTextWarning: {
+    color: colors.warningText,
   },
   actionButtonTextDanger: {
     color: colors.successText,

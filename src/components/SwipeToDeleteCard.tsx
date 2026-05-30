@@ -12,6 +12,7 @@ export function SwipeToDeleteCard({
   borderRadius = 14,
   allowRightDelete = true,
   rightLabel = 'Kupione',
+  rightActionTone = 'success',
 }: {
   children: React.ReactNode;
   onDelete: () => void;
@@ -20,6 +21,7 @@ export function SwipeToDeleteCard({
   borderRadius?: number;
   allowRightDelete?: boolean;
   rightLabel?: string;
+  rightActionTone?: 'success' | 'warning';
 }) {
   const {width} = useWindowDimensions();
   const translateX = useRef(new Animated.Value(0)).current;
@@ -106,7 +108,9 @@ export function SwipeToDeleteCard({
     extrapolate: 'clamp',
   });
   const showsRightAction = direction === 1 && onSwipeRight != null;
-  const bgColor = showsRightAction ? colors.success : colors.danger;
+  const rightActionBgColor = rightActionTone === 'warning' ? colors.warning : colors.success;
+  const rightActionTextColor = rightActionTone === 'warning' ? colors.warningText : colors.successText;
+  const bgColor = showsRightAction ? rightActionBgColor : colors.danger;
   const bgText = showsRightAction ? rightLabel : 'Usuń';
 
   return (
@@ -122,7 +126,11 @@ export function SwipeToDeleteCard({
             opacity: active ? 0.92 : bgOpacity,
           },
         ]}>
-        <Text style={[styles.deleteBgText, showsRightAction && styles.doneBgText]}>
+        <Text
+          style={[
+            styles.deleteBgText,
+            showsRightAction && {color: rightActionTextColor},
+          ]}>
           {bgText}
         </Text>
       </Animated.View>
@@ -155,8 +163,5 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     fontSize: 16,
     letterSpacing: 0.2,
-  },
-  doneBgText: {
-    color: colors.successText,
   },
 });
