@@ -2,6 +2,7 @@ import {
   AutoShoppingListItemState,
   CatalogProduct,
   InventoryItem,
+  ShoppingListIconKey,
   ShoppingItemStatus,
   ShoppingListItem,
   ShoppingListSummary,
@@ -42,8 +43,15 @@ export class ShoppingList {
     this.productRepository = productRepository;
   }
 
-  async createList(name: string, type: ShoppingListType): Promise<ShoppingListSummary> {
-    return this.requireShoppingRepository().createList(name, type);
+  async createList(
+    name: string,
+    type: ShoppingListType,
+    iconKey?: ShoppingListIconKey,
+  ): Promise<ShoppingListSummary> {
+    const repository = this.requireShoppingRepository();
+    return iconKey == null
+      ? repository.createList(name, type)
+      : repository.createList(name, type, iconKey);
   }
 
   async addItem(listId: string, input: AddShoppingItemInput): Promise<ShoppingListItem> {

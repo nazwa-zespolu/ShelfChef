@@ -28,6 +28,7 @@ import {ShoppingList} from './app/ShoppingList';
 import {ProductRepository} from './infrastructure/ProductRepository';
 import {ShoppingListRepository} from './infrastructure/ShoppingListRepository';
 import {SwipeToDeleteCard} from './components/SwipeToDeleteCard';
+import {getShoppingListIconDefinition} from './shoppingListIcons';
 import {colors} from './theme/colors';
 
 type ShoppingListViewProps = {
@@ -95,10 +96,6 @@ function purchasedLabel(count: number) {
     return '1 kupiona';
   }
   return `${count} kupionych`;
-}
-
-function listIconSymbol(list: ShoppingListSummary) {
-  return list.type === 'auto' ? '↻' : '▤';
 }
 
 function parseQuantityInput(value: string): number | null {
@@ -690,7 +687,11 @@ export default function ShoppingListView({
       onPress={openSuggestions}
       style={({pressed}) => [styles.replenishmentTile, pressed && styles.cardPressed]}>
       <View style={styles.replenishmentIcon}>
-        <Text style={styles.replenishmentIconText}>↻</Text>
+        {React.createElement(getShoppingListIconDefinition('refresh').Icon, {
+          color: colors.accent,
+          size: 42,
+          strokeWidth: 2,
+        })}
       </View>
       <View style={styles.replenishmentText}>
         <View style={styles.titleBadgeRow}>
@@ -827,6 +828,7 @@ function SortableListRow({
   const dragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const movedAt = useRef(0);
   const [dragging, setDragging] = useState(false);
+  const Icon = getShoppingListIconDefinition(item.iconKey).Icon;
 
   const resetPosition = useCallback(() => {
     if (dragTimer.current) {
@@ -906,7 +908,7 @@ function SortableListRow({
           ]}>
           <View style={styles.rowBetween}>
             <View style={styles.listIconBubble} {...dragResponder.panHandlers}>
-              <Text style={styles.listIconText}>{listIconSymbol(item)}</Text>
+              <Icon color={colors.accent} size={26} strokeWidth={2.2} />
             </View>
             <View style={styles.rowText}>
               <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
@@ -1355,11 +1357,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  replenishmentIconText: {
-    color: colors.accent,
-    fontSize: 42,
-    fontWeight: '700',
-  },
   replenishmentText: {
     flex: 1,
     minWidth: 0,
@@ -1438,11 +1435,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  listIconText: {
-    color: colors.accent,
-    fontSize: 25,
-    fontWeight: '800',
   },
   cardTitle: {
     color: colors.textPrimary,

@@ -28,6 +28,8 @@ export interface CatalogProduct {
 
 export type ShoppingListType = 'manual' | 'auto';
 
+export type ShoppingListIconKey = string;
+
 export type ShoppingItemStatus = 'planned' | 'purchased' | 'unavailable' | 'stored';
 
 export type ShoppingItemSource = 'manual' | 'suggestion' | 'reactivated';
@@ -36,6 +38,7 @@ export interface ShoppingListSummary {
   id: string;
   name: string;
   type: ShoppingListType;
+  iconKey: ShoppingListIconKey;
   isLocked: boolean;
   isArchived: boolean;
   sortOrder: number;

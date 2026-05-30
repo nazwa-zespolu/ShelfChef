@@ -3,6 +3,7 @@ import {
   CatalogProductKind,
   ShoppingItemSource,
   ShoppingItemStatus,
+  ShoppingListIconKey,
   ShoppingListItem,
   ShoppingListSummary,
   ShoppingListType,
@@ -38,6 +39,10 @@ function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
 }
 
+export function getDefaultShoppingListIconKey(type: ShoppingListType): ShoppingListIconKey {
+  return type === 'auto' ? 'refresh' : 'basket';
+}
+
 function mapCatalogProduct(row: Record<string, any>): CatalogProduct {
   return {
     id: row.id,
@@ -56,6 +61,7 @@ function mapShoppingList(row: Record<string, any>): ShoppingListSummary {
     id: row.id,
     name: row.name,
     type: row.type,
+    iconKey: row.icon_key ?? getDefaultShoppingListIconKey(row.type),
     isLocked: row.is_locked === 1,
     isArchived: row.is_archived === 1,
     sortOrder: Number(row.sort_order ?? 0),
@@ -81,7 +87,11 @@ function mapShoppingItem(row: Record<string, any>): ShoppingListItem {
 }
 
 export class ShoppingListRepository {
-  async createList(name: string, type: ShoppingListType): Promise<ShoppingListSummary> {
+  async createList(
+    name: string,
+    type: ShoppingListType,
+    iconKey: ShoppingListIconKey = getDefaultShoppingListIconKey(type),
+  ): Promise<ShoppingListSummary> {
     const timestamp = nowIso();
     const id = generateId('shopping-list');
     const orderResult = db.execute(
@@ -94,6 +104,7 @@ export class ShoppingListRepository {
           id,
           name,
           type,
+          icon_key,
           is_locked,
           is_archived,
           sort_order,
@@ -101,14 +112,15 @@ export class ShoppingListRepository {
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, 0, 0, ?, NULL, ?, ?)
+        VALUES (?, ?, ?, ?, 0, 0, ?, NULL, ?, ?)
       `,
-      [id, name.trim(), type, sortOrder, timestamp, timestamp],
+      [id, name.trim(), type, iconKey, sortOrder, timestamp, timestamp],
     );
     return {
       id,
       name: name.trim(),
       type,
+      iconKey,
       isLocked: false,
       isArchived: false,
       sortOrder,

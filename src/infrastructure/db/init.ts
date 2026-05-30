@@ -2,7 +2,7 @@ import { open } from 'react-native-quick-sqlite';
 
 // Otwarcie bazy danych
 export const db = open({ name: 'shelfchef.db' });
-const SHOPPING_LISTS_SCHEMA_VERSION = 4;
+const SHOPPING_LISTS_SCHEMA_VERSION = 5;
 
 const MOCK_DATA_SQL = [
   // 1. Product definitions (in English) - expanded base for the LLM
@@ -82,6 +82,7 @@ function migrateToShoppingListsSchema() {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         type TEXT NOT NULL CHECK(type IN ('manual', 'auto')),
+        icon_key TEXT NOT NULL DEFAULT 'basket',
         is_locked INTEGER NOT NULL DEFAULT 0,
         is_archived INTEGER NOT NULL DEFAULT 0,
         sort_order INTEGER NOT NULL DEFAULT 0,
@@ -158,6 +159,7 @@ function migrateToShoppingListsSchema() {
         id,
         name,
         type,
+        icon_key,
         is_locked,
         is_archived,
         sort_order,
@@ -169,6 +171,7 @@ function migrateToShoppingListsSchema() {
         'default-auto-minimum',
         'Moje minimum',
         'auto',
+        'refresh',
         0,
         0,
         0,
@@ -217,6 +220,11 @@ function migrateInventoryExpiryNullable() {
 
   db.execute('DROP TABLE inventory');
   db.execute('ALTER TABLE inventory_v4 RENAME TO inventory');
+}
+
+function migrateShoppingListIcons() {
+  db.execute("ALTER TABLE shopping_lists ADD COLUMN icon_key TEXT NOT NULL DEFAULT 'basket'");
+  db.execute("UPDATE shopping_lists SET icon_key = 'refresh' WHERE type = 'auto'");
 }
 
 function migrateCatalogConcreteToSpecific() {
@@ -306,6 +314,9 @@ function runMigrations() {
     }
     if (currentVersion < 4) {
       migrateInventoryExpiryNullable();
+    }
+    if (currentVersion >= 1 && currentVersion < 5) {
+      migrateShoppingListIcons();
     }
     db.execute(`PRAGMA user_version = ${SHOPPING_LISTS_SCHEMA_VERSION}`);
   });

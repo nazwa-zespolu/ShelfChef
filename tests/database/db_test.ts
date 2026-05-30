@@ -30,6 +30,7 @@ type ShoppingListRow = {
   id: string;
   name: string;
   type: 'manual' | 'auto';
+  icon_key: string;
   is_locked: number;
   is_archived: number;
   sort_order: number;
@@ -101,11 +102,21 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     normalized.startsWith('CREATE TABLE') ||
     normalized.startsWith('CREATE UNIQUE INDEX') ||
     normalized.startsWith('CREATE INDEX') ||
-    normalized.startsWith('ALTER TABLE') ||
     normalized === 'BEGIN TRANSACTION' ||
     normalized === 'COMMIT' ||
     normalized === 'ROLLBACK'
   ) {
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('ALTER TABLE SHOPPING_LISTS ADD COLUMN ICON_KEY')) {
+    for (const row of shoppingLists.values()) {
+      row.icon_key = row.icon_key ?? 'basket';
+    }
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('ALTER TABLE')) {
     return toRows([]);
   }
 
@@ -318,11 +329,12 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
   }
 
   if (normalized.startsWith('INSERT INTO SHOPPING_LISTS')) {
-    const [id, name, type, sortOrder, createdAt, updatedAt] = params;
+    const [id, name, type, iconKey, sortOrder, createdAt, updatedAt] = params;
     shoppingLists.set(id, {
       id,
       name,
       type,
+      icon_key: iconKey,
       is_locked: 0,
       is_archived: 0,
       sort_order: sortOrder,
@@ -330,6 +342,15 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       created_at: createdAt,
       updated_at: updatedAt,
     });
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('UPDATE SHOPPING_LISTS SET ICON_KEY =')) {
+    for (const row of shoppingLists.values()) {
+      if (row.type === 'auto') {
+        row.icon_key = 'refresh';
+      }
+    }
     return toRows([]);
   }
 
@@ -469,6 +490,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
         id: 'default-auto-minimum',
         name: 'Moje minimum',
         type: 'auto',
+        icon_key: 'refresh',
         is_locked: 0,
         is_archived: 0,
         sort_order: 0,
@@ -696,12 +718,13 @@ describe('ProductRepository + database integration', () => {
     const version = db.execute('PRAGMA user_version').rows!.item(0);
     const lists = db.execute('SELECT * FROM shopping_lists').rows!;
 
-    expect(version.user_version).toBe(4);
+    expect(version.user_version).toBe(5);
     expect(lists.length).toBe(1);
     expect(lists.item(0)).toMatchObject({
       id: 'default-auto-minimum',
       name: 'Moje minimum',
       type: 'auto',
+      icon_key: 'refresh',
       is_locked: 0,
       is_archived: 0,
     });
@@ -733,8 +756,8 @@ describe('ProductRepository + database integration', () => {
     });
   });
 
-  it('tworzy listy zakupów i dodaje tekstową pozycję do listy manual', async () => {
-    const list = await shoppingListRepository.createList('Cotygodniowe', 'manual');
+  it('tworzy listy zakupów z ikoną i dodaje tekstową pozycję do listy manual', async () => {
+    const list = await shoppingListRepository.createList('Cotygodniowe', 'manual', 'cart');
     const item = await shoppingListRepository.addItem(list.id, {
       label: 'Mleko',
       quantity: 2,
@@ -744,6 +767,7 @@ describe('ProductRepository + database integration', () => {
     const items = await shoppingListRepository.getItems(list.id);
 
     expect(lists.map(l => l.name)).toContain('Cotygodniowe');
+    expect(lists.find(l => l.id === list.id)?.iconKey).toBe('cart');
     expect(item).toMatchObject({
       listId: list.id,
       catalogProductId: null,
