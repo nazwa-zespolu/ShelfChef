@@ -42,10 +42,22 @@ const genericMilk = {
   updatedAt: "2026-05-27T00:00:00.000Z",
 };
 
+const lactoseFreeMilk = {
+  id: "catalog-specific-222",
+  name: "Mleko bez laktozy",
+  normalizedName: "mleko bez laktozy",
+  kind: "specific" as const,
+  productEan: "222",
+  parentCatalogProductId: null,
+  createdAt: "2026-05-27T00:00:00.000Z",
+  updatedAt: "2026-05-27T00:00:00.000Z",
+};
+
 const milkItem: ShoppingListItem = {
   id: "item-milk",
   listId: "auto-1",
   catalogProductId: "catalog-specific-111",
+  linkedCatalogProducts: [],
   label: "Mleko",
   quantity: 3,
   sortOrder: 0,
@@ -67,7 +79,7 @@ function createRepositories(items = [milkItem]) {
         ? [{...milkItem, id: "locked-item", listId, quantity: 10}]
         : items,
     ),
-    getCatalogProducts: jest.fn(async () => [milk, genericMilk]),
+    getCatalogProducts: jest.fn(async () => [milk, genericMilk, lactoseFreeMilk]),
     setListLocked: jest.fn(async () => undefined),
     updateItemStatusSnapshot: jest.fn(async () => undefined),
   };
@@ -208,6 +220,38 @@ describe("UC-06: ShoppingList - domain rules", () => {
         }),
       ]),
     );
+  });
+
+  it("counts linked catalog products for text auto items", async () => {
+    const {shoppingRepository, productRepository} = createRepositories([
+      {
+        ...milkItem,
+        id: "item-text-milk",
+        catalogProductId: null,
+        linkedCatalogProducts: [lactoseFreeMilk],
+        label: "Mleko",
+        quantity: 1,
+      },
+    ]);
+    productRepository.getFullInventory.mockResolvedValueOnce([
+      {
+        id: "inv-lactose-free",
+        ean: "222",
+        name: "Mleko bez laktozy",
+        expiryDate: "2999-01-01",
+        isOpened: false,
+      },
+    ]);
+    const shoppingList = new ShoppingList(shoppingRepository as any, productRepository as any);
+
+    const result = await shoppingList.getListWithEffectiveStatuses("auto-1");
+
+    expect(result.items[0]).toMatchObject({
+      id: "item-text-milk",
+      effectiveStatus: "stored",
+      currentQuantity: 1,
+      missingQuantity: 0,
+    });
   });
 
   it("stores effective planned/stored statuses when locking an auto list", async () => {

@@ -122,10 +122,8 @@ export class ShoppingList {
     const catalogIndex = await this.loadCatalogIndex();
     const inventory = await this.loadFreshInventory();
     const usedInventoryIds = new Set<string>();
-    const displayQuantityByCatalogId = new Map<string, number>();
-    const consumedQuantityByCatalogId = new Map<string, number>();
-    const displayQuantityByLabel = new Map<string, number>();
-    const consumedQuantityByLabel = new Map<string, number>();
+    const displayQuantityByInventoryKey = new Map<string, number>();
+    const consumedQuantityByInventoryKey = new Map<string, number>();
     const grouped = new Map<string, ShoppingSuggestion>();
 
     for (const list of lists) {
@@ -136,53 +134,35 @@ export class ShoppingList {
         }
 
         const catalogProduct = item.catalogProductId
-          ? catalogIndex.byId.get(item.catalogProductId)
+          ? catalogIndex.byId.get(item.catalogProductId) ?? null
           : null;
         const normalizedName = catalogProduct?.normalizedName ?? normalizeProductName(item.label);
-        const groupKey = catalogProduct ? `catalog:${catalogProduct.id}` : `text:${normalizedName}`;
+        const inventoryKey = this.buildItemInventoryKey(item, catalogProduct, normalizedName);
+        const groupKey = inventoryKey;
         const suggestionName = catalogProduct?.name ?? item.label;
 
-        let displayQuantity: number | undefined;
-        let consumedQuantity: number | undefined;
-        if (catalogProduct) {
-          displayQuantity = displayQuantityByCatalogId.get(catalogProduct.id);
-          if (displayQuantity == null) {
-            displayQuantity = this.countFreshInventory(
-              catalogProduct,
-              catalogIndex,
-              inventory,
-            );
-            displayQuantityByCatalogId.set(catalogProduct.id, displayQuantity);
-          }
+        let displayQuantity = displayQuantityByInventoryKey.get(inventoryKey);
+        if (displayQuantity == null) {
+          displayQuantity = this.countFreshInventoryForItem(
+            item,
+            catalogProduct,
+            catalogIndex,
+            inventory,
+          );
+          displayQuantityByInventoryKey.set(inventoryKey, displayQuantity);
+        }
 
-          consumedQuantity = consumedQuantityByCatalogId.get(catalogProduct.id);
-          if (consumedQuantity == null) {
-            consumedQuantity = this.consumeFreshInventory(
-              catalogProduct,
-              catalogIndex,
-              inventory,
-              usedInventoryIds,
-              item.quantity,
-            );
-            consumedQuantityByCatalogId.set(catalogProduct.id, consumedQuantity);
-          }
-        } else {
-          displayQuantity = displayQuantityByLabel.get(normalizedName);
-          if (displayQuantity == null) {
-            displayQuantity = this.countFreshInventoryByLabel(item.label, inventory);
-            displayQuantityByLabel.set(normalizedName, displayQuantity);
-          }
-
-          consumedQuantity = consumedQuantityByLabel.get(normalizedName);
-          if (consumedQuantity == null) {
-            consumedQuantity = this.consumeFreshInventoryByLabel(
-              item.label,
-              inventory,
-              usedInventoryIds,
-              item.quantity,
-            );
-            consumedQuantityByLabel.set(normalizedName, consumedQuantity);
-          }
+        let consumedQuantity = consumedQuantityByInventoryKey.get(inventoryKey);
+        if (consumedQuantity == null) {
+          consumedQuantity = this.consumeFreshInventoryForItem(
+            item,
+            catalogProduct,
+            catalogIndex,
+            inventory,
+            usedInventoryIds,
+            item.quantity,
+          );
+          consumedQuantityByInventoryKey.set(inventoryKey, consumedQuantity);
         }
         const missingQuantity = Math.max(0, item.quantity - consumedQuantity);
         if (missingQuantity === 0) {
@@ -193,6 +173,7 @@ export class ShoppingList {
         if (!existing) {
           grouped.set(groupKey, {
             catalogProductId: catalogProduct?.id ?? null,
+            linkedCatalogProductIds: item.linkedCatalogProducts.map(product => product.id),
             name: suggestionName,
             normalizedName,
             missingQuantity,
@@ -210,6 +191,12 @@ export class ShoppingList {
           existing.sourceAutoListIds.push(list.id);
           existing.sourceAutoListNames.push(list.name);
         }
+        existing.linkedCatalogProductIds = Array.from(
+          new Set([
+            ...existing.linkedCatalogProductIds,
+            ...item.linkedCatalogProducts.map(product => product.id),
+          ]),
+        );
         if (missingQuantity > existing.missingQuantity) {
           existing.missingQuantity = missingQuantity;
           existing.currentQuantity = displayQuantity;
@@ -283,9 +270,16 @@ export class ShoppingList {
     usedInventoryIds: Set<string>,
   ): AutoShoppingListItemState {
     if (!item.catalogProductId) {
-      const displayQuantity = this.countFreshInventoryByLabel(item.label, inventory);
-      const consumedQuantity = this.consumeFreshInventoryByLabel(
-        item.label,
+      const displayQuantity = this.countFreshInventoryForItem(
+        item,
+        null,
+        catalogIndex,
+        inventory,
+      );
+      const consumedQuantity = this.consumeFreshInventoryForItem(
+        item,
+        null,
+        catalogIndex,
         inventory,
         usedInventoryIds,
         item.quantity,
@@ -304,12 +298,14 @@ export class ShoppingList {
       return this.toStaticItemState(item);
     }
 
-    const displayQuantity = this.countFreshInventory(
+    const displayQuantity = this.countFreshInventoryForItem(
+      item,
       catalogProduct,
       catalogIndex,
       inventory,
     );
-    const consumedQuantity = this.consumeFreshInventory(
+    const consumedQuantity = this.consumeFreshInventoryForItem(
+      item,
       catalogProduct,
       catalogIndex,
       inventory,
@@ -358,87 +354,70 @@ export class ShoppingList {
     catalogIndex: CatalogIndex,
     inventory: InventoryItem[],
   ): number {
-    if (!item.catalogProductId) {
-      return this.countFreshInventoryByLabel(item.label, inventory);
-    }
-    const catalogProduct = catalogIndex.byId.get(item.catalogProductId);
-    if (!catalogProduct) {
-      return this.countFreshInventoryByLabel(item.label, inventory);
-    }
-    return this.countFreshInventory(catalogProduct, catalogIndex, inventory);
+    const catalogProduct = item.catalogProductId
+      ? catalogIndex.byId.get(item.catalogProductId) ?? null
+      : null;
+    return this.countFreshInventoryForItem(item, catalogProduct, catalogIndex, inventory);
   }
 
-  private consumeFreshInventory(
-    catalogProduct: CatalogProduct,
+  private consumeFreshInventoryForItem(
+    shoppingItem: ShoppingListItem,
+    catalogProduct: CatalogProduct | null,
     catalogIndex: CatalogIndex,
     inventory: InventoryItem[],
     usedInventoryIds: Set<string>,
     maxQuantity: number,
   ): number {
     let count = 0;
-    for (const item of inventory) {
+    for (const inventoryItem of inventory) {
       if (count >= maxQuantity) {
         break;
       }
-      if (usedInventoryIds.has(item.id)) {
+      if (usedInventoryIds.has(inventoryItem.id)) {
         continue;
       }
-      if (!this.inventoryMatchesCatalogProduct(item, catalogProduct, catalogIndex)) {
+      if (!this.inventoryMatchesShoppingItem(
+        inventoryItem,
+        catalogProduct,
+        catalogIndex,
+        shoppingItem,
+      )) {
         continue;
       }
-      usedInventoryIds.add(item.id);
+      usedInventoryIds.add(inventoryItem.id);
       count += 1;
     }
     return count;
   }
 
-  private countFreshInventory(
-    catalogProduct: CatalogProduct,
+  private countFreshInventoryForItem(
+    shoppingItem: ShoppingListItem,
+    catalogProduct: CatalogProduct | null,
     catalogIndex: CatalogIndex,
     inventory: InventoryItem[],
   ): number {
     let count = 0;
     for (const item of inventory) {
-      if (this.inventoryMatchesCatalogProduct(item, catalogProduct, catalogIndex)) {
+      if (this.inventoryMatchesShoppingItem(item, catalogProduct, catalogIndex, shoppingItem)) {
         count += 1;
       }
     }
     return count;
   }
 
-  private consumeFreshInventoryByLabel(
-    label: string,
-    inventory: InventoryItem[],
-    usedInventoryIds: Set<string>,
-    maxQuantity: number,
-  ): number {
-    let count = 0;
-    const normalizedLabel = normalizeProductName(label);
-    for (const item of inventory) {
-      if (count >= maxQuantity) {
-        break;
-      }
-      if (usedInventoryIds.has(item.id)) {
-        continue;
-      }
-      if (normalizeProductName(item.name) !== normalizedLabel) {
-        continue;
-      }
-      usedInventoryIds.add(item.id);
-      count += 1;
+  private buildItemInventoryKey(
+    item: ShoppingListItem,
+    catalogProduct: CatalogProduct | null,
+    normalizedName: string,
+  ): string {
+    const linkedIds = item.linkedCatalogProducts
+      .map(product => product.id)
+      .sort()
+      .join(',');
+    if (linkedIds) {
+      return `linked:${catalogProduct?.id ?? normalizedName}:${linkedIds}`;
     }
-    return count;
-  }
-
-  private countFreshInventoryByLabel(label: string, inventory: InventoryItem[]): number {
-    const normalizedLabel = normalizeProductName(label);
-    let count = 0;
-    for (const item of inventory) {
-      if (normalizeProductName(item.name) === normalizedLabel) {
-        count += 1;
-      }
-    }
-    return count;
+    return catalogProduct ? `catalog:${catalogProduct.id}` : `text:${normalizedName}`;
   }
 
   private resolveAutoEffectiveStatus(
@@ -468,6 +447,31 @@ export class ShoppingList {
     }
 
     return normalizeProductName(item.name) === catalogProduct.normalizedName;
+  }
+
+  private inventoryMatchesShoppingItem(
+    inventoryItem: InventoryItem,
+    catalogProduct: CatalogProduct | null,
+    catalogIndex: CatalogIndex,
+    shoppingItem: ShoppingListItem,
+  ): boolean {
+    if (
+      catalogProduct &&
+      this.inventoryMatchesCatalogProduct(inventoryItem, catalogProduct, catalogIndex)
+    ) {
+      return true;
+    }
+
+    if (
+      !catalogProduct &&
+      normalizeProductName(inventoryItem.name) === normalizeProductName(shoppingItem.label)
+    ) {
+      return true;
+    }
+
+    return shoppingItem.linkedCatalogProducts.some(product =>
+      this.inventoryMatchesCatalogProduct(inventoryItem, product, catalogIndex),
+    );
   }
 
   private isLockSnapshotStatus(status: ShoppingItemStatus): status is 'planned' | 'stored' {

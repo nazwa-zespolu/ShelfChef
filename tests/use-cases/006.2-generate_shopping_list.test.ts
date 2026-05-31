@@ -28,6 +28,7 @@ describe("UC-06: ShoppingList - create and merge lists", () => {
   it("adds generated replenishment suggestions to a manual list", async () => {
     const suggestion = {
       catalogProductId: "catalog-specific-111",
+      linkedCatalogProductIds: [],
       name: "Mleko",
       normalizedName: "mleko",
       missingQuantity: 1,

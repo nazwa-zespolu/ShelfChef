@@ -64,13 +64,21 @@ erDiagram
         TEXT updated_at
     }
 
+    SHOPPING_LIST_ITEM_CATALOG_PRODUCTS {
+        TEXT item_id PK,FK
+        TEXT catalog_product_id PK,FK
+        TEXT created_at
+    }
+
     PRODUCT_DEFINITIONS ||--o{ INVENTORY : "defines scanned product"
     PRODUCT_DEFINITIONS ||--o| PRODUCT_CATALOG : "backs specific catalog product"
 
     PRODUCT_CATALOG ||--o{ SHOPPING_LIST_ITEMS : "used by"
     PRODUCT_CATALOG ||--o{ PRODUCT_CATALOG : "generic parent of specific"
+    PRODUCT_CATALOG ||--o{ SHOPPING_LIST_ITEM_CATALOG_PRODUCTS : "linked to item"
 
     SHOPPING_LISTS ||--o{ SHOPPING_LIST_ITEMS : "contains"
+    SHOPPING_LIST_ITEMS ||--o{ SHOPPING_LIST_ITEM_CATALOG_PRODUCTS : "accepts alternatives"
 ```
 
 ## Najwazniejsze relacje
@@ -81,6 +89,7 @@ erDiagram
 - `shopping_list_items.list_id` wskazuje liste zakupow.
 - `shopping_list_items.catalog_product_id` jest opcjonalne, bo zwykle pozycje tekstowe nie musza miec wpisu w katalogu.
 - `shopping_list_items.sort_order` zapisuje reczna kolejnosc produktow w konkretnej liscie.
+- `shopping_list_item_catalog_products` pozwala podpiac produkty katalogowe jako alternatywy dla pozycji listy, np. tekstowe `mleko` moze liczyc kilka konkretnych produktow z EAN.
 - `shopping_lists.icon_key` i `shopping_lists.icon_color_key` przechowuja wybrany wyglad ikony listy.
 - `shopping_lists.sort_order` zapisuje reczna kolejnosc list na ekranie list zakupow.
 - `app_settings` jest tabela konfiguracyjna i nie ma relacji z pozostalymi tabelami.
@@ -101,4 +110,7 @@ ON shopping_list_items(list_id, status);
 
 CREATE INDEX IF NOT EXISTS idx_shopping_lists_type_locked
 ON shopping_lists(type, is_locked);
+
+CREATE INDEX IF NOT EXISTS idx_shopping_item_catalog_products_catalog
+ON shopping_list_item_catalog_products(catalog_product_id);
 ```

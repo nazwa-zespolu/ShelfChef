@@ -54,6 +54,12 @@ type ShoppingListItemRow = {
   updated_at: string;
 };
 
+type ShoppingListItemCatalogProductRow = {
+  item_id: string;
+  catalog_product_id: string;
+  created_at: string;
+};
+
 type SQLiteResult = {
   rows: {
     length: number;
@@ -67,6 +73,7 @@ let inventoryV4: Map<string, InventoryRow> | null = null;
 const productCatalog = new Map<string, ProductCatalogRow>();
 const shoppingLists = new Map<string, ShoppingListRow>();
 const shoppingListItems = new Map<string, ShoppingListItemRow>();
+const shoppingListItemCatalogProducts = new Map<string, ShoppingListItemCatalogProductRow>();
 let userVersion = 0;
 
 const toRows = (data: Record<string, unknown>[]): SQLiteResult => ({
@@ -180,6 +187,39 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     return toRows([]);
   }
 
+  if (normalized.startsWith('DELETE FROM SHOPPING_LIST_ITEM_CATALOG_PRODUCTS')) {
+    if (normalized.includes('WHERE ITEM_ID IN')) {
+      const [listId] = params;
+      const itemIds = new Set(
+        Array.from(shoppingListItems.values())
+          .filter(item => item.list_id === listId)
+          .map(item => item.id),
+      );
+      for (const [key, row] of shoppingListItemCatalogProducts.entries()) {
+        if (itemIds.has(row.item_id)) {
+          shoppingListItemCatalogProducts.delete(key);
+        }
+      }
+      return toRows([]);
+    }
+    if (normalized.includes('WHERE ITEM_ID = ? AND CATALOG_PRODUCT_ID = ?')) {
+      const [itemId, catalogProductId] = params;
+      shoppingListItemCatalogProducts.delete(`${itemId}:${catalogProductId}`);
+      return toRows([]);
+    }
+    if (normalized.includes('WHERE ITEM_ID = ?')) {
+      const [itemId] = params;
+      for (const [key, row] of shoppingListItemCatalogProducts.entries()) {
+        if (row.item_id === itemId) {
+          shoppingListItemCatalogProducts.delete(key);
+        }
+      }
+      return toRows([]);
+    }
+    shoppingListItemCatalogProducts.clear();
+    return toRows([]);
+  }
+
   if (normalized.startsWith('DELETE FROM SHOPPING_LISTS WHERE ID = ?')) {
     shoppingLists.delete(params[0]);
     return toRows([]);
@@ -244,6 +284,28 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       );
     }
     return toRows(Array.from(shoppingListItems.values()));
+  }
+
+  if (normalized.startsWith('SELECT CATALOG_PRODUCT_ID FROM SHOPPING_LIST_ITEMS WHERE ID = ?')) {
+    const [id] = params;
+    const row = shoppingListItems.get(id);
+    return toRows(row ? [{catalog_product_id: row.catalog_product_id}] : []);
+  }
+
+  if (normalized.startsWith('SELECT LINK.ITEM_ID')) {
+    const itemIds = new Set(params);
+    const rows: Record<string, unknown>[] = [];
+    for (const link of shoppingListItemCatalogProducts.values()) {
+      if (!itemIds.has(link.item_id)) {
+        continue;
+      }
+      const catalog = productCatalog.get(link.catalog_product_id);
+      if (catalog) {
+        rows.push({item_id: link.item_id, ...catalog});
+      }
+    }
+    rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return toRows(rows);
   }
 
   if (normalized.startsWith('SELECT * FROM PRODUCT_DEFINITIONS WHERE EAN = ?')) {
@@ -406,6 +468,19 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       created_at: hasExplicitStatus ? params[8] : params[6],
       updated_at: hasExplicitStatus ? params[9] : params[7],
     });
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('INSERT OR IGNORE INTO SHOPPING_LIST_ITEM_CATALOG_PRODUCTS')) {
+    const [itemId, catalogProductId, createdAt] = params;
+    const key = `${itemId}:${catalogProductId}`;
+    if (!shoppingListItemCatalogProducts.has(key)) {
+      shoppingListItemCatalogProducts.set(key, {
+        item_id: itemId,
+        catalog_product_id: catalogProductId,
+        created_at: createdAt,
+      });
+    }
     return toRows([]);
   }
 
@@ -623,6 +698,7 @@ describe('ProductRepository + database integration', () => {
     db.execute('DELETE FROM product_definitions');
     db.execute('DELETE FROM product_catalog');
     db.execute('DELETE FROM shopping_lists');
+    db.execute('DELETE FROM shopping_list_item_catalog_products');
     db.execute('DELETE FROM shopping_list_items');
     db.execute('PRAGMA user_version = 0');
     setupDatabase();
@@ -746,7 +822,7 @@ describe('ProductRepository + database integration', () => {
     const version = db.execute('PRAGMA user_version').rows!.item(0);
     const lists = db.execute('SELECT * FROM shopping_lists').rows!;
 
-    expect(version.user_version).toBe(7);
+    expect(version.user_version).toBe(8);
     expect(lists.length).toBe(1);
     expect(lists.item(0)).toMatchObject({
       id: 'default-auto-minimum',
@@ -764,6 +840,7 @@ describe('ProductRepository + database integration', () => {
     db.execute('DELETE FROM product_definitions');
     db.execute('DELETE FROM product_catalog');
     db.execute('DELETE FROM shopping_lists');
+    db.execute('DELETE FROM shopping_list_item_catalog_products');
     db.execute('PRAGMA user_version = 0');
     db.execute(
       'INSERT OR REPLACE INTO product_definitions (ean, name, brand, image_url, category) VALUES (?, ?, ?, ?, ?)',
@@ -812,6 +889,62 @@ describe('ProductRepository + database integration', () => {
       source: 'manual',
     });
     expect(items.map(i => i.label)).toEqual(['Chleb', 'Mleko']);
+  });
+
+  it('zapisuje powiązania pozycji listy z produktami katalogowymi', async () => {
+    await repository.saveDefinition({
+      ean: '5901234123457',
+      name: 'Mleko 2%',
+      brand: 'Lacpol',
+      imageUrl: undefined,
+      category: 'Nabial',
+    });
+    const catalog = db.execute('SELECT * FROM product_catalog WHERE product_ean = ?', [
+      '5901234123457',
+    ]).rows!.item(0);
+    const list = await shoppingListRepository.createList('Minimum', 'auto');
+    const item = await shoppingListRepository.addItem(list.id, {
+      label: 'Mleko',
+      quantity: 1,
+    });
+
+    await shoppingListRepository.linkCatalogProductToItem(item.id, catalog.id as string);
+    const linkedItems = await shoppingListRepository.getItems(list.id);
+
+    expect(linkedItems[0].linkedCatalogProducts).toHaveLength(1);
+    expect(linkedItems[0].linkedCatalogProducts[0]).toMatchObject({
+      id: 'catalog-specific-5901234123457',
+      name: 'Mleko 2%',
+      kind: 'specific',
+    });
+
+    await shoppingListRepository.unlinkCatalogProductFromItem(item.id, catalog.id as string);
+    const unlinkedItems = await shoppingListRepository.getItems(list.id);
+
+    expect(unlinkedItems[0].linkedCatalogProducts).toHaveLength(0);
+  });
+
+  it('nie pozwala podpinać katalogu do pozycji, która już jest katalogowa', async () => {
+    await repository.saveDefinition({
+      ean: '5901234123457',
+      name: 'Mleko 2%',
+      brand: 'Lacpol',
+      imageUrl: undefined,
+      category: 'Nabial',
+    });
+    const catalog = db.execute('SELECT * FROM product_catalog WHERE product_ean = ?', [
+      '5901234123457',
+    ]).rows!.item(0);
+    const list = await shoppingListRepository.createList('Minimum', 'auto');
+    const item = await shoppingListRepository.addItem(list.id, {
+      catalogProductId: catalog.id as string,
+      label: 'Mleko 2%',
+      quantity: 1,
+    });
+
+    await expect(
+      shoppingListRepository.linkCatalogProductToItem(item.id, catalog.id as string),
+    ).rejects.toThrow('Catalog links can only be added to text shopping items');
   });
 
   it('zapisuje kolejność list i usuwa listę razem z jej pozycjami', async () => {

@@ -78,6 +78,7 @@ function mapShoppingItem(row: Record<string, any>): ShoppingListItem {
     id: row.id,
     listId: row.list_id,
     catalogProductId: row.catalog_product_id ?? null,
+    linkedCatalogProducts: [],
     label: row.label,
     quantity: Number(row.quantity),
     sortOrder: Number(row.sort_order ?? 0),
@@ -165,6 +166,17 @@ export class ShoppingListRepository {
 
   async deleteList(id: string): Promise<void> {
     runInTransaction(() => {
+      db.execute(
+        `
+          DELETE FROM shopping_list_item_catalog_products
+          WHERE item_id IN (
+            SELECT id
+            FROM shopping_list_items
+            WHERE list_id = ?
+          )
+        `,
+        [id],
+      );
       db.execute('DELETE FROM shopping_list_items WHERE list_id = ?', [id]);
       db.execute('DELETE FROM shopping_lists WHERE id = ?', [id]);
     });
@@ -216,7 +228,7 @@ export class ShoppingListRepository {
         items.push(mapShoppingItem(result.rows.item(i)));
       }
     }
-    return items;
+    return this.attachLinkedCatalogProducts(items);
   }
 
   async getCatalogProducts(): Promise<CatalogProduct[]> {
@@ -285,6 +297,7 @@ export class ShoppingListRepository {
       id,
       listId,
       catalogProductId: input.catalogProductId ?? null,
+      linkedCatalogProducts: [],
       label: input.label.trim(),
       quantity,
       sortOrder,
@@ -352,7 +365,46 @@ export class ShoppingListRepository {
   }
 
   async deleteItem(id: string): Promise<void> {
-    db.execute('DELETE FROM shopping_list_items WHERE id = ?', [id]);
+    runInTransaction(() => {
+      db.execute('DELETE FROM shopping_list_item_catalog_products WHERE item_id = ?', [id]);
+      db.execute('DELETE FROM shopping_list_items WHERE id = ?', [id]);
+    });
+  }
+
+  async linkCatalogProductToItem(itemId: string, catalogProductId: string): Promise<void> {
+    const itemResult = db.execute(
+      'SELECT catalog_product_id FROM shopping_list_items WHERE id = ?',
+      [itemId],
+    );
+    if (!itemResult.rows || itemResult.rows.length === 0) {
+      throw new Error(`Shopping list item not found: ${itemId}`);
+    }
+    if (itemResult.rows.item(0).catalog_product_id != null) {
+      throw new Error('Catalog links can only be added to text shopping items');
+    }
+
+    db.execute(
+      `
+        INSERT OR IGNORE INTO shopping_list_item_catalog_products (
+          item_id,
+          catalog_product_id,
+          created_at
+        )
+        VALUES (?, ?, ?)
+      `,
+      [itemId, catalogProductId, nowIso()],
+    );
+  }
+
+  async unlinkCatalogProductFromItem(itemId: string, catalogProductId: string): Promise<void> {
+    db.execute(
+      `
+        DELETE FROM shopping_list_item_catalog_products
+        WHERE item_id = ?
+          AND catalog_product_id = ?
+      `,
+      [itemId, catalogProductId],
+    );
   }
 
   async createGenericCatalogProduct(name: string): Promise<CatalogProduct> {
@@ -455,8 +507,10 @@ export class ShoppingListRepository {
     runInTransaction(() => {
       for (const suggestion of suggestions) {
         const existing = this.findTargetItemForSuggestion(targetManualListId, suggestion);
+        const linkedCatalogProductIds = suggestion.linkedCatalogProductIds ?? [];
         if (!existing) {
           const timestamp = nowIso();
+          const itemId = generateId('shopping-item');
           db.execute(
             `
               INSERT INTO shopping_list_items (
@@ -475,7 +529,7 @@ export class ShoppingListRepository {
               VALUES (?, ?, ?, ?, ?, ?, 'planned', 'suggestion', NULL, ?, ?)
             `,
             [
-              generateId('shopping-item'),
+              itemId,
               targetManualListId,
               suggestion.catalogProductId,
               suggestion.name,
@@ -485,6 +539,7 @@ export class ShoppingListRepository {
               timestamp,
             ],
           );
+          this.insertItemCatalogLinks(itemId, linkedCatalogProductIds, timestamp);
           nextSortOrder += 1;
           summary.added += 1;
           continue;
@@ -497,6 +552,7 @@ export class ShoppingListRepository {
 
         const nextQuantity = Math.max(existing.quantity, suggestion.missingQuantity);
         const timestamp = nowIso();
+        this.insertItemCatalogLinks(existing.id, linkedCatalogProductIds, timestamp);
         if (existing.status === 'planned') {
           db.execute(
             'UPDATE shopping_list_items SET quantity = ?, updated_at = ? WHERE id = ?',
@@ -641,5 +697,69 @@ export class ShoppingListRepository {
       return mapShoppingItem(byName.rows.item(0));
     }
     return null;
+  }
+
+  private attachLinkedCatalogProducts(items: ShoppingListItem[]): ShoppingListItem[] {
+    if (items.length === 0) {
+      return items;
+    }
+
+    const itemIds = items.map(item => item.id);
+    const placeholders = itemIds.map(() => '?').join(', ');
+    const result = db.execute(
+      `
+        SELECT
+          link.item_id,
+          catalog.id,
+          catalog.name,
+          catalog.normalized_name,
+          catalog.kind,
+          catalog.product_ean,
+          catalog.parent_catalog_product_id,
+          catalog.created_at,
+          catalog.updated_at
+        FROM shopping_list_item_catalog_products link
+        INNER JOIN product_catalog catalog ON catalog.id = link.catalog_product_id
+        WHERE link.item_id IN (${placeholders})
+        ORDER BY catalog.name ASC
+      `,
+      itemIds,
+    );
+
+    const linkedByItemId = new Map<string, CatalogProduct[]>();
+    if (result.rows) {
+      for (let i = 0; i < result.rows.length; i++) {
+        const row = result.rows.item(i);
+        const itemId = String(row.item_id);
+        const linked = linkedByItemId.get(itemId) ?? [];
+        linked.push(mapCatalogProduct(row));
+        linkedByItemId.set(itemId, linked);
+      }
+    }
+
+    return items.map(item => ({
+      ...item,
+      linkedCatalogProducts: linkedByItemId.get(item.id) ?? [],
+    }));
+  }
+
+  private insertItemCatalogLinks(
+    itemId: string,
+    catalogProductIds: string[],
+    timestamp: string,
+  ): void {
+    for (const catalogProductId of catalogProductIds) {
+      db.execute(
+        `
+          INSERT OR IGNORE INTO shopping_list_item_catalog_products (
+            item_id,
+            catalog_product_id,
+            created_at
+          )
+          VALUES (?, ?, ?)
+        `,
+        [itemId, catalogProductId, timestamp],
+      );
+    }
   }
 }

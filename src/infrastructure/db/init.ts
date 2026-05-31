@@ -2,7 +2,7 @@ import { open } from 'react-native-quick-sqlite';
 
 // Otwarcie bazy danych
 export const db = open({ name: 'shelfchef.db' });
-const SHOPPING_LISTS_SCHEMA_VERSION = 7;
+const SHOPPING_LISTS_SCHEMA_VERSION = 8;
 
 const MOCK_DATA_SQL = [
   // 1. Product definitions (in English) - expanded base for the LLM
@@ -133,6 +133,8 @@ function migrateToShoppingListsSchema() {
       ON shopping_lists(type, is_locked);
     `);
 
+  createShoppingListItemCatalogProductsTable();
+
   db.execute(`
       INSERT OR IGNORE INTO product_catalog (
         id,
@@ -183,6 +185,24 @@ function migrateToShoppingListsSchema() {
         datetime('now'),
         datetime('now')
       );
+    `);
+}
+
+function createShoppingListItemCatalogProductsTable() {
+  db.execute(`
+      CREATE TABLE IF NOT EXISTS shopping_list_item_catalog_products (
+        item_id TEXT NOT NULL,
+        catalog_product_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(item_id, catalog_product_id),
+        FOREIGN KEY(item_id) REFERENCES shopping_list_items(id),
+        FOREIGN KEY(catalog_product_id) REFERENCES product_catalog(id)
+      );
+    `);
+
+  db.execute(`
+      CREATE INDEX IF NOT EXISTS idx_shopping_item_catalog_products_catalog
+      ON shopping_list_item_catalog_products(catalog_product_id);
     `);
 }
 
@@ -335,6 +355,9 @@ function runMigrations() {
     }
     if (currentVersion >= 1 && currentVersion < 7) {
       migrateShoppingListItemSortOrder();
+    }
+    if (currentVersion >= 1 && currentVersion < 8) {
+      createShoppingListItemCatalogProductsTable();
     }
     db.execute(`PRAGMA user_version = ${SHOPPING_LISTS_SCHEMA_VERSION}`);
   });

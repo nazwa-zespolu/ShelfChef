@@ -17,7 +17,7 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Check, ClipboardList, Lock, Package, Plus, RefreshCcw, Search, Unlock} from 'lucide-react-native';
+import {Check, ClipboardList, Link, Lock, Package, Plus, RefreshCcw, Search, ShoppingBag, Unlock} from 'lucide-react-native';
 import {
   AutoShoppingListItemState,
   CatalogProduct,
@@ -48,7 +48,6 @@ type ShoppingListViewProps = {
 };
 
 type ScreenMode = 'lists' | 'suggestions' | 'details';
-type AddMode = 'text' | 'catalog' | 'generic';
 type ListFilter = 'all' | 'manual' | 'auto';
 
 type ShoppingListCardStats = {
@@ -92,6 +91,16 @@ function purchasedLabel(count: number) {
   return `${count} kupionych`;
 }
 
+function shortageLabel(count: number) {
+  if (count === 1) {
+    return '1 brak';
+  }
+  if (count > 1 && count < 5) {
+    return `${count} braki`;
+  }
+  return `${count} braków`;
+}
+
 function parseQuantityInput(value: string): number | null {
   const trimmed = value.trim();
   if (!/^\d+$/.test(trimmed)) {
@@ -132,12 +141,13 @@ export default function ShoppingListView({
     DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY,
   );
   const [addOpen, setAddOpen] = useState(false);
-  const [addMode, setAddMode] = useState<AddMode>('text');
-  const [addLabel, setAddLabel] = useState('');
   const [addQuantity, setAddQuantity] = useState('1');
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogResults, setCatalogResults] = useState<CatalogProduct[]>([]);
   const [selectedCatalog, setSelectedCatalog] = useState<CatalogProduct | null>(null);
+  const [linkingItem, setLinkingItem] = useState<AutoShoppingListItemState | null>(null);
+  const [linkCatalogQuery, setLinkCatalogQuery] = useState('');
+  const [linkCatalogResults, setLinkCatalogResults] = useState<CatalogProduct[]>([]);
   const [targetListId, setTargetListId] = useState<string | null>(null);
   const [pendingDeleteList, setPendingDeleteList] = useState<ShoppingListSummary | null>(null);
   const [listSearch, setListSearch] = useState('');
@@ -199,6 +209,7 @@ export default function ShoppingListView({
       const details = await shoppingList.getListWithEffectiveStatuses(list.id);
       setSelectedList(details.list);
       setItems(details.items);
+      return details;
     } finally {
       setLoading(false);
     }
@@ -213,6 +224,10 @@ export default function ShoppingListView({
       setAddOpen(false);
       return true;
     }
+    if (linkingItem) {
+      setLinkingItem(null);
+      return true;
+    }
     if (createOpen) {
       setCreateOpen(false);
       return true;
@@ -224,7 +239,7 @@ export default function ShoppingListView({
 
     onRequestClose();
     return true;
-  }, [addOpen, createOpen, mode, onRequestClose, pendingDeleteList]);
+  }, [addOpen, createOpen, linkingItem, mode, onRequestClose, pendingDeleteList]);
 
   React.useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', goBackOneLevel);
@@ -315,8 +330,6 @@ export default function ShoppingListView({
   }, [loadLists, pendingDeleteList]);
 
   const openAddItem = useCallback(() => {
-    setAddMode('text');
-    setAddLabel('');
     setAddQuantity('1');
     setCatalogQuery('');
     setCatalogResults([]);
@@ -335,6 +348,65 @@ export default function ShoppingListView({
     setCatalogResults(results);
   }, []);
 
+  const openCatalogLinks = useCallback((item: AutoShoppingListItemState) => {
+    if (item.catalogProductId) {
+      return;
+    }
+    setLinkingItem(item);
+    setLinkCatalogQuery('');
+    setLinkCatalogResults([]);
+  }, []);
+
+  const searchCatalogLinks = useCallback(async (query: string) => {
+    setLinkCatalogQuery(query);
+    if (!query.trim()) {
+      setLinkCatalogResults([]);
+      return;
+    }
+    const results = await shoppingRepository.searchCatalogProducts(query);
+    setLinkCatalogResults(results);
+  }, []);
+
+  const linkCatalogProduct = useCallback(
+    async (product: CatalogProduct) => {
+      if (!selectedList || !linkingItem) {
+        return;
+      }
+      setBusy(true);
+      try {
+        await shoppingRepository.linkCatalogProductToItem(linkingItem.id, product.id);
+        const details = await loadSelectedList(selectedList);
+        setLinkingItem(details.items.find(item => item.id === linkingItem.id) ?? null);
+        setLinkCatalogQuery('');
+        setLinkCatalogResults([]);
+        const nextSuggestions = await shoppingList.generateReplenishmentSuggestions();
+        setSuggestions(nextSuggestions);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [linkingItem, loadSelectedList, selectedList],
+  );
+
+  const unlinkCatalogProduct = useCallback(
+    async (catalogProductId: string) => {
+      if (!selectedList || !linkingItem) {
+        return;
+      }
+      setBusy(true);
+      try {
+        await shoppingRepository.unlinkCatalogProductFromItem(linkingItem.id, catalogProductId);
+        const details = await loadSelectedList(selectedList);
+        setLinkingItem(details.items.find(item => item.id === linkingItem.id) ?? null);
+        const nextSuggestions = await shoppingList.generateReplenishmentSuggestions();
+        setSuggestions(nextSuggestions);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [linkingItem, loadSelectedList, selectedList],
+  );
+
   const addItem = useCallback(async () => {
     if (!selectedList) {
       return;
@@ -343,36 +415,22 @@ export default function ShoppingListView({
     if (quantity == null) {
       return;
     }
-    const textLabel = addLabel.trim();
-    const genericName = catalogQuery.trim();
-    if (addMode === 'catalog' && !selectedCatalog) {
-      return;
-    }
-    if (addMode === 'text' && !textLabel) {
-      return;
-    }
-    if (addMode === 'generic' && !genericName) {
+    const productLabel = catalogQuery.trim();
+    if (!selectedCatalog && !productLabel) {
       return;
     }
 
     setBusy(true);
     try {
-      if (addMode === 'catalog' && selectedCatalog) {
+      if (selectedCatalog) {
         await shoppingList.addItem(selectedList.id, {
           catalogProductId: selectedCatalog.id,
           label: selectedCatalog.name,
           quantity,
         });
-      } else if (addMode === 'generic') {
-        const generic = await shoppingRepository.createGenericCatalogProduct(genericName);
-        await shoppingList.addItem(selectedList.id, {
-          catalogProductId: generic.id,
-          label: generic.name,
-          quantity,
-        });
       } else {
         await shoppingList.addItem(selectedList.id, {
-          label: textLabel,
+          label: productLabel,
           quantity,
         });
       }
@@ -383,7 +441,7 @@ export default function ShoppingListView({
     } finally {
       setBusy(false);
     }
-  }, [addLabel, addMode, addQuantity, catalogQuery, loadSelectedList, selectedCatalog, selectedList]);
+  }, [addQuantity, catalogQuery, loadSelectedList, selectedCatalog, selectedList]);
 
   const updateStatus = useCallback(
     async (itemId: string, status: ShoppingItemStatus) => {
@@ -558,6 +616,7 @@ export default function ShoppingListView({
       onMove={moveItem}
       onUpdateQuantity={updateQuantity}
       onUpdateStatus={updateStatus}
+      onOpenLinks={openCatalogLinks}
     />
   );
 
@@ -567,13 +626,26 @@ export default function ShoppingListView({
       busy={busy}
       onDelete={deleteItem}
       onUpdateQuantity={updateQuantity}
+      onOpenLinks={openCatalogLinks}
     />
   );
 
   const renderSuggestions = () => (
     <View style={styles.content}>
-      <Header title="Do uzupełnienia" onBack={goBackOneLevel} />
+      <View style={styles.suggestionsHero}>
+        <Pressable
+          onPress={goBackOneLevel}
+          style={({pressed}) => [styles.manualBackButton, pressed && styles.pressed]}
+          hitSlop={10}>
+          <Text style={styles.manualBackText}>‹ Wróć</Text>
+        </Pressable>
+        <Text style={styles.manualDetailsTitle} numberOfLines={1}>Do uzupełnienia</Text>
+        <Text style={styles.manualDetailsMeta}>
+          {suggestions.length === 1 ? '1 produkt do kupienia' : `${suggestions.length} produkty do kupienia`}
+        </Text>
+      </View>
       <View style={styles.mergeBar}>
+        <Text style={styles.mergeLabel}>Dodaj do listy</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.targetRow}>
           {manualLists.map(list => {
             const active = targetListId === list.id;
@@ -602,31 +674,39 @@ export default function ShoppingListView({
             (!targetListId || suggestions.length === 0 || busy) && styles.disabled,
             pressed && styles.pressed,
           ]}>
-          <Text style={styles.primaryButtonText}>Dodaj do listy</Text>
+          <View style={styles.inlineButtonContent}>
+            <ShoppingBag color={colors.successText} size={20} strokeWidth={2.2} />
+            <Text style={styles.primaryButtonText}>Dodaj do listy</Text>
+          </View>
         </Pressable>
       </View>
       <FlatList
         data={suggestions}
         keyExtractor={item => item.catalogProductId ?? `text:${item.normalizedName}`}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={openSuggestions} tintColor={colors.success} />}
-        contentContainerStyle={[styles.listContent, suggestions.length === 0 && styles.emptyContent]}
+        contentContainerStyle={[styles.suggestionsContent, suggestions.length === 0 && styles.emptyContent]}
         renderItem={({item}) => (
-          <View style={styles.itemCard}>
-            <View style={styles.rowBetween}>
-              <View style={styles.rowText}>
-                <Text style={styles.itemTitle}>{item.name}</Text>
-                <Text style={styles.itemMeta}>{item.reason} · brakuje {item.missingQuantity}</Text>
-              </View>
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{item.priority === 'out' ? 'Brak' : 'Mało'}</Text>
-              </View>
+          <View style={styles.suggestionItemCard}>
+            <View style={styles.autoItemIcon}>
+              <Package color={colors.accent} size={24} strokeWidth={2.1} />
             </View>
-            <Text style={styles.sourceText} numberOfLines={1}>
-              {item.sourceAutoListNames.join(', ')}
-            </Text>
+            <View style={styles.suggestionItemText}>
+              <Text style={styles.manualItemTitle} numberOfLines={1}>{item.name}</Text>
+              <Text style={styles.manualItemMeta} numberOfLines={1}>{item.reason}</Text>
+              <Text style={styles.suggestionSourceText} numberOfLines={1}>
+                {item.sourceAutoListNames.join(', ')}
+              </Text>
+            </View>
+            <View style={styles.suggestionMissingPill}>
+              <Text style={styles.suggestionMissingText}>Brakuje {item.missingQuantity}</Text>
+            </View>
           </View>
         )}
-        ListEmptyComponent={<EmptyState title="Brak sugestii" />}
+        ListEmptyComponent={
+          <View style={styles.emptyBox}>
+            <Text style={styles.emptyTitle}>Wszystko uzupełnione</Text>
+          </View>
+        }
       />
     </View>
   );
@@ -814,7 +894,7 @@ export default function ShoppingListView({
           </View>
         </View>
         <Text style={styles.suggestionMeta}>
-          {suggestions.length === 1 ? '1 brak' : `${suggestions.length} braków`} z list auto
+          {shortageLabel(suggestions.length)} z list auto
         </Text>
       </View>
       <Text style={styles.suggestionArrow}>›</Text>
@@ -899,15 +979,11 @@ export default function ShoppingListView({
       />
       <AddItemModal
         visible={addOpen}
-        mode={addMode}
-        label={addLabel}
         quantity={addQuantity}
         catalogQuery={catalogQuery}
         catalogResults={catalogResults}
         selectedCatalog={selectedCatalog}
         busy={busy}
-        onChangeMode={setAddMode}
-        onChangeLabel={setAddLabel}
         onChangeQuantity={setAddQuantity}
         onChangeCatalogQuery={query => searchCatalog(query).catch(() => {})}
         onSelectCatalog={product => {
@@ -916,6 +992,16 @@ export default function ShoppingListView({
         }}
         onClose={() => setAddOpen(false)}
         onSubmit={addItem}
+      />
+      <CatalogLinksModal
+        item={linkingItem}
+        query={linkCatalogQuery}
+        results={linkCatalogResults}
+        busy={busy}
+        onChangeQuery={query => searchCatalogLinks(query).catch(() => {})}
+        onLink={product => { linkCatalogProduct(product).catch(() => {}); }}
+        onUnlink={catalogProductId => { unlinkCatalogProduct(catalogProductId).catch(() => {}); }}
+        onClose={() => setLinkingItem(null)}
       />
       <DeleteListModal
         list={pendingDeleteList}
@@ -1066,6 +1152,7 @@ function ManualShoppingItemRow({
   onMove,
   onUpdateQuantity,
   onUpdateStatus,
+  onOpenLinks,
 }: {
   item: AutoShoppingListItemState;
   busy: boolean;
@@ -1074,6 +1161,7 @@ function ManualShoppingItemRow({
   onMove: (id: string, direction: -1 | 1) => void;
   onUpdateQuantity: (id: string, quantity: number) => Promise<void>;
   onUpdateStatus: (id: string, status: ShoppingItemStatus) => Promise<void>;
+  onOpenLinks: (item: AutoShoppingListItemState) => void;
 }) {
   const translateY = useRef(new Animated.Value(0)).current;
   const dragActive = useRef(false);
@@ -1175,6 +1263,18 @@ function ManualShoppingItemRow({
             <Text style={styles.manualItemMeta} numberOfLines={1}>
               Masz {item.currentQuantity}
             </Text>
+            {!item.catalogProductId ? (
+              <Pressable
+                onPress={() => onOpenLinks(item)}
+                style={({pressed}) => [styles.itemCatalogLink, pressed && styles.pressed]}>
+                <Link color={colors.accent} size={13} strokeWidth={2.1} />
+                <Text style={styles.itemCatalogLinkText}>
+                  {item.linkedCatalogProducts.length > 0
+                    ? `Powiązania ${item.linkedCatalogProducts.length}`
+                    : 'Powiąż katalog'}
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
           <View style={styles.manualItemControls}>
             <View style={styles.manualQuantityStepper}>
@@ -1212,11 +1312,13 @@ function AutoShoppingItemRow({
   busy,
   onDelete,
   onUpdateQuantity,
+  onOpenLinks,
 }: {
   item: AutoShoppingListItemState;
   busy: boolean;
   onDelete: (id: string) => Promise<void>;
   onUpdateQuantity: (id: string, quantity: number) => Promise<void>;
+  onOpenLinks: (item: AutoShoppingListItemState) => void;
 }) {
   const canDecrease = item.quantity > 1 && !busy;
   return (
@@ -1233,6 +1335,18 @@ function AutoShoppingItemRow({
           <Text style={styles.manualItemMeta} numberOfLines={1}>
             Masz {item.currentQuantity} z {item.quantity}
           </Text>
+          {!item.catalogProductId ? (
+            <Pressable
+              onPress={() => onOpenLinks(item)}
+              style={({pressed}) => [styles.itemCatalogLink, pressed && styles.pressed]}>
+              <Link color={colors.accent} size={13} strokeWidth={2.1} />
+              <Text style={styles.itemCatalogLinkText}>
+                {item.linkedCatalogProducts.length > 0
+                  ? `Powiązania ${item.linkedCatalogProducts.length}`
+                  : 'Powiąż katalog'}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
         <View style={styles.manualQuantityStepper}>
           <Pressable
@@ -1501,15 +1615,11 @@ function CreateListModal({
 
 function AddItemModal({
   visible,
-  mode,
-  label,
   quantity,
   catalogQuery,
   catalogResults,
   selectedCatalog,
   busy,
-  onChangeMode,
-  onChangeLabel,
   onChangeQuantity,
   onChangeCatalogQuery,
   onSelectCatalog,
@@ -1517,15 +1627,11 @@ function AddItemModal({
   onSubmit,
 }: {
   visible: boolean;
-  mode: AddMode;
-  label: string;
   quantity: string;
   catalogQuery: string;
   catalogResults: CatalogProduct[];
   selectedCatalog: CatalogProduct | null;
   busy: boolean;
-  onChangeMode: (mode: AddMode) => void;
-  onChangeLabel: (label: string) => void;
   onChangeQuantity: (quantity: string) => void;
   onChangeCatalogQuery: (query: string) => void;
   onSelectCatalog: (product: CatalogProduct) => void;
@@ -1533,61 +1639,38 @@ function AddItemModal({
   onSubmit: () => void;
 }) {
   const quantityIsValid = parseQuantityInput(quantity) != null;
+  const productName = catalogQuery.trim();
+  const canSubmit = quantityIsValid && (selectedCatalog != null || productName.length > 0);
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
         <View style={styles.modalSheet}>
           <Text style={styles.modalTitle}>Dodaj produkt</Text>
-          <View style={styles.segmentRow}>
-            {(['text', 'catalog', 'generic'] as AddMode[]).map(option => {
-              const active = mode === option;
-              return (
-                <Pressable
-                  key={option}
-                  onPress={() => onChangeMode(option)}
-                  style={({pressed}) => [styles.segment, active && styles.segmentActive, pressed && styles.pressed]}>
-                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                    {option === 'text' ? 'Tekst' : option === 'catalog' ? 'Katalog' : 'Ogólny'}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          {mode === 'text' ? (
-            <TextInput
-              value={label}
-              onChangeText={onChangeLabel}
-              placeholder="Produkt"
-              placeholderTextColor={colors.textMuted}
-              style={styles.input}
-            />
-          ) : (
-            <>
-              <TextInput
-                value={catalogQuery}
-                onChangeText={onChangeCatalogQuery}
-                placeholder={mode === 'generic' ? 'Nazwa ogólna' : 'Szukaj w katalogu'}
-                placeholderTextColor={colors.textMuted}
-                style={styles.input}
-              />
-              {mode === 'catalog' ? (
-                <ScrollView style={styles.catalogResults} keyboardShouldPersistTaps="handled">
-                  {catalogResults.map(product => {
-                    const active = selectedCatalog?.id === product.id;
-                    return (
-                      <Pressable
-                        key={product.id}
-                        onPress={() => onSelectCatalog(product)}
-                        style={({pressed}) => [styles.catalogRow, active && styles.catalogRowActive, pressed && styles.pressed]}>
-                        <Text style={styles.catalogName}>{product.name}</Text>
-                        <Text style={styles.catalogKind}>{product.kind === 'specific' ? 'EAN' : 'Ogólny'}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              ) : null}
-            </>
-          )}
+          <TextInput
+            value={catalogQuery}
+            onChangeText={onChangeCatalogQuery}
+            placeholder="Wpisz lub wyszukaj produkt"
+            placeholderTextColor={colors.textMuted}
+            style={styles.input}
+          />
+          {catalogResults.length > 0 ? (
+            <ScrollView style={styles.catalogResults} keyboardShouldPersistTaps="handled">
+              {catalogResults.map(product => {
+                const active = selectedCatalog?.id === product.id;
+                return (
+                  <Pressable
+                    key={product.id}
+                    onPress={() => onSelectCatalog(product)}
+                    style={({pressed}) => [styles.catalogRow, active && styles.catalogRowActive, pressed && styles.pressed]}>
+                    <Text style={styles.catalogName}>{product.name}</Text>
+                    <Text style={styles.catalogKind}>
+                      {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt katalogowy'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          ) : null}
           <TextInput
             value={quantity}
             onChangeText={onChangeQuantity}
@@ -1600,11 +1683,97 @@ function AddItemModal({
           ) : null}
           <ModalActions
             busy={busy}
-            submitDisabled={!quantityIsValid}
+            submitDisabled={!canSubmit}
             onClose={onClose}
             onSubmit={onSubmit}
-            submitLabel="Dodaj"
+            submitLabel={selectedCatalog ? 'Dodaj z katalogu' : 'Dodaj'}
           />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function CatalogLinksModal({
+  item,
+  query,
+  results,
+  busy,
+  onChangeQuery,
+  onLink,
+  onUnlink,
+  onClose,
+}: {
+  item: AutoShoppingListItemState | null;
+  query: string;
+  results: CatalogProduct[];
+  busy: boolean;
+  onChangeQuery: (query: string) => void;
+  onLink: (product: CatalogProduct) => void;
+  onUnlink: (catalogProductId: string) => void;
+  onClose: () => void;
+}) {
+  const linkedIds = new Set(item?.linkedCatalogProducts.map(product => product.id) ?? []);
+  const availableResults = results.filter(product => !linkedIds.has(product.id));
+
+  return (
+    <Modal visible={item != null} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalSheet}>
+          <Text style={styles.modalTitle}>Powiązania katalogu</Text>
+          <Text style={styles.confirmText} numberOfLines={2}>{item?.label}</Text>
+
+          <Text style={styles.modalSectionTitle}>Powiązane produkty</Text>
+          {item && item.linkedCatalogProducts.length > 0 ? (
+            item.linkedCatalogProducts.map(product => (
+              <View key={product.id} style={styles.linkedCatalogRow}>
+                <View style={styles.linkedCatalogText}>
+                  <Text style={styles.catalogName} numberOfLines={1}>{product.name}</Text>
+                  <Text style={styles.catalogKind}>
+                    {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt katalogowy'}
+                  </Text>
+                </View>
+                <Pressable
+                  disabled={busy}
+                  onPress={() => onUnlink(product.id)}
+                  style={({pressed}) => [styles.smallDangerButton, busy && styles.disabled, pressed && styles.pressed]}>
+                  <Text style={styles.smallDangerButtonText}>Usuń</Text>
+                </Pressable>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.catalogEmptyText}>Brak powiązań</Text>
+          )}
+
+          <TextInput
+            value={query}
+            onChangeText={onChangeQuery}
+            placeholder="Szukaj produktu z katalogu"
+            placeholderTextColor={colors.textMuted}
+            style={styles.input}
+          />
+          {availableResults.length > 0 ? (
+            <ScrollView style={styles.catalogResults} keyboardShouldPersistTaps="handled">
+              {availableResults.map(product => (
+                <Pressable
+                  key={product.id}
+                  disabled={busy}
+                  onPress={() => onLink(product)}
+                  style={({pressed}) => [styles.catalogRow, busy && styles.disabled, pressed && styles.pressed]}>
+                  <Text style={styles.catalogName}>{product.name}</Text>
+                  <Text style={styles.catalogKind}>
+                    {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt katalogowy'}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : null}
+
+          <View style={styles.modalActions}>
+            <Pressable onPress={onClose} style={({pressed}) => [styles.secondaryButton, pressed && styles.pressed]}>
+              <Text style={styles.secondaryButtonText}>Zamknij</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
     </Modal>
@@ -1973,6 +2142,11 @@ const styles = StyleSheet.create({
     paddingTop: 2,
     paddingBottom: 14,
   },
+  suggestionsHero: {
+    paddingHorizontal: 16,
+    paddingTop: 2,
+    paddingBottom: 14,
+  },
   autoDetailsHero: {
     paddingHorizontal: 16,
     paddingTop: 2,
@@ -2096,6 +2270,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 112,
   },
+  suggestionsContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+  },
   manualItemCard: {
     minHeight: 78,
     borderRadius: 8,
@@ -2153,6 +2331,46 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  suggestionItemCard: {
+    minHeight: 92,
+    borderRadius: 8,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: {width: 0, height: 6},
+    elevation: 3,
+    marginBottom: 12,
+  },
+  suggestionItemText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  suggestionSourceText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    marginTop: 8,
+  },
+  suggestionMissingPill: {
+    minHeight: 36,
+    borderRadius: 8,
+    backgroundColor: colors.surfaceSubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  suggestionMissingText: {
+    color: colors.warning,
+    fontSize: 12,
+    fontWeight: '900',
+  },
   manualItemStatusBar: {
     position: 'absolute',
     left: 0,
@@ -2194,6 +2412,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 4,
   },
+  itemCatalogLink: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 6,
+    paddingVertical: 2,
+  },
+  itemCatalogLinkText: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '800',
+  },
   manualItemControls: {
     alignItems: 'flex-end',
   },
@@ -2231,29 +2462,6 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: 15,
     fontWeight: '900',
-  },
-  itemCard: {
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 12,
-    marginBottom: 10,
-  },
-  itemTitle: {
-    color: colors.textPrimary,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  itemMeta: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    marginTop: 4,
-  },
-  sourceText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    marginTop: 10,
   },
   bottomBar: {
     position: 'absolute',
@@ -2344,6 +2552,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
   },
+  inlineButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
   mergeButton: {
     flex: 0,
     minHeight: 46,
@@ -2403,11 +2617,16 @@ const styles = StyleSheet.create({
   },
   mergeBar: {
     paddingHorizontal: 16,
-    paddingBottom: 10,
-    gap: 10,
+    paddingBottom: 14,
+    gap: 12,
+  },
+  mergeLabel: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '900',
   },
   targetRow: {
-    gap: 8,
+    gap: 10,
     paddingRight: 16,
   },
   targetChip: {
@@ -2415,8 +2634,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    minHeight: 44,
+    minWidth: 96,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
   },
   targetChipActive: {
     backgroundColor: colors.success,
@@ -2424,8 +2647,8 @@ const styles = StyleSheet.create({
   },
   targetChipText: {
     color: colors.textSecondary,
-    fontWeight: '800',
-    fontSize: 12,
+    fontWeight: '900',
+    fontSize: 14,
   },
   targetChipTextActive: {
     color: colors.successText,
@@ -2675,31 +2898,45 @@ const styles = StyleSheet.create({
     marginTop: -4,
     marginBottom: 10,
   },
-  segmentRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 10,
+  modalSectionTitle: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '900',
+    marginBottom: 8,
   },
-  segment: {
-    flex: 1,
+  linkedCatalogRow: {
     borderRadius: 8,
-    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: 9,
+    backgroundColor: colors.surface,
+    padding: 10,
+    marginBottom: 8,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
   },
-  segmentActive: {
-    backgroundColor: colors.success,
-    borderColor: colors.success,
+  linkedCatalogText: {
+    flex: 1,
+    minWidth: 0,
   },
-  segmentText: {
-    color: colors.textSecondary,
-    fontWeight: '800',
+  catalogEmptyText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    marginBottom: 12,
+  },
+  smallDangerButton: {
+    minHeight: 34,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  smallDangerButtonText: {
+    color: colors.danger,
     fontSize: 12,
-  },
-  segmentTextActive: {
-    color: colors.successText,
+    fontWeight: '900',
   },
   catalogResults: {
     maxHeight: 180,

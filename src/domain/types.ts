@@ -54,6 +54,7 @@ export interface ShoppingListItem {
   id: string;
   listId: string;
   catalogProductId: string | null;
+  linkedCatalogProducts: CatalogProduct[];
   label: string;
   quantity: number;
   sortOrder: number;
@@ -72,6 +73,7 @@ export interface AutoShoppingListItemState extends ShoppingListItem {
 
 export interface ShoppingSuggestion {
   catalogProductId: string | null;
+  linkedCatalogProductIds: string[];
   name: string;
   normalizedName: string;
   missingQuantity: number;
