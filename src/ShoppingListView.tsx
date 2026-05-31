@@ -16,10 +16,12 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {ClipboardList, RefreshCcw} from 'lucide-react-native';
 import {
   AutoShoppingListItemState,
   CatalogProduct,
   ShoppingItemStatus,
+  ShoppingListIconKey,
   ShoppingListSummary,
   ShoppingListType,
   ShoppingSuggestion,
@@ -28,7 +30,7 @@ import {ShoppingList} from './app/ShoppingList';
 import {ProductRepository} from './infrastructure/ProductRepository';
 import {ShoppingListRepository} from './infrastructure/ShoppingListRepository';
 import {SwipeToDeleteCard} from './components/SwipeToDeleteCard';
-import {getShoppingListIconDefinition} from './shoppingListIcons';
+import {getShoppingListIconDefinition, SHOPPING_LIST_ICONS} from './shoppingListIcons';
 import {colors} from './theme/colors';
 
 type ShoppingListViewProps = {
@@ -133,6 +135,7 @@ export default function ShoppingListView({
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState('');
   const [createType, setCreateType] = useState<ShoppingListType>('manual');
+  const [createIconKey, setCreateIconKey] = useState<ShoppingListIconKey>('basket');
   const [addOpen, setAddOpen] = useState(false);
   const [addMode, setAddMode] = useState<AddMode>('text');
   const [addLabel, setAddLabel] = useState('');
@@ -262,16 +265,17 @@ export default function ShoppingListView({
     }
     setBusy(true);
     try {
-      const created = await shoppingList.createList(name, createType);
+      const created = await shoppingList.createList(name, createType, createIconKey);
       setCreateName('');
       setCreateType('manual');
+      setCreateIconKey('basket');
       setCreateOpen(false);
       await loadLists();
       openList(created);
     } finally {
       setBusy(false);
     }
-  }, [createName, createType, loadLists, openList]);
+  }, [createIconKey, createName, createType, loadLists, openList]);
 
   const moveList = useCallback(async (listId: string, direction: -1 | 1) => {
     const currentIndex = lists.findIndex(list => list.id === listId);
@@ -774,9 +778,11 @@ export default function ShoppingListView({
         visible={createOpen}
         name={createName}
         type={createType}
+        iconKey={createIconKey}
         busy={busy}
         onChangeName={setCreateName}
         onChangeType={setCreateType}
+        onChangeIconKey={setCreateIconKey}
         onClose={() => setCreateOpen(false)}
         onSubmit={createList}
       />
@@ -995,50 +1001,172 @@ function CreateListModal({
   visible,
   name,
   type,
+  iconKey,
   busy,
   onChangeName,
   onChangeType,
+  onChangeIconKey,
   onClose,
   onSubmit,
 }: {
   visible: boolean;
   name: string;
   type: ShoppingListType;
+  iconKey: ShoppingListIconKey;
   busy: boolean;
   onChangeName: (name: string) => void;
   onChangeType: (type: ShoppingListType) => void;
+  onChangeIconKey: (iconKey: ShoppingListIconKey) => void;
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const selectedIcon = getShoppingListIconDefinition(iconKey);
+  const SelectedIcon = selectedIcon.Icon;
+  const sheetTranslateY = useRef(new Animated.Value(0)).current;
+  const closeWithDrag = useCallback(() => {
+    Animated.timing(sheetTranslateY, {
+      toValue: 420,
+      duration: 160,
+      useNativeDriver: true,
+    }).start(({finished}) => {
+      sheetTranslateY.setValue(0);
+      if (finished) {
+        onClose();
+      }
+    });
+  }, [onClose, sheetTranslateY]);
+  const resetSheetPosition = useCallback(() => {
+    Animated.spring(sheetTranslateY, {
+      toValue: 0,
+      useNativeDriver: true,
+      speed: 18,
+      bounciness: 5,
+    }).start();
+  }, [sheetTranslateY]);
+  const sheetDragResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_evt, gesture) =>
+          Math.abs(gesture.dy) > 2 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onPanResponderGrant: () => {
+          sheetTranslateY.stopAnimation();
+        },
+        onPanResponderMove: (_evt, gesture) => {
+          sheetTranslateY.setValue(Math.max(0, gesture.dy));
+        },
+        onPanResponderRelease: (_evt, gesture) => {
+          if (gesture.dy > 80 || gesture.vy > 0.9) {
+            closeWithDrag();
+            return;
+          }
+          resetSheetPosition();
+        },
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderTerminate: resetSheetPosition,
+      }),
+    [closeWithDrag, resetSheetPosition, sheetTranslateY],
+  );
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
-        <View style={styles.modalSheet}>
-          <Text style={styles.modalTitle}>Nowa lista</Text>
+        <Animated.View style={[styles.createListSheet, {transform: [{translateY: sheetTranslateY}]}]}>
+          <View style={styles.sheetHandleTouch} {...sheetDragResponder.panHandlers}>
+            <View style={styles.sheetHandle} />
+          </View>
+          <Text style={styles.createTitle}>Nowa lista zakupów</Text>
+          <Text style={styles.createSubtitle}>Nadaj nazwę i wybierz typ listy.</Text>
+          <View style={styles.createPreview}>
+            <View style={styles.createPreviewIcon}>
+              <SelectedIcon color={colors.accent} size={30} strokeWidth={2.2} />
+            </View>
+            <View style={styles.rowText}>
+              <Text style={styles.createPreviewTitle} numberOfLines={1}>
+                {name.trim() || 'Nazwa listy'}
+              </Text>
+              <Text style={styles.createPreviewMeta}>
+                {type === 'manual' ? 'Lista zakupów' : 'Lista uzupełniania'}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.fieldLabel}>Nazwa listy</Text>
           <TextInput
             value={name}
             onChangeText={onChangeName}
-            placeholder="Nazwa"
+            placeholder="Np. zakupy na weekend"
             placeholderTextColor={colors.textMuted}
             style={styles.input}
           />
-          <View style={styles.segmentRow}>
+          <Text style={styles.fieldLabel}>Typ listy</Text>
+          <View style={styles.createTypeRow}>
             {(['manual', 'auto'] as ShoppingListType[]).map(option => {
               const active = type === option;
+              const TypeIcon = option === 'manual' ? ClipboardList : RefreshCcw;
               return (
                 <Pressable
                   key={option}
                   onPress={() => onChangeType(option)}
-                  style={({pressed}) => [styles.segment, active && styles.segmentActive, pressed && styles.pressed]}>
-                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                    {option === 'manual' ? 'Manual' : 'Auto'}
+                  style={({pressed}) => [
+                    styles.createTypeOption,
+                    active && styles.createTypeOptionActive,
+                    pressed && styles.pressed,
+                  ]}>
+                  <TypeIcon
+                    color={active ? colors.accent : colors.textSecondary}
+                    size={20}
+                    strokeWidth={2.2}
+                  />
+                  <Text style={[styles.createTypeTitle, active && styles.createTypeTitleActive]}>
+                    {option === 'manual' ? 'Manualna' : 'Auto'}
                   </Text>
                 </Pressable>
               );
             })}
           </View>
-          <ModalActions busy={busy} onClose={onClose} onSubmit={onSubmit} submitLabel="Utwórz" />
-        </View>
+          <Text style={styles.fieldLabel}>Ikona listy</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.iconPickerRow}>
+            {SHOPPING_LIST_ICONS.map(icon => {
+              const active = icon.key === iconKey;
+              const Icon = icon.Icon;
+              return (
+                <Pressable
+                  key={icon.key}
+                  onPress={() => onChangeIconKey(icon.key)}
+                  style={({pressed}) => [
+                    styles.iconChoice,
+                    active && styles.iconChoiceActive,
+                    pressed && styles.pressed,
+                  ]}>
+                  <Icon
+                    color={active ? colors.accent : colors.textSecondary}
+                    size={27}
+                    strokeWidth={2.1}
+                  />
+                  <Text style={[styles.iconChoiceLabel, active && styles.iconChoiceLabelActive]} numberOfLines={1}>
+                    {icon.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <Pressable
+            disabled={busy || name.trim().length === 0}
+            onPress={onSubmit}
+            style={({pressed}) => [
+              styles.createSubmitButton,
+              (busy || name.trim().length === 0) && styles.disabled,
+              pressed && styles.pressed,
+            ]}>
+            <Text style={styles.createSubmitButtonText}>Utwórz listę</Text>
+          </Pressable>
+          <Pressable onPress={onClose} disabled={busy} style={styles.createCancelButton}>
+            <Text style={styles.createCancelText}>Anuluj</Text>
+          </Pressable>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -1726,6 +1854,166 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderColor: colors.border,
     maxHeight: '88%',
+  },
+  createListSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+    borderColor: colors.border,
+    maxHeight: '90%',
+  },
+  sheetHandleTouch: {
+    alignSelf: 'center',
+    width: '100%',
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  sheetHandle: {
+    width: 58,
+    height: 6,
+    borderRadius: 8,
+    backgroundColor: colors.border,
+  },
+  createTitle: {
+    color: colors.textPrimary,
+    fontSize: 26,
+    fontWeight: '900',
+    marginBottom: 6,
+  },
+  createSubtitle: {
+    color: colors.textSecondary,
+    fontSize: 15,
+    marginBottom: 18,
+  },
+  createPreview: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: 12,
+    marginBottom: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  createPreviewIcon: {
+    width: 62,
+    height: 62,
+    borderRadius: 8,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  createPreviewTitle: {
+    color: colors.textPrimary,
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  createPreviewMeta: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    marginTop: 4,
+  },
+  fieldLabel: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '900',
+    marginBottom: 8,
+  },
+  createTypeRow: {
+    minHeight: 50,
+    flexDirection: 'row',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  createTypeOption: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 8,
+    borderWidth: 0,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+  },
+  createTypeOptionActive: {
+    borderWidth: 2,
+    borderColor: colors.success,
+    backgroundColor: colors.surface,
+  },
+  createTypeTitle: {
+    color: colors.textPrimary,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  createTypeTitleActive: {
+    color: colors.accent,
+  },
+  iconPickerRow: {
+    gap: 10,
+    paddingBottom: 4,
+    paddingRight: 16,
+  },
+  iconChoice: {
+    width: 82,
+    minHeight: 88,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    gap: 8,
+  },
+  iconChoiceActive: {
+    borderColor: colors.success,
+    backgroundColor: colors.accentSoft,
+  },
+  iconChoiceLabel: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '800',
+    maxWidth: '100%',
+  },
+  iconChoiceLabelActive: {
+    color: colors.accent,
+  },
+  createSubmitButton: {
+    borderRadius: 8,
+    backgroundColor: colors.success,
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 18,
+  },
+  createSubmitButtonText: {
+    color: colors.successText,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  createCancelButton: {
+    minHeight: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  createCancelText: {
+    color: colors.accent,
+    fontSize: 15,
+    fontWeight: '900',
   },
   modalTitle: {
     color: colors.textPrimary,
