@@ -1129,8 +1129,8 @@ function SortableListRow({
                 </View>
               ) : null}
               <View style={styles.listTrailingRow}>
-                <View style={[styles.listTypePill, item.type === 'auto' && styles.listTypePillAuto]}>
-                  <Text style={[styles.listTypePillText, item.type === 'auto' && styles.listTypePillTextAuto]}>
+                <View style={[styles.listTypePill, item.type === 'manual' ? styles.listTypePillManual : styles.listTypePillAuto]}>
+                  <Text style={[styles.listTypePillText, item.type === 'manual' ? styles.listTypePillTextManual : styles.listTypePillTextAuto]}>
                     {listTypeBadge(item.type)}
                   </Text>
                 </View>
@@ -1499,28 +1499,35 @@ function CreateListModal({
             onChangeText={onChangeName}
             placeholder="Np. zakupy na weekend"
             placeholderTextColor={colors.textMuted}
-            style={styles.input}
+            style={[styles.input, styles.createInput]}
           />
           <Text style={styles.fieldLabel}>Typ listy</Text>
           <View style={styles.createTypeRow}>
             {(['manual', 'auto'] as ShoppingListType[]).map(option => {
               const active = type === option;
               const TypeIcon = option === 'manual' ? ClipboardList : RefreshCcw;
+              const typeColor = option === 'manual' ? colors.accent : colors.warning;
               return (
                 <Pressable
                   key={option}
                   onPress={() => onChangeType(option)}
                   style={({pressed}) => [
                     styles.createTypeOption,
+                    option === 'manual' ? styles.createTypeOptionManual : styles.createTypeOptionAuto,
                     active && styles.createTypeOptionActive,
+                    active && (option === 'manual' ? styles.createTypeOptionManualActive : styles.createTypeOptionAutoActive),
                     pressed && styles.pressed,
                   ]}>
                   <TypeIcon
-                    color={active ? colors.accent : colors.textSecondary}
+                    color={active ? typeColor : colors.textSecondary}
                     size={20}
                     strokeWidth={2.2}
                   />
-                  <Text style={[styles.createTypeTitle, active && styles.createTypeTitleActive]}>
+                  <Text
+                    style={[
+                      styles.createTypeTitle,
+                      active && (option === 'manual' ? styles.createTypeTitleManualActive : styles.createTypeTitleAutoActive),
+                    ]}>
                     {option === 'manual' ? 'Manualna' : 'Auto'}
                   </Text>
                 </Pressable>
@@ -1542,15 +1549,21 @@ function CreateListModal({
                     onPress={() => onChangeIconColorKey(colorOption.key)}
                     accessibilityLabel={`Kolor ikony: ${colorOption.label}`}
                     style={({pressed}) => [
-                      styles.colorSwatch,
+                      styles.colorSwatchShadow,
+                      active && styles.colorSwatchShadowActive,
+                      pressed && styles.pressed,
+                    ]}>
+                    <View
+                      style={[
+                        styles.colorSwatch,
                       {
                         borderColor: active ? colorOption.color : colors.border,
                         backgroundColor: active ? colorOption.background : colors.surface,
                       },
                       active && styles.colorSwatchActive,
-                      pressed && styles.pressed,
                     ]}>
-                    <View style={[styles.colorSwatchInner, {backgroundColor: colorOption.color}]} />
+                      <View style={[styles.colorSwatchInner, {backgroundColor: colorOption.color}]} />
+                    </View>
                   </Pressable>
                 );
               })}
@@ -1568,28 +1581,34 @@ function CreateListModal({
                   key={icon.key}
                   onPress={() => onChangeIconKey(icon.key)}
                   style={({pressed}) => [
-                    styles.iconChoice,
-                    active && styles.iconChoiceActive,
-                    active && {
-                      borderColor: selectedColor.color,
-                      backgroundColor: selectedColor.background,
-                    },
+                    styles.iconChoiceShadow,
+                    active && styles.iconChoiceShadowActive,
                     pressed && styles.pressed,
                   ]}>
-                  <Icon
-                    color={active ? selectedColor.color : colors.textSecondary}
-                    size={27}
-                    strokeWidth={2.1}
-                  />
-                  <Text
+                  <View
                     style={[
-                      styles.iconChoiceLabel,
-                      active && styles.iconChoiceLabelActive,
-                      active && {color: selectedColor.color},
-                    ]}
-                    numberOfLines={1}>
-                    {icon.label}
-                  </Text>
+                      styles.iconChoice,
+                      active && styles.iconChoiceActive,
+                      active && {
+                        borderColor: selectedColor.color,
+                        backgroundColor: selectedColor.background,
+                      },
+                    ]}>
+                    <Icon
+                      color={active ? selectedColor.color : colors.textSecondary}
+                      size={27}
+                      strokeWidth={2.1}
+                    />
+                    <Text
+                      style={[
+                        styles.iconChoiceLabel,
+                        active && styles.iconChoiceLabelActive,
+                        active && {color: selectedColor.color},
+                      ]}
+                      numberOfLines={1}>
+                      {icon.label}
+                    </Text>
+                  </View>
                 </Pressable>
               );
             })}
@@ -1907,6 +1926,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 2,
   },
   searchIcon: {
     color: colors.textMuted,
@@ -1928,6 +1952,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: {width: 0, height: 5},
+    elevation: 3,
   },
   newListButtonText: {
     color: colors.successText,
@@ -1943,6 +1972,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     padding: 5,
     gap: 4,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 1,
   },
   filterSegment: {
     flex: 1,
@@ -1972,6 +2006,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.09,
+    shadowRadius: 14,
+    shadowOffset: {width: 0, height: 7},
+    elevation: 4,
   },
   replenishmentIcon: {
     width: 86,
@@ -2031,6 +2070,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 10,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: {width: 0, height: 6},
+    elevation: 3,
   },
   listCard: {
     minHeight: 74,
@@ -2041,6 +2085,8 @@ const styles = StyleSheet.create({
   },
   cardDragging: {
     borderColor: colors.success,
+    shadowOpacity: 0.14,
+    elevation: 5,
   },
   rowBetween: {
     flexDirection: 'row',
@@ -2073,21 +2119,26 @@ const styles = StyleSheet.create({
   listTypePill: {
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSubtle,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
+  listTypePillManual: {
+    borderColor: colors.accentSoft,
+    backgroundColor: colors.accentSoft,
+  },
   listTypePillAuto: {
-    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.warningSoft,
+    backgroundColor: colors.warningSoft,
   },
   listTypePillText: {
-    color: colors.textSecondary,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '900',
+  },
+  listTypePillTextManual: {
+    color: colors.accent,
   },
   listTypePillTextAuto: {
-    color: colors.accent,
+    color: colors.warning,
   },
   listTrailing: {
     minHeight: 50,
@@ -2193,12 +2244,12 @@ const styles = StyleSheet.create({
   },
   autoTypeBadge: {
     borderRadius: 8,
-    backgroundColor: colors.accentSoft,
+    backgroundColor: colors.warningSoft,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
   autoTypeBadgeText: {
-    color: colors.accent,
+    color: colors.warning,
     fontSize: 12,
     fontWeight: '900',
   },
@@ -2713,6 +2764,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: {width: 0, height: 4},
+    elevation: 2,
   },
   createPreviewIcon: {
     width: 62,
@@ -2758,7 +2814,23 @@ const styles = StyleSheet.create({
   colorPickerRow: {
     alignItems: 'center',
     gap: 8,
+    paddingVertical: 4,
     paddingRight: 2,
+  },
+  colorSwatchShadow: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.surface,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 2,
+  },
+  colorSwatchShadowActive: {
+    shadowOpacity: 0.08,
+    elevation: 3,
   },
   colorSwatch: {
     width: 32,
@@ -2783,14 +2855,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
-    overflow: 'hidden',
     marginBottom: 16,
+    padding: 2,
+    gap: 4,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 1,
   },
   createTypeOption: {
     flex: 1,
     minHeight: 48,
     borderRadius: 8,
-    borderWidth: 0,
+    borderWidth: 1,
+    borderColor: 'transparent',
     backgroundColor: colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
@@ -2798,23 +2877,56 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 10,
   },
+  createTypeOptionManual: {
+    backgroundColor: colors.surface,
+  },
+  createTypeOptionAuto: {
+    backgroundColor: colors.surface,
+  },
   createTypeOptionActive: {
     borderWidth: 2,
-    borderColor: colors.success,
-    backgroundColor: colors.surface,
+    margin: -3,
+    zIndex: 2,
+  },
+  createTypeOptionManualActive: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+  },
+  createTypeOptionAutoActive: {
+    borderColor: colors.warning,
+    backgroundColor: colors.warningSoft,
   },
   createTypeTitle: {
     color: colors.textPrimary,
     fontSize: 15,
     fontWeight: '900',
   },
-  createTypeTitleActive: {
+  createTypeTitleManualActive: {
     color: colors.accent,
+  },
+  createTypeTitleAutoActive: {
+    color: colors.warning,
   },
   iconPickerRow: {
     gap: 10,
-    paddingBottom: 4,
+    paddingTop: 4,
+    paddingBottom: 8,
     paddingRight: 16,
+  },
+  iconChoiceShadow: {
+    width: 82,
+    minHeight: 88,
+    borderRadius: 8,
+    backgroundColor: colors.surface,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: {width: 0, height: 5},
+    elevation: 2,
+  },
+  iconChoiceShadowActive: {
+    shadowOpacity: 0.09,
+    elevation: 3,
   },
   iconChoice: {
     width: 82,
@@ -2887,6 +2999,13 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
     marginBottom: 10,
+  },
+  createInput: {
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 1,
   },
   inputError: {
     borderColor: colors.danger,
