@@ -643,18 +643,18 @@ export default function ShoppingListView({
       return (
         <View style={styles.content}>
           <View style={styles.manualDetailsHero}>
-            <Pressable
-              onPress={goBackOneLevel}
-              style={({pressed}) => [styles.manualBackButton, pressed && styles.pressed]}
-              hitSlop={10}>
-              <Text style={styles.manualBackText}>‹ Wróć</Text>
-            </Pressable>
-            <View style={styles.manualTitleRow}>
-              <Text style={styles.manualDetailsTitle} numberOfLines={1}>{selectedList.name}</Text>
+            <View style={styles.detailsTopRow}>
+              <Pressable
+                onPress={goBackOneLevel}
+                style={({pressed}) => [styles.manualBackButton, pressed && styles.pressed]}
+                hitSlop={10}>
+                <Text style={styles.manualBackText}>‹ Wróć</Text>
+              </Pressable>
               <View style={styles.manualTypeBadge}>
                 <Text style={styles.manualTypeBadgeText}>Manualna</Text>
               </View>
             </View>
+            <Text style={styles.manualDetailsTitle} numberOfLines={1}>{selectedList.name}</Text>
             <Text style={styles.manualDetailsMeta}>
               {pluralizeItems(totalCount)} · {purchasedLabel(purchasedCount)}
             </Text>
@@ -715,14 +715,13 @@ export default function ShoppingListView({
     return (
       <View style={styles.content}>
         <View style={styles.autoDetailsHero}>
-          <Pressable
-            onPress={goBackOneLevel}
-            style={({pressed}) => [styles.manualBackButton, pressed && styles.pressed]}
-            hitSlop={10}>
-            <Text style={styles.manualBackText}>‹ Wróć</Text>
-          </Pressable>
-          <View style={styles.autoTitleRow}>
-            <Text style={styles.manualDetailsTitle} numberOfLines={1}>{selectedList.name}</Text>
+          <View style={styles.detailsTopRow}>
+            <Pressable
+              onPress={goBackOneLevel}
+              style={({pressed}) => [styles.manualBackButton, pressed && styles.pressed]}
+              hitSlop={10}>
+              <Text style={styles.manualBackText}>‹ Wróć</Text>
+            </Pressable>
             <View style={styles.autoBadgeRow}>
               <View style={styles.autoTypeBadge}>
                 <Text style={styles.autoTypeBadgeText}>Auto</Text>
@@ -734,6 +733,7 @@ export default function ShoppingListView({
               </View>
             </View>
           </View>
+          <Text style={styles.manualDetailsTitle} numberOfLines={1}>{selectedList.name}</Text>
           <Text style={styles.manualDetailsMeta}>
             {pluralizeItems(totalCount)} · {missingCount === 1 ? '1 do uzupełnienia' : `${missingCount} do uzupełnienia`}
           </Text>
@@ -1218,7 +1218,6 @@ function AutoShoppingItemRow({
   onDelete: (id: string) => Promise<void>;
   onUpdateQuantity: (id: string, quantity: number) => Promise<void>;
 }) {
-  const missingQuantity = Math.max(0, item.missingQuantity);
   const canDecrease = item.quantity > 1 && !busy;
   return (
     <SwipeToDeleteCard
@@ -1233,17 +1232,6 @@ function AutoShoppingItemRow({
           <Text style={styles.manualItemTitle} numberOfLines={1}>{item.label}</Text>
           <Text style={styles.manualItemMeta} numberOfLines={1}>
             Masz {item.currentQuantity} z {item.quantity}
-          </Text>
-        </View>
-        <View style={[
-          styles.autoStatusPill,
-          missingQuantity > 0 ? styles.autoStatusPillMissing : styles.autoStatusPillOk,
-        ]}>
-          <Text style={[
-            styles.autoStatusPillText,
-            missingQuantity > 0 ? styles.autoStatusPillTextMissing : styles.autoStatusPillTextOk,
-          ]}>
-            {missingQuantity > 0 ? `Brakuje ${missingQuantity}` : 'OK'}
           </Text>
         </View>
         <View style={styles.manualQuantityStepper}>
@@ -1990,33 +1978,24 @@ const styles = StyleSheet.create({
     paddingTop: 2,
     paddingBottom: 14,
   },
+  detailsTopRow: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 14,
+  },
   manualBackButton: {
     alignSelf: 'flex-start',
     paddingVertical: 8,
-    marginBottom: 14,
   },
   manualBackText: {
     color: colors.accent,
     fontSize: 17,
     fontWeight: '800',
   },
-  manualTitleRow: {
-    minHeight: 42,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  autoTitleRow: {
-    minHeight: 42,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
   manualDetailsTitle: {
-    flex: 1,
-    minWidth: 0,
     color: colors.textPrimary,
     fontSize: 38,
     fontWeight: '900',
@@ -2173,30 +2152,6 @@ const styles = StyleSheet.create({
   autoItemText: {
     flex: 1,
     minWidth: 0,
-  },
-  autoStatusPill: {
-    minWidth: 54,
-    minHeight: 34,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 9,
-  },
-  autoStatusPillMissing: {
-    backgroundColor: colors.surfaceSubtle,
-  },
-  autoStatusPillOk: {
-    backgroundColor: colors.accentSoft,
-  },
-  autoStatusPillText: {
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  autoStatusPillTextMissing: {
-    color: colors.warning,
-  },
-  autoStatusPillTextOk: {
-    color: colors.accent,
   },
   manualItemStatusBar: {
     position: 'absolute',
