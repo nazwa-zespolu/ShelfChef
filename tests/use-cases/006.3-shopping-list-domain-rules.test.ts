@@ -48,6 +48,7 @@ const milkItem: ShoppingListItem = {
   catalogProductId: "catalog-specific-111",
   label: "Mleko",
   quantity: 3,
+  sortOrder: 0,
   status: "planned" as const,
   source: "manual" as const,
   storedAt: null,

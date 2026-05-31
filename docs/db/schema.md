@@ -56,6 +56,7 @@ erDiagram
         TEXT catalog_product_id FK
         TEXT label
         INTEGER quantity
+        INTEGER sort_order
         TEXT status
         TEXT source
         TEXT stored_at
@@ -79,6 +80,7 @@ erDiagram
 - `product_catalog.parent_catalog_product_id` laczy produkt konkretny z produktem ogolnym (`generic`).
 - `shopping_list_items.list_id` wskazuje liste zakupow.
 - `shopping_list_items.catalog_product_id` jest opcjonalne, bo zwykle pozycje tekstowe nie musza miec wpisu w katalogu.
+- `shopping_list_items.sort_order` zapisuje reczna kolejnosc produktow w konkretnej liscie.
 - `shopping_lists.icon_key` i `shopping_lists.icon_color_key` przechowuja wybrany wyglad ikony listy.
 - `shopping_lists.sort_order` zapisuje reczna kolejnosc list na ekranie list zakupow.
 - `app_settings` jest tabela konfiguracyjna i nie ma relacji z pozostalymi tabelami.

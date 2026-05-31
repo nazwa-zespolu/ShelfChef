@@ -80,6 +80,7 @@ function mapShoppingItem(row: Record<string, any>): ShoppingListItem {
     catalogProductId: row.catalog_product_id ?? null,
     label: row.label,
     quantity: Number(row.quantity),
+    sortOrder: Number(row.sort_order ?? 0),
     status: row.status,
     source: row.source,
     storedAt: row.stored_at ?? null,
@@ -205,7 +206,7 @@ export class ShoppingListRepository {
         SELECT *
         FROM shopping_list_items
         WHERE list_id = ?
-        ORDER BY created_at ASC
+        ORDER BY sort_order ASC, created_at ASC
       `,
       [listId],
     );
@@ -245,6 +246,11 @@ export class ShoppingListRepository {
     const quantity = Math.max(1, input.quantity ?? 1);
     const status = input.status ?? 'planned';
     const source = input.source ?? 'manual';
+    const orderResult = db.execute(
+      'SELECT COALESCE(MAX(sort_order), -1) AS max_sort_order FROM shopping_list_items WHERE list_id = ?',
+      [listId],
+    );
+    const sortOrder = Number(orderResult.rows?.item(0)?.max_sort_order ?? -1) + 1;
     db.execute(
       `
         INSERT INTO shopping_list_items (
@@ -253,13 +259,14 @@ export class ShoppingListRepository {
           catalog_product_id,
           label,
           quantity,
+          sort_order,
           status,
           source,
           stored_at,
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
       `,
       [
         id,
@@ -267,6 +274,7 @@ export class ShoppingListRepository {
         input.catalogProductId ?? null,
         input.label.trim(),
         quantity,
+        sortOrder,
         status,
         source,
         timestamp,
@@ -279,6 +287,7 @@ export class ShoppingListRepository {
       catalogProductId: input.catalogProductId ?? null,
       label: input.label.trim(),
       quantity,
+      sortOrder,
       status,
       source,
       storedAt: null,
@@ -322,6 +331,24 @@ export class ShoppingListRepository {
       `,
       [Math.max(1, quantity), nowIso(), id],
     );
+  }
+
+  async updateItemOrder(listId: string, itemIds: string[]): Promise<void> {
+    runInTransaction(() => {
+      const timestamp = nowIso();
+      itemIds.forEach((id, index) => {
+        db.execute(
+          `
+            UPDATE shopping_list_items
+            SET sort_order = ?,
+                updated_at = ?
+            WHERE list_id = ?
+              AND id = ?
+          `,
+          [index, timestamp, listId, id],
+        );
+      });
+    });
   }
 
   async deleteItem(id: string): Promise<void> {
@@ -420,6 +447,11 @@ export class ShoppingListRepository {
     }
 
     const summary: AddAllSuggestionsSummary = {added: 0, reactivated: 0, skipped: 0};
+    const orderResult = db.execute(
+      'SELECT COALESCE(MAX(sort_order), -1) AS max_sort_order FROM shopping_list_items WHERE list_id = ?',
+      [targetManualListId],
+    );
+    let nextSortOrder = Number(orderResult.rows?.item(0)?.max_sort_order ?? -1) + 1;
     runInTransaction(() => {
       for (const suggestion of suggestions) {
         const existing = this.findTargetItemForSuggestion(targetManualListId, suggestion);
@@ -433,13 +465,14 @@ export class ShoppingListRepository {
                 catalog_product_id,
                 label,
                 quantity,
+                sort_order,
                 status,
                 source,
                 stored_at,
                 created_at,
                 updated_at
               )
-              VALUES (?, ?, ?, ?, ?, 'planned', 'suggestion', NULL, ?, ?)
+              VALUES (?, ?, ?, ?, ?, ?, 'planned', 'suggestion', NULL, ?, ?)
             `,
             [
               generateId('shopping-item'),
@@ -447,10 +480,12 @@ export class ShoppingListRepository {
               suggestion.catalogProductId,
               suggestion.name,
               Math.max(1, suggestion.missingQuantity),
+              nextSortOrder,
               timestamp,
               timestamp,
             ],
           );
+          nextSortOrder += 1;
           summary.added += 1;
           continue;
         }
@@ -579,7 +614,7 @@ export class ShoppingListRepository {
         FROM shopping_list_items
         WHERE list_id = ?
           AND catalog_product_id = ?
-        ORDER BY created_at ASC
+        ORDER BY sort_order ASC, created_at ASC
         LIMIT 1
       `,
       [listId, suggestion.catalogProductId],
@@ -595,7 +630,7 @@ export class ShoppingListRepository {
         WHERE list_id = ?
           AND catalog_product_id IS NULL
           AND lower(trim(label)) = ?
-        ORDER BY created_at ASC
+        ORDER BY sort_order ASC, created_at ASC
         LIMIT 1
       `,
       [listId, suggestion.normalizedName],

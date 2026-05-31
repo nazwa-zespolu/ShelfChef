@@ -4,6 +4,7 @@ import {
   Animated,
   Alert,
   BackHandler,
+  type DimensionValue,
   FlatList,
   Modal,
   PanResponder,
@@ -16,7 +17,7 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {ClipboardList, RefreshCcw} from 'lucide-react-native';
+import {Check, ClipboardList, Package, Plus, RefreshCcw, Search} from 'lucide-react-native';
 import {
   AutoShoppingListItemState,
   CatalogProduct,
@@ -156,6 +157,7 @@ export default function ShoppingListView({
   const [targetListId, setTargetListId] = useState<string | null>(null);
   const [pendingDeleteList, setPendingDeleteList] = useState<ShoppingListSummary | null>(null);
   const [listSearch, setListSearch] = useState('');
+  const [itemSearch, setItemSearch] = useState('');
   const [listFilter, setListFilter] = useState<ListFilter>('all');
   const [listStats, setListStats] = useState<Record<string, ShoppingListCardStats>>({});
 
@@ -172,6 +174,13 @@ export default function ShoppingListView({
       return list.name.toLowerCase().includes(query);
     });
   }, [listFilter, listSearch, lists]);
+  const filteredItems = useMemo(() => {
+    const query = itemSearch.trim().toLowerCase();
+    if (!query || selectedList?.type !== 'manual') {
+      return items;
+    }
+    return items.filter(item => item.label.toLowerCase().includes(query));
+  }, [itemSearch, items, selectedList?.type]);
 
   const loadLists = useCallback(async () => {
     setLoading(true);
@@ -254,6 +263,7 @@ export default function ShoppingListView({
 
   const openList = useCallback(
     (list: ShoppingListSummary) => {
+      setItemSearch('');
       setMode('details');
       loadSelectedList(list).catch(() => setLoading(false));
     },
@@ -423,6 +433,27 @@ export default function ShoppingListView({
     [loadSelectedList, selectedList],
   );
 
+  const moveItem = useCallback(async (itemId: string, direction: -1 | 1) => {
+    if (!selectedList || selectedList.type !== 'manual' || itemSearch.trim()) {
+      return;
+    }
+    const currentIndex = items.findIndex(item => item.id === itemId);
+    const nextIndex = currentIndex + direction;
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= items.length) {
+      return;
+    }
+    const nextItems = [...items];
+    const [moved] = nextItems.splice(currentIndex, 1);
+    nextItems.splice(nextIndex, 0, moved);
+    const ordered = nextItems.map((item, index) => ({...item, sortOrder: index}));
+    setItems(ordered);
+    try {
+      await shoppingRepository.updateItemOrder(selectedList.id, ordered.map(item => item.id));
+    } catch {
+      loadSelectedList(selectedList).catch(() => {});
+    }
+  }, [itemSearch, items, loadSelectedList, selectedList]);
+
   const deleteItem = useCallback(
     async (itemId: string) => {
       if (!selectedList) {
@@ -584,6 +615,18 @@ export default function ShoppingListView({
     );
   };
 
+  const renderManualItem = ({item}: {item: AutoShoppingListItemState}) => (
+    <ManualShoppingItemRow
+      item={item}
+      busy={busy}
+      reorderEnabled={itemSearch.trim().length === 0}
+      onDelete={deleteItem}
+      onMove={moveItem}
+      onUpdateQuantity={updateQuantity}
+      onUpdateStatus={updateStatus}
+    />
+  );
+
   const renderSuggestions = () => (
     <View style={styles.content}>
       <Header title="Do uzupełnienia" onBack={goBackOneLevel} />
@@ -649,7 +692,78 @@ export default function ShoppingListView({
     if (!selectedList) {
       return null;
     }
-    const purchasedCount = items.filter(item => item.status === 'purchased').length;
+    const purchasedCount = items.filter(item => item.effectiveStatus === 'purchased').length;
+    const totalCount = items.length;
+    const progress = totalCount > 0 ? purchasedCount / totalCount : 0;
+    const progressPercent = `${Math.round(progress * 100)}%` as DimensionValue;
+    if (selectedList.type === 'manual') {
+      return (
+        <View style={styles.content}>
+          <View style={styles.manualDetailsHero}>
+            <Pressable
+              onPress={goBackOneLevel}
+              style={({pressed}) => [styles.manualBackButton, pressed && styles.pressed]}
+              hitSlop={10}>
+              <Text style={styles.manualBackText}>‹ Wróć</Text>
+            </Pressable>
+            <View style={styles.manualTitleRow}>
+              <Text style={styles.manualDetailsTitle} numberOfLines={1}>{selectedList.name}</Text>
+              <View style={styles.manualTypeBadge}>
+                <Text style={styles.manualTypeBadgeText}>Manualna</Text>
+              </View>
+            </View>
+            <Text style={styles.manualDetailsMeta}>
+              {pluralizeItems(totalCount)} · {purchasedLabel(purchasedCount)}
+            </Text>
+            <View style={styles.manualProgressTrack}>
+              <View style={[styles.manualProgressFill, {width: progressPercent}]} />
+            </View>
+            <View style={styles.manualSearchBox}>
+              <Search color={colors.textMuted} size={22} strokeWidth={2.1} />
+              <TextInput
+                value={itemSearch}
+                onChangeText={setItemSearch}
+                placeholder="Szukaj produktu..."
+                placeholderTextColor={colors.textMuted}
+                style={styles.manualSearchInput}
+              />
+            </View>
+          </View>
+          <FlatList
+            data={filteredItems}
+            keyExtractor={item => item.id}
+            refreshControl={<RefreshControl refreshing={loading} onRefresh={refreshCurrent} tintColor={colors.success} />}
+            contentContainerStyle={[
+              styles.manualItemsContent,
+              filteredItems.length === 0 && styles.emptyContent,
+            ]}
+            renderItem={renderManualItem}
+            ListEmptyComponent={
+              <EmptyState title={items.length === 0 ? 'Pusta lista' : 'Brak pasujących produktów'} />
+            }
+          />
+          <View style={[styles.manualBottomBar, {paddingBottom: insets.bottom + 10}]}>
+            <Pressable
+              onPress={openAddItem}
+              style={({pressed}) => [styles.manualAddButton, pressed && styles.pressed]}>
+              <Plus color={colors.success} size={22} strokeWidth={2.3} />
+              <Text style={styles.manualAddButtonText}>Dodaj</Text>
+            </Pressable>
+            <Pressable
+              disabled={purchasedCount === 0 || busy}
+              onPress={() => { completePurchase().catch(() => {}); }}
+              style={({pressed}) => [
+                styles.manualFinalizeButton,
+                (purchasedCount === 0 || busy) && styles.disabled,
+                pressed && styles.pressed,
+              ]}>
+              <Check color={colors.successText} size={22} strokeWidth={2.3} />
+              <Text style={styles.manualFinalizeButtonText}>Finalizuj</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
     return (
       <View style={styles.content}>
         <Header title={selectedList.name} onBack={goBackOneLevel} />
@@ -955,6 +1069,155 @@ function SortableListRow({
             </View>
           </View>
         </Pressable>
+      </Animated.View>
+    </SwipeToDeleteCard>
+  );
+}
+
+function ManualShoppingItemRow({
+  item,
+  busy,
+  reorderEnabled,
+  onDelete,
+  onMove,
+  onUpdateQuantity,
+  onUpdateStatus,
+}: {
+  item: AutoShoppingListItemState;
+  busy: boolean;
+  reorderEnabled: boolean;
+  onDelete: (id: string) => Promise<void>;
+  onMove: (id: string, direction: -1 | 1) => void;
+  onUpdateQuantity: (id: string, quantity: number) => Promise<void>;
+  onUpdateStatus: (id: string, status: ShoppingItemStatus) => Promise<void>;
+}) {
+  const translateY = useRef(new Animated.Value(0)).current;
+  const dragActive = useRef(false);
+  const dragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const movedAt = useRef(0);
+  const [dragging, setDragging] = useState(false);
+  const isPurchased = item.effectiveStatus === 'purchased';
+  const nextToggleStatus: ShoppingItemStatus = isPurchased ? 'planned' : 'purchased';
+  const canDecrease = item.quantity > 1 && !busy;
+  const ItemIcon = isPurchased ? Check : Package;
+
+  const resetPosition = useCallback(() => {
+    if (dragTimer.current) {
+      clearTimeout(dragTimer.current);
+      dragTimer.current = null;
+    }
+    Animated.spring(translateY, {
+      toValue: 0,
+      useNativeDriver: true,
+      speed: 20,
+      bounciness: 4,
+    }).start();
+    dragActive.current = false;
+    setDragging(false);
+  }, [translateY]);
+
+  const dragResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => reorderEnabled,
+        onMoveShouldSetPanResponder: (_evt, gesture) =>
+          reorderEnabled && Math.abs(gesture.dy) > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onPanResponderGrant: () => {
+          movedAt.current = 0;
+          dragTimer.current = setTimeout(() => {
+            dragActive.current = true;
+            setDragging(true);
+          }, 180);
+        },
+        onPanResponderMove: (_evt, gesture) => {
+          if (!dragActive.current) {
+            return;
+          }
+          translateY.setValue(gesture.dy);
+          const now = Date.now();
+          if (now - movedAt.current < 220) {
+            return;
+          }
+          if (gesture.dy > 46) {
+            movedAt.current = now;
+            translateY.setValue(0);
+            onMove(item.id, 1);
+          } else if (gesture.dy < -46) {
+            movedAt.current = now;
+            translateY.setValue(0);
+            onMove(item.id, -1);
+          }
+        },
+        onPanResponderRelease: resetPosition,
+        onPanResponderTerminate: resetPosition,
+      }),
+    [item.id, onMove, reorderEnabled, resetPosition, translateY],
+  );
+
+  return (
+    <SwipeToDeleteCard
+      borderRadius={8}
+      allowRightDelete={false}
+      onDelete={() => { onDelete(item.id).catch(() => {}); }}
+      onSwipeRight={() => { onUpdateStatus(item.id, nextToggleStatus).catch(() => {}); }}
+      rightLabel={isPurchased ? 'Cofnij' : 'Kupione'}
+      rightActionTone={isPurchased ? 'warning' : 'success'}>
+      <Animated.View style={{transform: [{translateY}]}}>
+        <View
+          style={[
+            styles.manualItemCard,
+            isPurchased && styles.manualItemCardPurchased,
+            dragging && styles.manualItemCardDragging,
+          ]}>
+          {isPurchased ? <View style={styles.manualItemStatusBar} /> : null}
+          <View
+            style={[styles.manualItemIcon, isPurchased && styles.manualItemIconPurchased]}
+            {...dragResponder.panHandlers}>
+            <ItemIcon
+              color={isPurchased ? colors.success : colors.accent}
+              size={24}
+              strokeWidth={2.1}
+            />
+          </View>
+          <View style={styles.manualItemText}>
+            <Text
+              style={[
+                styles.manualItemTitle,
+                isPurchased && styles.manualItemTitlePurchased,
+              ]}
+              numberOfLines={1}>
+              {item.label}
+            </Text>
+            <Text style={styles.manualItemMeta} numberOfLines={1}>
+              Masz {item.currentQuantity}
+            </Text>
+          </View>
+          <View style={styles.manualItemControls}>
+            <View style={styles.manualQuantityStepper}>
+              <Pressable
+                disabled={!canDecrease}
+                style={({pressed}) => [
+                  styles.manualStepButton,
+                  !canDecrease && styles.disabled,
+                  pressed && styles.pressed,
+                ]}
+                onPress={() => onUpdateQuantity(item.id, item.quantity - 1)}>
+                <Text style={styles.manualStepText}>−</Text>
+              </Pressable>
+              <Text style={styles.manualQuantityText}>{item.quantity}</Text>
+              <Pressable
+                disabled={busy}
+                style={({pressed}) => [
+                  styles.manualStepButton,
+                  busy && styles.disabled,
+                  pressed && styles.pressed,
+                ]}
+                onPress={() => onUpdateQuantity(item.id, item.quantity + 1)}>
+                <Text style={styles.manualStepText}>+</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
       </Animated.View>
     </SwipeToDeleteCard>
   );
@@ -1700,6 +1963,196 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: '700',
   },
+  manualDetailsHero: {
+    paddingHorizontal: 16,
+    paddingTop: 2,
+    paddingBottom: 14,
+  },
+  manualBackButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    marginBottom: 14,
+  },
+  manualBackText: {
+    color: colors.accent,
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  manualTitleRow: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  manualDetailsTitle: {
+    flex: 1,
+    minWidth: 0,
+    color: colors.textPrimary,
+    fontSize: 38,
+    fontWeight: '900',
+  },
+  manualTypeBadge: {
+    borderRadius: 8,
+    backgroundColor: colors.accentSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  manualTypeBadgeText: {
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  manualDetailsMeta: {
+    color: colors.textSecondary,
+    fontSize: 15,
+    marginTop: 8,
+  },
+  manualProgressTrack: {
+    height: 9,
+    borderRadius: 8,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginTop: 16,
+    marginBottom: 16,
+  },
+  manualProgressFill: {
+    height: '100%',
+    borderRadius: 8,
+    backgroundColor: colors.success,
+  },
+  manualSearchBox: {
+    minHeight: 52,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: {width: 0, height: 4},
+    elevation: 2,
+  },
+  manualSearchInput: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontSize: 16,
+    paddingVertical: 0,
+  },
+  manualItemsContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 112,
+  },
+  manualItemCard: {
+    minHeight: 78,
+    borderRadius: 8,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: {width: 0, height: 6},
+    elevation: 3,
+  },
+  manualItemCardPurchased: {
+    borderColor: colors.accentSoft,
+    backgroundColor: colors.surface,
+  },
+  manualItemCardDragging: {
+    borderColor: colors.success,
+    shadowOpacity: 0.14,
+    elevation: 5,
+  },
+  manualItemStatusBar: {
+    position: 'absolute',
+    left: 0,
+    top: 10,
+    bottom: 10,
+    width: 4,
+    borderTopRightRadius: 8,
+    borderBottomRightRadius: 8,
+    backgroundColor: colors.success,
+  },
+  manualItemIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 999,
+    backgroundColor: colors.accentSoft,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  manualItemIconPurchased: {
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accentSoft,
+  },
+  manualItemText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  manualItemTitle: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  manualItemTitlePurchased: {
+    color: colors.textSecondary,
+  },
+  manualItemMeta: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    marginTop: 4,
+  },
+  manualItemControls: {
+    alignItems: 'flex-end',
+  },
+  manualQuantityStepper: {
+    height: 38,
+    minWidth: 98,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSubtle,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 1,
+  },
+  manualStepButton: {
+    width: 32,
+    height: 36,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceSubtle,
+  },
+  manualStepText: {
+    color: colors.textPrimary,
+    fontSize: 20,
+    fontWeight: '900',
+  },
+  manualQuantityText: {
+    minWidth: 34,
+    textAlign: 'center',
+    color: colors.textPrimary,
+    fontSize: 15,
+    fontWeight: '900',
+  },
   itemCard: {
     borderRadius: 8,
     backgroundColor: colors.surface,
@@ -1799,6 +2252,68 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     flexDirection: 'row',
     gap: 10,
+  },
+  manualBottomBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    backgroundColor: colors.background,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    flexDirection: 'row',
+    gap: 10,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: {width: 0, height: -5},
+    elevation: 10,
+  },
+  manualAddButton: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.success,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 1,
+  },
+  manualAddButtonText: {
+    color: colors.success,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  manualFinalizeButton: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 8,
+    backgroundColor: colors.success,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: {width: 0, height: 5},
+    elevation: 4,
+  },
+  manualFinalizeButtonText: {
+    color: colors.successText,
+    fontSize: 16,
+    fontWeight: '900',
   },
   primaryButton: {
     flex: 1,

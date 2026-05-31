@@ -46,6 +46,7 @@ type ShoppingListItemRow = {
   catalog_product_id: string | null;
   label: string;
   quantity: number;
+  sort_order: number;
   status: 'planned' | 'purchased' | 'unavailable' | 'stored';
   source: 'manual' | 'suggestion' | 'reactivated';
   stored_at: string | null;
@@ -120,6 +121,13 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
   if (normalized.startsWith('ALTER TABLE SHOPPING_LISTS ADD COLUMN ICON_COLOR_KEY')) {
     for (const row of shoppingLists.values()) {
       row.icon_color_key = row.icon_color_key ?? 'green';
+    }
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('ALTER TABLE SHOPPING_LIST_ITEMS ADD COLUMN SORT_ORDER')) {
+    for (const row of shoppingListItems.values()) {
+      row.sort_order = row.sort_order ?? 0;
     }
     return toRows([]);
   }
@@ -232,7 +240,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       return toRows(
         Array.from(shoppingListItems.values())
           .filter(item => item.list_id === listId)
-          .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+          .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at)),
       );
     }
     return toRows(Array.from(shoppingListItems.values()));
@@ -329,6 +337,13 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
   }
 
   if (normalized.startsWith('SELECT COALESCE(MAX(SORT_ORDER), -1) AS MAX_SORT_ORDER')) {
+    if (normalized.includes('FROM SHOPPING_LIST_ITEMS')) {
+      const [listId] = params;
+      const maxSortOrder = Array.from(shoppingListItems.values())
+        .filter(row => row.list_id === listId)
+        .reduce((max, row) => Math.max(max, row.sort_order), -1);
+      return toRows([{max_sort_order: maxSortOrder}]);
+    }
     const maxSortOrder = Array.from(shoppingLists.values()).reduce(
       (max, row) => Math.max(max, row.sort_order),
       -1,
@@ -375,30 +390,33 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
   }
 
   if (normalized.startsWith('INSERT INTO SHOPPING_LIST_ITEMS')) {
-    const [
-      id,
-      listId,
-      catalogProductId,
-      label,
-      quantity,
-      statusOrCreatedAt,
-      sourceOrUpdatedAt,
-      maybeCreatedAt,
-      maybeUpdatedAt,
-    ] = params;
-    const hasExplicitStatus = maybeUpdatedAt !== undefined;
+    const [id, listId, catalogProductId, label, quantity] = params;
+    const hasExplicitStatus = params.length === 10;
+    const sortOrder = hasExplicitStatus ? params[5] : params[5];
     shoppingListItems.set(id, {
       id,
       list_id: listId,
       catalog_product_id: catalogProductId ?? null,
       label,
       quantity,
-      status: hasExplicitStatus ? statusOrCreatedAt : 'planned',
-      source: hasExplicitStatus ? sourceOrUpdatedAt : 'suggestion',
+      sort_order: sortOrder,
+      status: hasExplicitStatus ? params[6] : 'planned',
+      source: hasExplicitStatus ? params[7] : 'suggestion',
       stored_at: null,
-      created_at: hasExplicitStatus ? maybeCreatedAt : statusOrCreatedAt,
-      updated_at: hasExplicitStatus ? maybeUpdatedAt : sourceOrUpdatedAt,
+      created_at: hasExplicitStatus ? params[8] : params[6],
+      updated_at: hasExplicitStatus ? params[9] : params[7],
     });
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('UPDATE SHOPPING_LIST_ITEMS SET SORT_ORDER = ?')) {
+    const [sortOrder, updatedAt, listId, id] = params;
+    const row = shoppingListItems.get(id);
+    if (row && row.list_id === listId) {
+      row.sort_order = sortOrder;
+      row.updated_at = updatedAt;
+      shoppingListItems.set(id, row);
+    }
     return toRows([]);
   }
 
@@ -728,7 +746,7 @@ describe('ProductRepository + database integration', () => {
     const version = db.execute('PRAGMA user_version').rows!.item(0);
     const lists = db.execute('SELECT * FROM shopping_lists').rows!;
 
-    expect(version.user_version).toBe(6);
+    expect(version.user_version).toBe(7);
     expect(lists.length).toBe(1);
     expect(lists.item(0)).toMatchObject({
       id: 'default-auto-minimum',
@@ -773,6 +791,11 @@ describe('ProductRepository + database integration', () => {
       label: 'Mleko',
       quantity: 2,
     });
+    const bread = await shoppingListRepository.addItem(list.id, {
+      label: 'Chleb',
+      quantity: 1,
+    });
+    await shoppingListRepository.updateItemOrder(list.id, [bread.id, item.id]);
 
     const lists = await shoppingListRepository.getLists();
     const items = await shoppingListRepository.getItems(list.id);
@@ -788,7 +811,7 @@ describe('ProductRepository + database integration', () => {
       status: 'planned',
       source: 'manual',
     });
-    expect(items).toHaveLength(1);
+    expect(items.map(i => i.label)).toEqual(['Chleb', 'Mleko']);
   });
 
   it('zapisuje kolejność list i usuwa listę razem z jej pozycjami', async () => {

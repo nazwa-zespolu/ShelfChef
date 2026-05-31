@@ -56,6 +56,7 @@ export interface ShoppingListItem {
   catalogProductId: string | null;
   label: string;
   quantity: number;
+  sortOrder: number;
   status: ShoppingItemStatus;
   source: ShoppingItemSource;
   storedAt: string | null;
