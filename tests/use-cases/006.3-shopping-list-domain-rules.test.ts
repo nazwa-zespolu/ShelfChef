@@ -176,6 +176,40 @@ describe("UC-06: ShoppingList - domain rules", () => {
     });
   });
 
+  it("includes text auto list items in replenishment suggestions", async () => {
+    const {shoppingRepository, productRepository} = createRepositories([
+      {
+        ...milkItem,
+        id: "item-text-uhh",
+        catalogProductId: null,
+        label: "Uhh",
+        quantity: 1,
+      },
+      {
+        ...milkItem,
+        id: "item-specific-milk",
+        quantity: 4,
+      },
+    ]);
+    const shoppingList = new ShoppingList(shoppingRepository as any, productRepository as any);
+
+    const suggestions = await shoppingList.generateReplenishmentSuggestions();
+
+    expect(suggestions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          catalogProductId: null,
+          name: "Uhh",
+          normalizedName: "uhh",
+          missingQuantity: 1,
+          currentQuantity: 0,
+          targetQuantity: 1,
+          reason: "Masz 0 z 1",
+        }),
+      ]),
+    );
+  });
+
   it("stores effective planned/stored statuses when locking an auto list", async () => {
     const item = {...milkItem, quantity: 1};
     const {shoppingRepository, productRepository} = createRepositories([item]);

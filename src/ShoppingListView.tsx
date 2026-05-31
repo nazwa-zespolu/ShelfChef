@@ -17,7 +17,7 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Check, ClipboardList, Package, Plus, RefreshCcw, Search} from 'lucide-react-native';
+import {Check, ClipboardList, Lock, Package, Plus, RefreshCcw, Search, Unlock} from 'lucide-react-native';
 import {
   AutoShoppingListItemState,
   CatalogProduct,
@@ -70,22 +70,6 @@ const EMPTY_LIST_STATS: ShoppingListCardStats = {
 const shoppingRepository = new ShoppingListRepository();
 const productRepository = new ProductRepository();
 const shoppingList = new ShoppingList(shoppingRepository, productRepository);
-
-function statusLabel(status: ShoppingItemStatus) {
-  switch (status) {
-    case 'planned':
-    case 'unavailable':
-      return 'Do kupienia';
-    case 'purchased':
-      return 'Kupione';
-    case 'stored':
-      return 'Masz w zapasach';
-  }
-}
-
-function listTypeLabel(type: ShoppingListType) {
-  return type === 'auto' ? 'Lista uzupełniania' : 'Lista zakupów';
-}
 
 function listTypeBadge(type: ShoppingListType) {
   return type === 'auto' ? 'Auto' : 'Manualna';
@@ -176,11 +160,11 @@ export default function ShoppingListView({
   }, [listFilter, listSearch, lists]);
   const filteredItems = useMemo(() => {
     const query = itemSearch.trim().toLowerCase();
-    if (!query || selectedList?.type !== 'manual') {
+    if (!query) {
       return items;
     }
     return items.filter(item => item.label.toLowerCase().includes(query));
-  }, [itemSearch, items, selectedList?.type]);
+  }, [itemSearch, items]);
 
   const loadLists = useCallback(async () => {
     setLoading(true);
@@ -565,56 +549,6 @@ export default function ShoppingListView({
     />
   );
 
-  const renderItem = ({item}: {item: AutoShoppingListItemState}) => {
-    const shownStatus = item.effectiveStatus;
-    const isPurchased = shownStatus === 'purchased';
-    const nextToggleStatus: ShoppingItemStatus = isPurchased ? 'planned' : 'purchased';
-    return (
-      <SwipeToDeleteCard
-        borderRadius={8}
-        allowRightDelete={false}
-        onDelete={() => { deleteItem(item.id).catch(() => {}); }}
-        onSwipeRight={
-          selectedList?.type === 'manual'
-            ? () => { updateStatus(item.id, nextToggleStatus).catch(() => {}); }
-            : undefined
-        }
-        rightLabel={isPurchased ? 'Cofnij' : 'Kupione'}
-        rightActionTone={isPurchased ? 'warning' : 'success'}>
-        <View style={[styles.itemCard, styles.swipeItemCard]}>
-        <View style={styles.rowBetween}>
-          <View style={styles.rowText}>
-            <Text style={styles.itemTitle} numberOfLines={2}>{item.label}</Text>
-            <Text style={styles.itemMeta}>
-              {statusLabel(shownStatus)} · masz {item.currentQuantity}
-            </Text>
-          </View>
-          <View style={styles.quantityStepper}>
-            <Pressable
-              style={({pressed}) => [styles.stepButton, pressed && styles.pressed]}
-              onPress={() => updateQuantity(item.id, item.quantity - 1)}>
-              <Text style={styles.stepText}>−</Text>
-            </Pressable>
-            <Text style={styles.quantityText}>{item.quantity}</Text>
-            <Pressable
-              style={({pressed}) => [styles.stepButton, pressed && styles.pressed]}
-              onPress={() => updateQuantity(item.id, item.quantity + 1)}>
-              <Text style={styles.stepText}>+</Text>
-            </Pressable>
-          </View>
-        </View>
-        <View style={styles.actionRow}>
-          <ActionButton
-            label={isPurchased ? 'Cofnij' : 'Kupione'}
-            tone={isPurchased ? 'warning' : 'success'}
-            onPress={() => updateStatus(item.id, nextToggleStatus)}
-          />
-        </View>
-        </View>
-      </SwipeToDeleteCard>
-    );
-  };
-
   const renderManualItem = ({item}: {item: AutoShoppingListItemState}) => (
     <ManualShoppingItemRow
       item={item}
@@ -624,6 +558,15 @@ export default function ShoppingListView({
       onMove={moveItem}
       onUpdateQuantity={updateQuantity}
       onUpdateStatus={updateStatus}
+    />
+  );
+
+  const renderAutoItem = ({item}: {item: AutoShoppingListItemState}) => (
+    <AutoShoppingItemRow
+      item={item}
+      busy={busy}
+      onDelete={deleteItem}
+      onUpdateQuantity={updateQuantity}
     />
   );
 
@@ -664,7 +607,7 @@ export default function ShoppingListView({
       </View>
       <FlatList
         data={suggestions}
-        keyExtractor={item => item.catalogProductId}
+        keyExtractor={item => item.catalogProductId ?? `text:${item.normalizedName}`}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={openSuggestions} tintColor={colors.success} />}
         contentContainerStyle={[styles.listContent, suggestions.length === 0 && styles.emptyContent]}
         renderItem={({item}) => (
@@ -764,47 +707,88 @@ export default function ShoppingListView({
         </View>
       );
     }
+    const missingCount = items.filter(item => item.missingQuantity > 0).length;
+    const coveredCount = Math.max(0, totalCount - missingCount);
+    const autoProgress = totalCount > 0 ? coveredCount / totalCount : 0;
+    const autoProgressPercent = `${Math.round(autoProgress * 100)}%` as DimensionValue;
+    const AutoLockIcon = selectedList.isLocked ? Unlock : Lock;
     return (
       <View style={styles.content}>
-        <Header title={selectedList.name} onBack={goBackOneLevel} />
-        <View style={styles.detailToolbar}>
-          <View style={styles.listBadge}>
-            <Text style={styles.listBadgeText}>{listTypeLabel(selectedList.type)}</Text>
+        <View style={styles.autoDetailsHero}>
+          <Pressable
+            onPress={goBackOneLevel}
+            style={({pressed}) => [styles.manualBackButton, pressed && styles.pressed]}
+            hitSlop={10}>
+            <Text style={styles.manualBackText}>‹ Wróć</Text>
+          </Pressable>
+          <View style={styles.autoTitleRow}>
+            <Text style={styles.manualDetailsTitle} numberOfLines={1}>{selectedList.name}</Text>
+            <View style={styles.autoBadgeRow}>
+              <View style={styles.autoTypeBadge}>
+                <Text style={styles.autoTypeBadgeText}>Auto</Text>
+              </View>
+              <View style={styles.autoLockBadge}>
+                <Text style={styles.autoLockBadgeText}>
+                  {selectedList.isLocked ? 'Zablokowana' : 'Aktywna'}
+                </Text>
+              </View>
+            </View>
           </View>
-          {selectedList.type === 'auto' ? (
-            <Pressable
-              onPress={toggleLock}
-              disabled={busy}
-              style={({pressed}) => [styles.secondaryButton, pressed && styles.pressed]}>
-              <Text style={styles.secondaryButtonText}>
-                {selectedList.isLocked ? 'Odblokuj' : 'Zablokuj'}
-              </Text>
-            </Pressable>
-          ) : null}
+          <Text style={styles.manualDetailsMeta}>
+            {pluralizeItems(totalCount)} · {missingCount === 1 ? '1 do uzupełnienia' : `${missingCount} do uzupełnienia`}
+          </Text>
+          <View style={styles.manualProgressTrack}>
+            <View style={[styles.manualProgressFill, {width: autoProgressPercent}]} />
+          </View>
+          <View style={styles.autoStatusRow}>
+            <RefreshCcw color={colors.accent} size={21} strokeWidth={2.1} />
+            <Text style={styles.autoStatusText}>
+              {selectedList.isLocked ? 'Aktualizacja wstrzymana' : 'Aktualizuje się z zapasów'}
+            </Text>
+          </View>
+          <View style={styles.manualSearchBox}>
+            <Search color={colors.textMuted} size={22} strokeWidth={2.1} />
+            <TextInput
+              value={itemSearch}
+              onChangeText={setItemSearch}
+              placeholder="Szukaj produktu..."
+              placeholderTextColor={colors.textMuted}
+              style={styles.manualSearchInput}
+            />
+          </View>
         </View>
         <FlatList
-          data={items}
+          data={filteredItems}
           keyExtractor={item => item.id}
           refreshControl={<RefreshControl refreshing={loading} onRefresh={refreshCurrent} tintColor={colors.success} />}
-          contentContainerStyle={[styles.listContent, items.length === 0 && styles.emptyContent]}
-          renderItem={renderItem}
-          ListEmptyComponent={<EmptyState title="Pusta lista" />}
+          contentContainerStyle={[
+            styles.manualItemsContent,
+            filteredItems.length === 0 && styles.emptyContent,
+          ]}
+          renderItem={renderAutoItem}
+          ListEmptyComponent={
+            <EmptyState title={items.length === 0 ? 'Pusta lista' : 'Brak pasujących produktów'} />
+          }
         />
-        <View style={[styles.bottomBar, {paddingBottom: insets.bottom + 10}]}>
+        <View style={[styles.manualBottomBar, {paddingBottom: insets.bottom + 10}]}>
           <Pressable
             onPress={openAddItem}
-            style={({pressed}) => [styles.primaryButton, pressed && styles.pressed]}>
-            <Text style={styles.primaryButtonText}>Dodaj</Text>
+            style={({pressed}) => [styles.manualAddButton, pressed && styles.pressed]}>
+            <Plus color={colors.success} size={22} strokeWidth={2.3} />
+            <Text style={styles.manualAddButtonText}>Dodaj</Text>
           </Pressable>
           <Pressable
-            disabled={purchasedCount === 0 || busy}
-            onPress={() => { completePurchase().catch(() => {}); }}
+            disabled={busy}
+            onPress={() => { toggleLock().catch(() => {}); }}
             style={({pressed}) => [
-              styles.secondaryButton,
-              (purchasedCount === 0 || busy) && styles.disabled,
+              styles.manualFinalizeButton,
+              busy && styles.disabled,
               pressed && styles.pressed,
             ]}>
-            <Text style={styles.secondaryButtonText}>Finalizuj</Text>
+            <AutoLockIcon color={colors.successText} size={21} strokeWidth={2.2} />
+            <Text style={styles.manualFinalizeButtonText}>
+              {selectedList.isLocked ? 'Odblokuj' : 'Zablokuj'}
+            </Text>
           </Pressable>
         </View>
       </View>
@@ -1223,6 +1207,73 @@ function ManualShoppingItemRow({
   );
 }
 
+function AutoShoppingItemRow({
+  item,
+  busy,
+  onDelete,
+  onUpdateQuantity,
+}: {
+  item: AutoShoppingListItemState;
+  busy: boolean;
+  onDelete: (id: string) => Promise<void>;
+  onUpdateQuantity: (id: string, quantity: number) => Promise<void>;
+}) {
+  const missingQuantity = Math.max(0, item.missingQuantity);
+  const canDecrease = item.quantity > 1 && !busy;
+  return (
+    <SwipeToDeleteCard
+      borderRadius={8}
+      allowRightDelete={false}
+      onDelete={() => { onDelete(item.id).catch(() => {}); }}>
+      <View style={styles.autoItemCard}>
+        <View style={styles.autoItemIcon}>
+          <Package color={colors.accent} size={24} strokeWidth={2.1} />
+        </View>
+        <View style={styles.autoItemText}>
+          <Text style={styles.manualItemTitle} numberOfLines={1}>{item.label}</Text>
+          <Text style={styles.manualItemMeta} numberOfLines={1}>
+            Masz {item.currentQuantity} z {item.quantity}
+          </Text>
+        </View>
+        <View style={[
+          styles.autoStatusPill,
+          missingQuantity > 0 ? styles.autoStatusPillMissing : styles.autoStatusPillOk,
+        ]}>
+          <Text style={[
+            styles.autoStatusPillText,
+            missingQuantity > 0 ? styles.autoStatusPillTextMissing : styles.autoStatusPillTextOk,
+          ]}>
+            {missingQuantity > 0 ? `Brakuje ${missingQuantity}` : 'OK'}
+          </Text>
+        </View>
+        <View style={styles.manualQuantityStepper}>
+          <Pressable
+            disabled={!canDecrease}
+            style={({pressed}) => [
+              styles.manualStepButton,
+              !canDecrease && styles.disabled,
+              pressed && styles.pressed,
+            ]}
+            onPress={() => onUpdateQuantity(item.id, item.quantity - 1)}>
+            <Text style={styles.manualStepText}>−</Text>
+          </Pressable>
+          <Text style={styles.manualQuantityText}>{item.quantity}</Text>
+          <Pressable
+            disabled={busy}
+            style={({pressed}) => [
+              styles.manualStepButton,
+              busy && styles.disabled,
+              pressed && styles.pressed,
+            ]}
+            onPress={() => onUpdateQuantity(item.id, item.quantity + 1)}>
+            <Text style={styles.manualStepText}>+</Text>
+          </Pressable>
+        </View>
+      </View>
+    </SwipeToDeleteCard>
+  );
+}
+
 function Header({title, onBack}: {title: string; onBack: () => void}) {
   return (
     <View style={styles.topBar}>
@@ -1231,40 +1282,6 @@ function Header({title, onBack}: {title: string; onBack: () => void}) {
       </Pressable>
       <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
     </View>
-  );
-}
-
-function ActionButton({
-  label,
-  danger,
-  tone = 'neutral',
-  onPress,
-}: {
-  label: string;
-  danger?: boolean;
-  tone?: 'neutral' | 'success' | 'warning';
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({pressed}) => [
-        styles.actionButton,
-        tone === 'success' && styles.actionButtonSuccess,
-        tone === 'warning' && styles.actionButtonWarning,
-        danger && styles.actionButtonDanger,
-        pressed && styles.pressed,
-      ]}>
-      <Text
-        style={[
-          styles.actionButtonText,
-          tone === 'success' && styles.actionButtonTextSuccess,
-          tone === 'warning' && styles.actionButtonTextWarning,
-          danger && styles.actionButtonTextDanger,
-        ]}>
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -1968,6 +1985,11 @@ const styles = StyleSheet.create({
     paddingTop: 2,
     paddingBottom: 14,
   },
+  autoDetailsHero: {
+    paddingHorizontal: 16,
+    paddingTop: 2,
+    paddingBottom: 14,
+  },
   manualBackButton: {
     alignSelf: 'flex-start',
     paddingVertical: 8,
@@ -1985,6 +2007,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
+  autoTitleRow: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
   manualDetailsTitle: {
     flex: 1,
     minWidth: 0,
@@ -2001,6 +2030,34 @@ const styles = StyleSheet.create({
   manualTypeBadgeText: {
     color: colors.accent,
     fontSize: 13,
+    fontWeight: '900',
+  },
+  autoBadgeRow: {
+    flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  autoTypeBadge: {
+    borderRadius: 8,
+    backgroundColor: colors.accentSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  autoTypeBadgeText: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  autoLockBadge: {
+    borderRadius: 8,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  autoLockBadgeText: {
+    color: colors.textSecondary,
+    fontSize: 12,
     fontWeight: '900',
   },
   manualDetailsMeta: {
@@ -2044,6 +2101,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     paddingVertical: 0,
   },
+  autoStatusRow: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  autoStatusText: {
+    color: colors.textSecondary,
+    fontSize: 15,
+    fontWeight: '700',
+  },
   manualItemsContent: {
     paddingHorizontal: 16,
     paddingBottom: 112,
@@ -2073,6 +2142,61 @@ const styles = StyleSheet.create({
     borderColor: colors.success,
     shadowOpacity: 0.14,
     elevation: 5,
+  },
+  autoItemCard: {
+    minHeight: 78,
+    borderRadius: 8,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: {width: 0, height: 6},
+    elevation: 3,
+  },
+  autoItemIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 999,
+    backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  autoItemText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  autoStatusPill: {
+    minWidth: 54,
+    minHeight: 34,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+  },
+  autoStatusPillMissing: {
+    backgroundColor: colors.surfaceSubtle,
+  },
+  autoStatusPillOk: {
+    backgroundColor: colors.accentSoft,
+  },
+  autoStatusPillText: {
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  autoStatusPillTextMissing: {
+    color: colors.warning,
+  },
+  autoStatusPillTextOk: {
+    color: colors.accent,
   },
   manualItemStatusBar: {
     position: 'absolute',
@@ -2161,9 +2285,6 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 10,
   },
-  swipeItemCard: {
-    marginBottom: 0,
-  },
   itemTitle: {
     color: colors.textPrimary,
     fontSize: 16,
@@ -2178,67 +2299,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12,
     marginTop: 10,
-  },
-  quantityStepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 8,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  stepButton: {
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surfaceSubtle,
-  },
-  stepText: {
-    color: colors.textPrimary,
-    fontSize: 18,
-    fontWeight: '900',
-  },
-  quantityText: {
-    minWidth: 34,
-    textAlign: 'center',
-    color: colors.textPrimary,
-    fontWeight: '800',
-  },
-  actionRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 12,
-  },
-  actionButton: {
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    backgroundColor: colors.surfaceSubtle,
-  },
-  actionButtonSuccess: {
-    backgroundColor: colors.success,
-  },
-  actionButtonWarning: {
-    backgroundColor: colors.warning,
-  },
-  actionButtonDanger: {
-    backgroundColor: colors.danger,
-  },
-  actionButtonText: {
-    color: colors.textPrimary,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  actionButtonTextSuccess: {
-    color: colors.successText,
-  },
-  actionButtonTextWarning: {
-    color: colors.warningText,
-  },
-  actionButtonTextDanger: {
-    color: colors.successText,
   },
   bottomBar: {
     position: 'absolute',

@@ -124,52 +124,77 @@ export class ShoppingList {
     const usedInventoryIds = new Set<string>();
     const displayQuantityByCatalogId = new Map<string, number>();
     const consumedQuantityByCatalogId = new Map<string, number>();
+    const displayQuantityByLabel = new Map<string, number>();
+    const consumedQuantityByLabel = new Map<string, number>();
     const grouped = new Map<string, ShoppingSuggestion>();
 
     for (const list of lists) {
       const items = await this.requireShoppingRepository().getItems(list.id);
       for (const item of items) {
-        if (item.status === 'purchased' || !item.catalogProductId) {
+        if (item.status === 'purchased') {
           continue;
         }
 
-        const catalogProduct = catalogIndex.byId.get(item.catalogProductId);
-        if (!catalogProduct) {
-          continue;
-        }
+        const catalogProduct = item.catalogProductId
+          ? catalogIndex.byId.get(item.catalogProductId)
+          : null;
+        const normalizedName = catalogProduct?.normalizedName ?? normalizeProductName(item.label);
+        const groupKey = catalogProduct ? `catalog:${catalogProduct.id}` : `text:${normalizedName}`;
+        const suggestionName = catalogProduct?.name ?? item.label;
 
-        let displayQuantity = displayQuantityByCatalogId.get(catalogProduct.id);
-        if (displayQuantity == null) {
-          displayQuantity = this.countFreshInventory(
-            catalogProduct,
-            catalogIndex,
-            inventory,
-          );
-          displayQuantityByCatalogId.set(catalogProduct.id, displayQuantity);
-        }
+        let displayQuantity: number | undefined;
+        let consumedQuantity: number | undefined;
+        if (catalogProduct) {
+          displayQuantity = displayQuantityByCatalogId.get(catalogProduct.id);
+          if (displayQuantity == null) {
+            displayQuantity = this.countFreshInventory(
+              catalogProduct,
+              catalogIndex,
+              inventory,
+            );
+            displayQuantityByCatalogId.set(catalogProduct.id, displayQuantity);
+          }
 
-        let consumedQuantity = consumedQuantityByCatalogId.get(catalogProduct.id);
-        if (consumedQuantity == null) {
-          consumedQuantity = this.consumeFreshInventory(
-            catalogProduct,
-            catalogIndex,
-            inventory,
-            usedInventoryIds,
-            item.quantity,
-          );
-          consumedQuantityByCatalogId.set(catalogProduct.id, consumedQuantity);
+          consumedQuantity = consumedQuantityByCatalogId.get(catalogProduct.id);
+          if (consumedQuantity == null) {
+            consumedQuantity = this.consumeFreshInventory(
+              catalogProduct,
+              catalogIndex,
+              inventory,
+              usedInventoryIds,
+              item.quantity,
+            );
+            consumedQuantityByCatalogId.set(catalogProduct.id, consumedQuantity);
+          }
+        } else {
+          displayQuantity = displayQuantityByLabel.get(normalizedName);
+          if (displayQuantity == null) {
+            displayQuantity = this.countFreshInventoryByLabel(item.label, inventory);
+            displayQuantityByLabel.set(normalizedName, displayQuantity);
+          }
+
+          consumedQuantity = consumedQuantityByLabel.get(normalizedName);
+          if (consumedQuantity == null) {
+            consumedQuantity = this.consumeFreshInventoryByLabel(
+              item.label,
+              inventory,
+              usedInventoryIds,
+              item.quantity,
+            );
+            consumedQuantityByLabel.set(normalizedName, consumedQuantity);
+          }
         }
         const missingQuantity = Math.max(0, item.quantity - consumedQuantity);
         if (missingQuantity === 0) {
           continue;
         }
 
-        const existing = grouped.get(catalogProduct.id);
+        const existing = grouped.get(groupKey);
         if (!existing) {
-          grouped.set(catalogProduct.id, {
-            catalogProductId: catalogProduct.id,
-            name: catalogProduct.name,
-            normalizedName: catalogProduct.normalizedName,
+          grouped.set(groupKey, {
+            catalogProductId: catalogProduct?.id ?? null,
+            name: suggestionName,
+            normalizedName,
             missingQuantity,
             currentQuantity: displayQuantity,
             targetQuantity: item.quantity,

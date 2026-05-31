@@ -71,7 +71,7 @@ export interface AutoShoppingListItemState extends ShoppingListItem {
 }
 
 export interface ShoppingSuggestion {
-  catalogProductId: string;
+  catalogProductId: string | null;
   name: string;
   normalizedName: string;
   missingQuantity: number;

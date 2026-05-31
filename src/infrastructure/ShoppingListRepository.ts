@@ -608,19 +608,21 @@ export class ShoppingListRepository {
     listId: string,
     suggestion: ShoppingSuggestion,
   ): ShoppingListItem | null {
-    const byCatalog = db.execute(
-      `
-        SELECT *
-        FROM shopping_list_items
-        WHERE list_id = ?
-          AND catalog_product_id = ?
-        ORDER BY sort_order ASC, created_at ASC
-        LIMIT 1
-      `,
-      [listId, suggestion.catalogProductId],
-    );
-    if (byCatalog.rows && byCatalog.rows.length > 0) {
-      return mapShoppingItem(byCatalog.rows.item(0));
+    if (suggestion.catalogProductId) {
+      const byCatalog = db.execute(
+        `
+          SELECT *
+          FROM shopping_list_items
+          WHERE list_id = ?
+            AND catalog_product_id = ?
+          ORDER BY sort_order ASC, created_at ASC
+          LIMIT 1
+        `,
+        [listId, suggestion.catalogProductId],
+      );
+      if (byCatalog.rows && byCatalog.rows.length > 0) {
+        return mapShoppingItem(byCatalog.rows.item(0));
+      }
     }
 
     const byName = db.execute(
