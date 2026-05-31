@@ -3,6 +3,7 @@ import {
   CatalogProductKind,
   ShoppingItemSource,
   ShoppingItemStatus,
+  ShoppingListIconColorKey,
   ShoppingListIconKey,
   ShoppingListItem,
   ShoppingListSummary,
@@ -62,6 +63,7 @@ function mapShoppingList(row: Record<string, any>): ShoppingListSummary {
     name: row.name,
     type: row.type,
     iconKey: row.icon_key ?? getDefaultShoppingListIconKey(row.type),
+    iconColorKey: row.icon_color_key ?? 'green',
     isLocked: row.is_locked === 1,
     isArchived: row.is_archived === 1,
     sortOrder: Number(row.sort_order ?? 0),
@@ -91,6 +93,7 @@ export class ShoppingListRepository {
     name: string,
     type: ShoppingListType,
     iconKey: ShoppingListIconKey = getDefaultShoppingListIconKey(type),
+    iconColorKey: ShoppingListIconColorKey = 'green',
   ): Promise<ShoppingListSummary> {
     const timestamp = nowIso();
     const id = generateId('shopping-list');
@@ -105,6 +108,7 @@ export class ShoppingListRepository {
           name,
           type,
           icon_key,
+          icon_color_key,
           is_locked,
           is_archived,
           sort_order,
@@ -112,15 +116,16 @@ export class ShoppingListRepository {
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, 0, 0, ?, NULL, ?, ?)
+        VALUES (?, ?, ?, ?, ?, 0, 0, ?, NULL, ?, ?)
       `,
-      [id, name.trim(), type, iconKey, sortOrder, timestamp, timestamp],
+      [id, name.trim(), type, iconKey, iconColorKey, sortOrder, timestamp, timestamp],
     );
     return {
       id,
       name: name.trim(),
       type,
       iconKey,
+      iconColorKey,
       isLocked: false,
       isArchived: false,
       sortOrder,

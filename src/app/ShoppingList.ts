@@ -2,6 +2,7 @@ import {
   AutoShoppingListItemState,
   CatalogProduct,
   InventoryItem,
+  ShoppingListIconColorKey,
   ShoppingListIconKey,
   ShoppingItemStatus,
   ShoppingListItem,
@@ -47,11 +48,12 @@ export class ShoppingList {
     name: string,
     type: ShoppingListType,
     iconKey?: ShoppingListIconKey,
+    iconColorKey?: ShoppingListIconColorKey,
   ): Promise<ShoppingListSummary> {
     const repository = this.requireShoppingRepository();
-    return iconKey == null
+    return iconKey == null && iconColorKey == null
       ? repository.createList(name, type)
-      : repository.createList(name, type, iconKey);
+      : repository.createList(name, type, iconKey, iconColorKey);
   }
 
   async addItem(listId: string, input: AddShoppingItemInput): Promise<ShoppingListItem> {

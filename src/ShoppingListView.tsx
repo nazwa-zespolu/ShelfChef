@@ -21,6 +21,7 @@ import {
   AutoShoppingListItemState,
   CatalogProduct,
   ShoppingItemStatus,
+  ShoppingListIconColorKey,
   ShoppingListIconKey,
   ShoppingListSummary,
   ShoppingListType,
@@ -30,7 +31,13 @@ import {ShoppingList} from './app/ShoppingList';
 import {ProductRepository} from './infrastructure/ProductRepository';
 import {ShoppingListRepository} from './infrastructure/ShoppingListRepository';
 import {SwipeToDeleteCard} from './components/SwipeToDeleteCard';
-import {getShoppingListIconDefinition, SHOPPING_LIST_ICONS} from './shoppingListIcons';
+import {
+  DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY,
+  getShoppingListIconColorDefinition,
+  getShoppingListIconDefinition,
+  SHOPPING_LIST_ICON_COLORS,
+  SHOPPING_LIST_ICONS,
+} from './shoppingListIcons';
 import {colors} from './theme/colors';
 
 type ShoppingListViewProps = {
@@ -136,6 +143,9 @@ export default function ShoppingListView({
   const [createName, setCreateName] = useState('');
   const [createType, setCreateType] = useState<ShoppingListType>('manual');
   const [createIconKey, setCreateIconKey] = useState<ShoppingListIconKey>('basket');
+  const [createIconColorKey, setCreateIconColorKey] = useState<ShoppingListIconColorKey>(
+    DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY,
+  );
   const [addOpen, setAddOpen] = useState(false);
   const [addMode, setAddMode] = useState<AddMode>('text');
   const [addLabel, setAddLabel] = useState('');
@@ -265,17 +275,18 @@ export default function ShoppingListView({
     }
     setBusy(true);
     try {
-      const created = await shoppingList.createList(name, createType, createIconKey);
+      const created = await shoppingList.createList(name, createType, createIconKey, createIconColorKey);
       setCreateName('');
       setCreateType('manual');
       setCreateIconKey('basket');
+      setCreateIconColorKey(DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY);
       setCreateOpen(false);
       await loadLists();
       openList(created);
     } finally {
       setBusy(false);
     }
-  }, [createIconKey, createName, createType, loadLists, openList]);
+  }, [createIconColorKey, createIconKey, createName, createType, loadLists, openList]);
 
   const moveList = useCallback(async (listId: string, direction: -1 | 1) => {
     const currentIndex = lists.findIndex(list => list.id === listId);
@@ -779,10 +790,12 @@ export default function ShoppingListView({
         name={createName}
         type={createType}
         iconKey={createIconKey}
+        iconColorKey={createIconColorKey}
         busy={busy}
         onChangeName={setCreateName}
         onChangeType={setCreateType}
         onChangeIconKey={setCreateIconKey}
+        onChangeIconColorKey={setCreateIconColorKey}
         onClose={() => setCreateOpen(false)}
         onSubmit={createList}
       />
@@ -835,6 +848,7 @@ function SortableListRow({
   const movedAt = useRef(0);
   const [dragging, setDragging] = useState(false);
   const Icon = getShoppingListIconDefinition(item.iconKey).Icon;
+  const iconColor = getShoppingListIconColorDefinition(item.iconColorKey);
 
   const resetPosition = useCallback(() => {
     if (dragTimer.current) {
@@ -913,8 +927,10 @@ function SortableListRow({
             pressed && styles.cardPressed,
           ]}>
           <View style={styles.rowBetween}>
-            <View style={styles.listIconBubble} {...dragResponder.panHandlers}>
-              <Icon color={colors.accent} size={26} strokeWidth={2.2} />
+            <View
+              style={[styles.listIconBubble, {backgroundColor: iconColor.background}]}
+              {...dragResponder.panHandlers}>
+              <Icon color={iconColor.color} size={26} strokeWidth={2.2} />
             </View>
             <View style={styles.rowText}>
               <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
@@ -1002,10 +1018,12 @@ function CreateListModal({
   name,
   type,
   iconKey,
+  iconColorKey,
   busy,
   onChangeName,
   onChangeType,
   onChangeIconKey,
+  onChangeIconColorKey,
   onClose,
   onSubmit,
 }: {
@@ -1013,14 +1031,17 @@ function CreateListModal({
   name: string;
   type: ShoppingListType;
   iconKey: ShoppingListIconKey;
+  iconColorKey: ShoppingListIconColorKey;
   busy: boolean;
   onChangeName: (name: string) => void;
   onChangeType: (type: ShoppingListType) => void;
   onChangeIconKey: (iconKey: ShoppingListIconKey) => void;
+  onChangeIconColorKey: (iconColorKey: ShoppingListIconColorKey) => void;
   onClose: () => void;
   onSubmit: () => void;
 }) {
   const selectedIcon = getShoppingListIconDefinition(iconKey);
+  const selectedColor = getShoppingListIconColorDefinition(iconColorKey);
   const SelectedIcon = selectedIcon.Icon;
   const sheetTranslateY = useRef(new Animated.Value(0)).current;
   const closeWithDrag = useCallback(() => {
@@ -1078,8 +1099,8 @@ function CreateListModal({
           <Text style={styles.createTitle}>Nowa lista zakupów</Text>
           <Text style={styles.createSubtitle}>Nadaj nazwę i wybierz typ listy.</Text>
           <View style={styles.createPreview}>
-            <View style={styles.createPreviewIcon}>
-              <SelectedIcon color={colors.accent} size={30} strokeWidth={2.2} />
+            <View style={[styles.createPreviewIcon, {backgroundColor: selectedColor.background}]}>
+              <SelectedIcon color={selectedColor.color} size={30} strokeWidth={2.2} />
             </View>
             <View style={styles.rowText}>
               <Text style={styles.createPreviewTitle} numberOfLines={1}>
@@ -1124,7 +1145,35 @@ function CreateListModal({
               );
             })}
           </View>
-          <Text style={styles.fieldLabel}>Ikona listy</Text>
+          <View style={styles.iconHeaderRow}>
+            <Text style={styles.iconHeaderLabel}>Ikona listy</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.colorPickerRow}
+              style={styles.colorPicker}>
+              {SHOPPING_LIST_ICON_COLORS.map(colorOption => {
+                const active = colorOption.key === iconColorKey;
+                return (
+                  <Pressable
+                    key={colorOption.key}
+                    onPress={() => onChangeIconColorKey(colorOption.key)}
+                    accessibilityLabel={`Kolor ikony: ${colorOption.label}`}
+                    style={({pressed}) => [
+                      styles.colorSwatch,
+                      {
+                        borderColor: active ? colorOption.color : colors.border,
+                        backgroundColor: active ? colorOption.background : colors.surface,
+                      },
+                      active && styles.colorSwatchActive,
+                      pressed && styles.pressed,
+                    ]}>
+                    <View style={[styles.colorSwatchInner, {backgroundColor: colorOption.color}]} />
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -1139,14 +1188,24 @@ function CreateListModal({
                   style={({pressed}) => [
                     styles.iconChoice,
                     active && styles.iconChoiceActive,
+                    active && {
+                      borderColor: selectedColor.color,
+                      backgroundColor: selectedColor.background,
+                    },
                     pressed && styles.pressed,
                   ]}>
                   <Icon
-                    color={active ? colors.accent : colors.textSecondary}
+                    color={active ? selectedColor.color : colors.textSecondary}
                     size={27}
                     strokeWidth={2.1}
                   />
-                  <Text style={[styles.iconChoiceLabel, active && styles.iconChoiceLabelActive]} numberOfLines={1}>
+                  <Text
+                    style={[
+                      styles.iconChoiceLabel,
+                      active && styles.iconChoiceLabelActive,
+                      active && {color: selectedColor.color},
+                    ]}
+                    numberOfLines={1}>
                     {icon.label}
                   </Text>
                 </Pressable>
@@ -1925,6 +1984,44 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
     marginBottom: 8,
+  },
+  iconHeaderRow: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 8,
+  },
+  iconHeaderLabel: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  colorPicker: {
+    flexShrink: 1,
+    maxWidth: 210,
+  },
+  colorPickerRow: {
+    alignItems: 'center',
+    gap: 8,
+    paddingRight: 2,
+  },
+  colorSwatch: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  colorSwatchActive: {
+    borderWidth: 2,
+  },
+  colorSwatchInner: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
   },
   createTypeRow: {
     minHeight: 50,

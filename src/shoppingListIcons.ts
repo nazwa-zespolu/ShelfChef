@@ -33,7 +33,7 @@ import {
   Utensils,
   Wheat,
 } from 'lucide-react-native';
-import type {ShoppingListIconKey} from './domain/types';
+import type {ShoppingListIconColorKey, ShoppingListIconKey} from './domain/types';
 
 export type ShoppingListIconComponent = ComponentType<{
   color?: string;
@@ -50,6 +50,27 @@ export type ShoppingListIconDefinition = {
 
 export const DEFAULT_SHOPPING_LIST_ICON_KEY = 'basket';
 export const DEFAULT_AUTO_SHOPPING_LIST_ICON_KEY = 'refresh';
+export const DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY = 'green';
+
+export type ShoppingListIconColorDefinition = {
+  key: ShoppingListIconColorKey;
+  label: string;
+  color: string;
+  background: string;
+};
+
+export const SHOPPING_LIST_ICON_COLORS: ShoppingListIconColorDefinition[] = [
+  {key: 'green', label: 'Zielony', color: '#5f8d56', background: '#5F8D562C'},
+  {key: 'amber', label: 'Bursztyn', color: '#c8792a', background: '#C8792A26'},
+  {key: 'red', label: 'Czerwony', color: '#be3f3f', background: '#BE3F3F24'},
+  {key: 'blue', label: 'Niebieski', color: '#3877c8', background: '#3877C826'},
+  {key: 'violet', label: 'Fiolet', color: '#7a5cc8', background: '#7A5CC826'},
+  {key: 'pink', label: 'Różowy', color: '#c85c8a', background: '#C85C8A26'},
+  {key: 'teal', label: 'Turkus', color: '#2f8f8a', background: '#2F8F8A26'},
+  {key: 'olive', label: 'Oliwka', color: '#77843c', background: '#77843C26'},
+  {key: 'brown', label: 'Brąz', color: '#8a6a42', background: '#8A6A4226'},
+  {key: 'slate', label: 'Grafit', color: '#687386', background: '#68738626'},
+];
 
 export const SHOPPING_LIST_ICONS: ShoppingListIconDefinition[] = [
   {key: 'basket', label: 'Koszyk', tags: ['zakupy', 'koszyk'], Icon: ShoppingBasket},
@@ -90,6 +111,10 @@ const SHOPPING_LIST_ICON_BY_KEY = new Map(
   SHOPPING_LIST_ICONS.map(icon => [icon.key, icon]),
 );
 
+const SHOPPING_LIST_ICON_COLOR_BY_KEY = new Map(
+  SHOPPING_LIST_ICON_COLORS.map(color => [color.key, color]),
+);
+
 export function getShoppingListIconDefinition(
   iconKey: ShoppingListIconKey | null | undefined,
 ): ShoppingListIconDefinition {
@@ -97,5 +122,15 @@ export function getShoppingListIconDefinition(
     (iconKey ? SHOPPING_LIST_ICON_BY_KEY.get(iconKey) : undefined) ??
     SHOPPING_LIST_ICON_BY_KEY.get(DEFAULT_SHOPPING_LIST_ICON_KEY) ??
     SHOPPING_LIST_ICONS[0]
+  );
+}
+
+export function getShoppingListIconColorDefinition(
+  colorKey: ShoppingListIconColorKey | null | undefined,
+): ShoppingListIconColorDefinition {
+  return (
+    (colorKey ? SHOPPING_LIST_ICON_COLOR_BY_KEY.get(colorKey) : undefined) ??
+    SHOPPING_LIST_ICON_COLOR_BY_KEY.get(DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY) ??
+    SHOPPING_LIST_ICON_COLORS[0]
   );
 }
