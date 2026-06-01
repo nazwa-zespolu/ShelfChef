@@ -103,17 +103,21 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
 
   if (
     normalized.startsWith(
-      'INSERT OR REPLACE INTO PRODUCT_DEFINITIONS (EAN, NAME, BRAND, IMAGE_URL, CATEGORY) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO PRODUCT_DEFINITIONS (EAN, NAME, BRAND, IMAGE_URL, CATEGORY, NORMALIZED_NAME) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(EAN) DO UPDATE SET NAME = EXCLUDED.NAME, BRAND = EXCLUDED.BRAND, IMAGE_URL = EXCLUDED.IMAGE_URL, CATEGORY = EXCLUDED.CATEGORY, NORMALIZED_NAME = COALESCE(EXCLUDED.NORMALIZED_NAME, PRODUCT_DEFINITIONS.NORMALIZED_NAME)',
     )
   ) {
-    const [ean, name, brand, imageUrl, category] = params;
+    const [ean, name, brand, imageUrl, category, normalizedName] = params;
+    const existing = productDefinitions.get(ean);
     productDefinitions.set(ean, {
       ean,
       name,
       brand: brand ?? null,
       image_url: imageUrl ?? null,
       category: category ?? null,
-      normalized_name: null,
+      normalized_name:
+        normalizedName != null
+          ? String(normalizedName)
+          : existing?.normalized_name ?? null,
     });
     return toRows([]);
   }
@@ -243,20 +247,24 @@ describe('ProductRepository + database integration', () => {
   it('wykonuje migracje schema_version i normalized_name', async () => {
     const columnInfo = db.execute('PRAGMA table_info(product_definitions)');
     const columnNames: string[] = [];
+    const rows = columnInfo.rows;
 
-    for (let i = 0; i < columnInfo.rows.length; i++) {
-      const row = columnInfo.rows.item(i);
-      columnNames.push(String(row.name));
+    if (rows) {
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows.item(i);
+        columnNames.push(String(row.name));
+      }
     }
 
     const schemaVersion = db.execute(
       'SELECT value FROM app_settings WHERE key = ?',
       ['schema_version'],
     );
+    const schemaRows = schemaVersion.rows;
 
     expect(columnNames).toContain('normalized_name');
-    expect(schemaVersion.rows.length).toBe(1);
-    expect(schemaVersion.rows.item(0).value).toBe('2');
+    expect(schemaRows?.length).toBe(1);
+    expect(schemaRows?.item(0).value).toBe('2');
   });
 
   it('zapisuje i odczytuje definicje produktu po EAN', async () => {
@@ -273,6 +281,33 @@ describe('ProductRepository + database integration', () => {
     const found = await repository.findDefinitionByEan('5901234123457');
 
     expect(found).toEqual(definition);
+  });
+
+  it('nie nadpisuje normalized_name przy zwyklym update definicji', async () => {
+    await repository.saveDefinition({
+      ean: '5901234123457',
+      name: 'Mleko',
+      brand: 'Lacpol',
+      imageUrl: 'https://img/mleko.jpg',
+      category: 'Nabial',
+      normalizedName: 'milk',
+    });
+
+    await repository.saveDefinition({
+      ean: '5901234123457',
+      name: 'Mleko 2%',
+      brand: 'Lacpol',
+      imageUrl: 'https://img/mleko2.jpg',
+      category: 'Nabial',
+    });
+
+    const found = await repository.findDefinitionByEan('5901234123457');
+
+    expect(found).toMatchObject({
+      ean: '5901234123457',
+      name: 'Mleko 2%',
+      normalizedName: 'milk',
+    });
   });
 
   it('zwraca null, gdy brak definicji dla EAN', async () => {

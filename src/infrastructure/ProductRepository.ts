@@ -13,7 +13,8 @@ export class ProductRepository {
         name: row.name,
         brand: row.brand,
         imageUrl: row.image_url,
-        category: row.category
+        category: row.category,
+        ...(row.normalized_name != null ? { normalizedName: row.normalized_name } : {}),
       };
     }
     return null;
@@ -21,8 +22,15 @@ export class ProductRepository {
 
   async saveDefinition(def: ProductDefinition): Promise<void> {
     db.execute(
-      'INSERT OR REPLACE INTO product_definitions (ean, name, brand, image_url, category) VALUES (?, ?, ?, ?, ?)',
-      [def.ean, def.name, def.brand, def.imageUrl, def.category]
+      `INSERT INTO product_definitions (ean, name, brand, image_url, category, normalized_name)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(ean) DO UPDATE SET
+         name = excluded.name,
+         brand = excluded.brand,
+         image_url = excluded.image_url,
+         category = excluded.category,
+         normalized_name = COALESCE(excluded.normalized_name, product_definitions.normalized_name)`,
+      [def.ean, def.name, def.brand, def.imageUrl, def.category, def.normalizedName ?? null]
     );
   }
 

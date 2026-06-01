@@ -4,6 +4,7 @@ export interface ProductDefinition {
     brand?: string;
     imageUrl?: string;
     category?: string;
+    normalizedName?: string;
   }
   
   export interface InventoryItem extends ProductDefinition {
