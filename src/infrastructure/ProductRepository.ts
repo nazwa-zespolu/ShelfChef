@@ -1,6 +1,16 @@
 import { db } from './db/init';
 import { ProductDefinition, InventoryItem } from '../domain/types';
 
+export interface PendingNormalizationRecord {
+  ean: string;
+  name: string;
+}
+
+export interface NormalizationUpdateRecord {
+  ean: string;
+  normalizedName: string;
+}
+
 export class ProductRepository {
   private static readonly RECIPE_MODEL_CONSENT_KEY = 'recipe_model_download_consent';
 
@@ -44,6 +54,86 @@ export class ProductRepository {
       'INSERT INTO inventory (id, product_ean, custom_name, expiry_date) VALUES (?, ?, ?, ?)',
       [id, ean, customName, expiryDate]
     );
+  }
+
+  async getDefinitionsPendingNormalization(limit = 50): Promise<PendingNormalizationRecord[]> {
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 50;
+    const result = db.execute(
+      `SELECT ean, name
+       FROM product_definitions
+       WHERE normalized_name IS NULL
+         AND TRIM(name) <> ''
+       ORDER BY ean
+       LIMIT ?`,
+      [safeLimit],
+    );
+
+    const pending: PendingNormalizationRecord[] = [];
+    if (!result.rows) {
+      return pending;
+    }
+
+    for (let i = 0; i < result.rows.length; i++) {
+      const row = result.rows.item(i);
+      const ean = String(row.ean ?? '').trim();
+      const name = String(row.name ?? '').trim();
+      if (!ean || !name) {
+        continue;
+      }
+      pending.push({ ean, name });
+    }
+    return pending;
+  }
+
+  async batchUpdateNormalizedNames(updates: NormalizationUpdateRecord[]): Promise<number> {
+    let updatedCount = 0;
+
+    for (const update of updates) {
+      const ean = update.ean.trim();
+      const normalizedName = update.normalizedName.trim();
+      if (!ean || !normalizedName) {
+        continue;
+      }
+
+      db.execute(
+        `UPDATE product_definitions
+         SET normalized_name = ?
+         WHERE ean = ?
+           AND (normalized_name IS NULL OR TRIM(normalized_name) = '')`,
+        [normalizedName, ean],
+      );
+      updatedCount += 1;
+    }
+
+    return updatedCount;
+  }
+
+  async getRecipeIngredientNames(): Promise<string[]> {
+    const result = db.execute(
+      `SELECT i.custom_name, d.normalized_name, d.name
+       FROM inventory i
+       LEFT JOIN product_definitions d ON i.product_ean = d.ean
+       ORDER BY i.expiry_date ASC`,
+    );
+
+    const names: string[] = [];
+    if (!result.rows) {
+      return names;
+    }
+
+    for (let i = 0; i < result.rows.length; i++) {
+      const row = result.rows.item(i);
+      const normalizedName = typeof row.normalized_name === 'string' ? row.normalized_name.trim() : '';
+      const definitionName = typeof row.name === 'string' ? row.name.trim() : '';
+      const customName = typeof row.custom_name === 'string' ? row.custom_name.trim() : '';
+
+      const selected = normalizedName || definitionName || customName;
+      if (selected) {
+        names.push(selected);
+      }
+    }
+
+    return names;
   }
 
   async getFullInventory(): Promise<InventoryItem[]> {

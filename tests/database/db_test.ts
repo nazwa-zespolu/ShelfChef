@@ -93,6 +93,20 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
 
   if (
     normalized.startsWith(
+      "SELECT EAN, NAME FROM PRODUCT_DEFINITIONS WHERE NORMALIZED_NAME IS NULL AND TRIM(NAME) <> '' ORDER BY EAN LIMIT ?",
+    )
+  ) {
+    const limit = Number(params[0] ?? 50);
+    const rows = Array.from(productDefinitions.values())
+      .filter(row => row.normalized_name == null && row.name.trim() !== '')
+      .sort((a, b) => a.ean.localeCompare(b.ean))
+      .slice(0, limit)
+      .map(row => ({ ean: row.ean, name: row.name }));
+    return toRows(rows);
+  }
+
+  if (
+    normalized.startsWith(
       'SELECT VALUE FROM APP_SETTINGS WHERE KEY = ?',
     )
   ) {
@@ -119,6 +133,22 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
           ? String(normalizedName)
           : existing?.normalized_name ?? null,
     });
+    return toRows([]);
+  }
+
+  if (
+    normalized.startsWith(
+      "UPDATE PRODUCT_DEFINITIONS SET NORMALIZED_NAME = ? WHERE EAN = ? AND (NORMALIZED_NAME IS NULL OR TRIM(NORMALIZED_NAME) = '')",
+    )
+  ) {
+    const [normalizedName, ean] = params;
+    const row = productDefinitions.get(ean);
+    if (row && (row.normalized_name == null || row.normalized_name.trim() === '')) {
+      productDefinitions.set(ean, {
+        ...row,
+        normalized_name: String(normalizedName),
+      });
+    }
     return toRows([]);
   }
 
@@ -198,6 +228,38 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
         }
         return a.expiry_date.localeCompare(b.expiry_date);
       });
+
+    return toRows(rows);
+  }
+
+  if (
+    normalized.startsWith(
+      'SELECT I.CUSTOM_NAME, D.NORMALIZED_NAME, D.NAME FROM INVENTORY I LEFT JOIN PRODUCT_DEFINITIONS D ON I.PRODUCT_EAN = D.EAN ORDER BY I.EXPIRY_DATE ASC',
+    )
+  ) {
+    const rows = Array.from(inventory.values())
+      .map(row => {
+        const def = row.product_ean ? productDefinitions.get(row.product_ean) : undefined;
+        return {
+          custom_name: row.custom_name,
+          normalized_name: def?.normalized_name ?? null,
+          name: def?.name ?? null,
+          expiry_date: row.expiry_date,
+        };
+      })
+      .sort((a, b) => {
+        if (a.expiry_date == null && b.expiry_date == null) {
+          return 0;
+        }
+        if (a.expiry_date == null) {
+          return 1;
+        }
+        if (b.expiry_date == null) {
+          return -1;
+        }
+        return a.expiry_date.localeCompare(b.expiry_date);
+      })
+      .map(({ expiry_date: _ignored, ...rest }) => rest);
 
     return toRows(rows);
   }
@@ -308,6 +370,58 @@ describe('ProductRepository + database integration', () => {
       name: 'Mleko 2%',
       normalizedName: 'milk',
     });
+  });
+
+  it('zwraca tylko rekordy wymagajace normalizacji i nie zwraca ich po batch update', async () => {
+    await repository.saveDefinition({
+      ean: '200',
+      name: 'Makaron spaghetti',
+    });
+    await repository.saveDefinition({
+      ean: '100',
+      name: 'Mleko UHT 3.2%',
+    });
+    await repository.saveDefinition({
+      ean: '300',
+      name: 'Cebula',
+      normalizedName: 'onion',
+    });
+
+    const pendingBefore = await repository.getDefinitionsPendingNormalization(10);
+    expect(pendingBefore).toEqual([
+      { ean: '100', name: 'Mleko UHT 3.2%' },
+      { ean: '200', name: 'Makaron spaghetti' },
+    ]);
+
+    const updated = await repository.batchUpdateNormalizedNames([
+      { ean: '200', normalizedName: 'spaghetti' },
+      { ean: '100', normalizedName: 'milk' },
+    ]);
+    expect(updated).toBe(2);
+
+    const pendingAfter = await repository.getDefinitionsPendingNormalization(10);
+    expect(pendingAfter).toEqual([]);
+  });
+
+  it('zwraca skladniki do recipe z fallbackiem normalized_name -> name -> custom_name', async () => {
+    await repository.saveDefinition({
+      ean: '111',
+      name: 'Mleko UHT 3.2%',
+      normalizedName: 'milk',
+    });
+    await repository.saveDefinition({
+      ean: '222',
+      name: 'Cebula',
+    });
+
+    await repository.addToInventory('inv-1', '111', null, '2026-01-01');
+    await repository.addToInventory('inv-2', '222', null, '2026-01-02');
+    await repository.addToInventory('inv-3', null, 'Domowy sos', '2026-01-03');
+    await repository.addToInventory('inv-4', null, null, '2026-01-04');
+
+    const names = await repository.getRecipeIngredientNames();
+
+    expect(names).toEqual(['milk', 'Cebula', 'Domowy sos']);
   });
 
   it('zwraca null, gdy brak definicji dla EAN', async () => {
