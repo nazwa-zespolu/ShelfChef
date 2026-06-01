@@ -16,8 +16,7 @@ export const buildNormalizationPrompt = (
     systemPrompt:
       'You normalize ingredient names. Return ONLY valid JSON with no markdown fences. ' +
       'Output must be a single JSON object where each key is an original ingredient name and each value is a concise English core ingredient ' +
-      '(for example: "Mleko UHT 3.2%" -> "milk", "Makaron spaghetti" -> "spaghetti"). ' +
-      'Use lowercase singular nouns when possible.',
+      '(for example: "Mleko UHT 3.2%" -> "milk", "Pomodori Secchi Sottolio" -> "dried tomatoes in oil"). ',
     userPrompt:
       'Normalize the following ingredient names and return only the JSON dictionary.\n\n' +
       safeCandidates.map(name => `- ${name}`).join('\n'),
