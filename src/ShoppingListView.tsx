@@ -1712,6 +1712,7 @@ function AddItemModal({
   const canSubmit = quantityIsValid && (selectedCatalog != null || productName.length > 0);
   const canDecrease = parsedQuantity > 1 && !busy;
   const selectedColor = getShoppingListIconColorDefinition(iconColorKey);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const sheetTranslateY = useRef(new Animated.Value(0)).current;
   const closeWithDrag = useCallback(() => {
     Animated.timing(sheetTranslateY, {
@@ -1758,13 +1759,39 @@ function AddItemModal({
     [closeWithDrag, resetSheetPosition, sheetTranslateY],
   );
 
+  React.useEffect(() => {
+    const showSubscription = Keyboard.addListener('keyboardDidShow', () => {
+      setKeyboardVisible(true);
+    });
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!visible) {
+      setKeyboardVisible(false);
+    }
+  }, [visible]);
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
+        <Pressable
+          accessibilityLabel="Zamknij dodawanie produktu"
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
         <Animated.View
           style={[
             styles.modalSheet,
             styles.addItemSheet,
+            keyboardVisible && styles.addItemSheetKeyboard,
             {transform: [{translateY: sheetTranslateY}]},
           ]}>
           <View style={[styles.sheetHandleTouch, styles.addItemHandleTouch]} {...sheetDragResponder.panHandlers}>
@@ -1773,86 +1800,94 @@ function AddItemModal({
           <Text style={styles.addItemTitle}>Dodaj produkt</Text>
           <Text style={styles.addItemSubtitle}>Wpisz nazwę albo wybierz produkt z katalogu</Text>
 
-          <View style={styles.iconHeaderRow}>
-            <Text style={styles.iconHeaderLabel}>Ikona produktu</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.colorPickerRow}
-              style={styles.colorPicker}>
-              {SHOPPING_LIST_ICON_COLORS.map(colorOption => {
-                const active = colorOption.key === iconColorKey;
-                return (
-                  <Pressable
-                    key={colorOption.key}
-                    onPress={() => onChangeIconColorKey(colorOption.key)}
-                    accessibilityLabel={`Kolor ikony produktu: ${colorOption.label}`}
-                    style={({pressed}) => [
-                      styles.colorSwatchShadow,
-                      active && styles.colorSwatchShadowActive,
-                      pressed && styles.pressed,
-                    ]}>
-                    <View
-                      style={[
-                        styles.colorSwatch,
-                        {
-                          borderColor: active ? colorOption.color : colors.border,
-                          backgroundColor: active ? colorOption.background : colors.surface,
-                        },
-                        active && styles.colorSwatchActive,
+          {!keyboardVisible ? (
+            <>
+              <View style={styles.iconHeaderRow}>
+                <Text style={styles.iconHeaderLabel}>Ikona produktu</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.colorPickerRow}
+                  style={styles.colorPicker}>
+                  {SHOPPING_LIST_ICON_COLORS.map(colorOption => {
+                    const active = colorOption.key === iconColorKey;
+                    return (
+                      <Pressable
+                        key={colorOption.key}
+                        onPress={() => onChangeIconColorKey(colorOption.key)}
+                        accessibilityLabel={`Kolor ikony produktu: ${colorOption.label}`}
+                        style={({pressed}) => [
+                          styles.colorSwatchShadow,
+                          active && styles.colorSwatchShadowActive,
+                          pressed && styles.pressed,
+                        ]}>
+                        <View
+                          style={[
+                            styles.colorSwatch,
+                            {
+                              borderColor: active ? colorOption.color : colors.border,
+                              backgroundColor: active ? colorOption.background : colors.surface,
+                            },
+                            active && styles.colorSwatchActive,
+                          ]}>
+                          <View style={[styles.colorSwatchInner, {backgroundColor: colorOption.color}]} />
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.iconPickerRow}>
+                {SHOPPING_LIST_ICONS.map(icon => {
+                  const active = icon.key === iconKey;
+                  const Icon = icon.Icon;
+                  return (
+                    <Pressable
+                      key={icon.key}
+                      onPress={() => onChangeIconKey(icon.key)}
+                      style={({pressed}) => [
+                        styles.iconChoiceShadow,
+                        styles.addItemIconChoiceShadow,
+                        active && styles.iconChoiceShadowActive,
+                        pressed && styles.pressed,
                       ]}>
-                      <View style={[styles.colorSwatchInner, {backgroundColor: colorOption.color}]} />
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.iconPickerRow}>
-            {SHOPPING_LIST_ICONS.map(icon => {
-              const active = icon.key === iconKey;
-              const Icon = icon.Icon;
-              return (
-                <Pressable
-                  key={icon.key}
-                  onPress={() => onChangeIconKey(icon.key)}
-                  style={({pressed}) => [
-                    styles.iconChoiceShadow,
-                    active && styles.iconChoiceShadowActive,
-                    pressed && styles.pressed,
-                  ]}>
-                  <View
-                    style={[
-                      styles.iconChoice,
-                      active && styles.iconChoiceActive,
-                      active && {
-                        borderColor: selectedColor.color,
-                        backgroundColor: selectedColor.background,
-                      },
-                    ]}>
-                    <Icon
-                      color={active ? selectedColor.color : colors.textSecondary}
-                      size={27}
-                      strokeWidth={2.1}
-                    />
-                    <Text
-                      style={[
-                        styles.iconChoiceLabel,
-                        active && styles.iconChoiceLabelActive,
-                        active && {color: selectedColor.color},
-                      ]}
-                      numberOfLines={1}>
-                      {icon.label}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+                      <View
+                        style={[
+                          styles.iconChoice,
+                          styles.addItemIconChoice,
+                          active && styles.iconChoiceActive,
+                          active && {
+                            borderColor: selectedColor.color,
+                            backgroundColor: selectedColor.background,
+                          },
+                        ]}>
+                        <Icon
+                          color={active ? selectedColor.color : colors.textSecondary}
+                          size={27}
+                          strokeWidth={2.1}
+                        />
+                        <Text
+                          style={[
+                            styles.iconChoiceLabel,
+                            styles.addItemIconChoiceLabel,
+                            active && styles.iconChoiceLabelActive,
+                            active && {color: selectedColor.color},
+                          ]}
+                          numberOfLines={1}>
+                          {icon.label}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </>
+          ) : null}
 
+          <Text style={styles.addItemInputLabel}>Nazwa produktu</Text>
           <View style={styles.addItemSearchQuantityRow}>
             <View style={[styles.addItemSearchBox, styles.addItemSearchBoxCompact]}>
               <Search color={colors.textMuted} size={22} strokeWidth={2.1} />
@@ -1926,9 +1961,6 @@ function AddItemModal({
               pressed && styles.pressed,
             ]}>
             <Text style={styles.addItemSubmitButtonText}>Dodaj produkt</Text>
-          </Pressable>
-          <Pressable onPress={onClose} disabled={busy} style={styles.addItemCancelButton}>
-            <Text style={styles.addItemCancelText}>Anuluj</Text>
           </Pressable>
         </Animated.View>
       </View>
@@ -2760,8 +2792,6 @@ const styles = StyleSheet.create({
     height: 46,
     borderRadius: 999,
     backgroundColor: colors.surfaceSubtle,
-    borderWidth: 1,
-    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2824,14 +2854,11 @@ const styles = StyleSheet.create({
     height: 46,
     borderRadius: 999,
     backgroundColor: colors.accentSoft,
-    borderWidth: 1,
-    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   manualItemIconPurchased: {
     backgroundColor: colors.accentSoft,
-    borderColor: colors.accentSoft,
   },
   manualItemText: {
     flex: 1,
@@ -3368,9 +3395,20 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     maxHeight: '98%',
   },
+  addItemSheetKeyboard: {
+    height: '94%',
+    maxHeight: '94%',
+  },
   addItemHandleTouch: {
-    minHeight: 22,
-    marginBottom: 0,
+    alignSelf: 'stretch',
+    width: 'auto',
+    minHeight: 44,
+    marginHorizontal: -16,
+    marginTop: -4,
+    marginBottom: -8,
+    paddingHorizontal: 16,
+    justifyContent: 'flex-start',
+    paddingTop: 10,
   },
   addItemTitle: {
     color: colors.textPrimary,
@@ -3425,6 +3463,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     marginBottom: 16,
+  },
+  addItemInputLabel: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '900',
+    marginBottom: 8,
   },
   addItemSearchBoxCompact: {
     flex: 1,
