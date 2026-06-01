@@ -4,6 +4,7 @@ type ProductDefinitionRow = {
   brand: string | null;
   image_url: string | null;
   category: string | null;
+  normalized_name: string | null;
 };
 
 type InventoryRow = {
@@ -24,6 +25,14 @@ type SQLiteResult = {
 
 const productDefinitions = new Map<string, ProductDefinitionRow>();
 const inventory = new Map<string, InventoryRow>();
+const appSettings = new Map<string, string>();
+const productDefinitionColumns = new Set([
+  'ean',
+  'name',
+  'brand',
+  'image_url',
+  'category',
+]);
 
 const toRows = (data: Record<string, unknown>[]): SQLiteResult => ({
   rows: {
@@ -49,10 +58,47 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     return toRows([]);
   }
 
+  if (normalized.startsWith('DELETE FROM APP_SETTINGS')) {
+    appSettings.clear();
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('PRAGMA TABLE_INFO(PRODUCT_DEFINITIONS)')) {
+    return toRows(
+      Array.from(productDefinitionColumns).map((name, index) => ({
+        cid: index,
+        name,
+        type: name === 'normalized_name' ? 'TEXT' : 'TEXT',
+        notnull: name === 'name' ? 1 : 0,
+        dflt_value: null,
+        pk: name === 'ean' ? 1 : 0,
+      })),
+    );
+  }
+
+  if (
+    normalized.startsWith(
+      'ALTER TABLE PRODUCT_DEFINITIONS ADD COLUMN NORMALIZED_NAME TEXT',
+    )
+  ) {
+    productDefinitionColumns.add('normalized_name');
+    return toRows([]);
+  }
+
   if (normalized.startsWith('SELECT * FROM PRODUCT_DEFINITIONS WHERE EAN = ?')) {
     const ean = params[0];
     const row = productDefinitions.get(ean);
     return toRows(row ? [row] : []);
+  }
+
+  if (
+    normalized.startsWith(
+      'SELECT VALUE FROM APP_SETTINGS WHERE KEY = ?',
+    )
+  ) {
+    const [key] = params;
+    const value = appSettings.get(key);
+    return toRows(value == null ? [] : [{ value }]);
   }
 
   if (
@@ -67,7 +113,26 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       brand: brand ?? null,
       image_url: imageUrl ?? null,
       category: category ?? null,
+      normalized_name: null,
     });
+    return toRows([]);
+  }
+
+  if (
+    normalized.startsWith(
+      'INSERT OR IGNORE INTO PRODUCT_DEFINITIONS (EAN, NAME, BRAND, IMAGE_URL, CATEGORY) VALUES',
+    )
+  ) {
+    return toRows([]);
+  }
+
+  if (
+    normalized.startsWith(
+      'INSERT OR REPLACE INTO APP_SETTINGS (KEY, VALUE) VALUES (?, ?)',
+    )
+  ) {
+    const [key, value] = params;
+    appSettings.set(key, String(value));
     return toRows([]);
   }
 
@@ -85,6 +150,14 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       opened_at: null,
       is_opened: 0,
     });
+    return toRows([]);
+  }
+
+  if (
+    normalized.startsWith(
+      'INSERT OR IGNORE INTO INVENTORY (ID, PRODUCT_EAN, CUSTOM_NAME, EXPIRY_DATE, IS_OPENED) VALUES',
+    )
+  ) {
     return toRows([]);
   }
 
@@ -161,8 +234,29 @@ describe('ProductRepository + database integration', () => {
   beforeEach(() => {
     db.execute('DELETE FROM inventory');
     db.execute('DELETE FROM product_definitions');
+    db.execute('DELETE FROM app_settings');
+    productDefinitionColumns.delete('normalized_name');
     setupDatabase();
     repository = new ProductRepository();
+  });
+
+  it('wykonuje migracje schema_version i normalized_name', async () => {
+    const columnInfo = db.execute('PRAGMA table_info(product_definitions)');
+    const columnNames: string[] = [];
+
+    for (let i = 0; i < columnInfo.rows.length; i++) {
+      const row = columnInfo.rows.item(i);
+      columnNames.push(String(row.name));
+    }
+
+    const schemaVersion = db.execute(
+      'SELECT value FROM app_settings WHERE key = ?',
+      ['schema_version'],
+    );
+
+    expect(columnNames).toContain('normalized_name');
+    expect(schemaVersion.rows.length).toBe(1);
+    expect(schemaVersion.rows.item(0).value).toBe('2');
   });
 
   it('zapisuje i odczytuje definicje produktu po EAN', async () => {
