@@ -1734,66 +1734,151 @@ function CatalogLinksModal({
 }) {
   const linkedIds = new Set(item?.linkedCatalogProducts.map(product => product.id) ?? []);
   const availableResults = results.filter(product => !linkedIds.has(product.id));
+  const sheetTranslateY = useRef(new Animated.Value(0)).current;
+  const closeWithDrag = useCallback(() => {
+    Animated.timing(sheetTranslateY, {
+      toValue: 420,
+      duration: 160,
+      useNativeDriver: true,
+    }).start(({finished}) => {
+      sheetTranslateY.setValue(0);
+      if (finished) {
+        onClose();
+      }
+    });
+  }, [onClose, sheetTranslateY]);
+  const resetSheetPosition = useCallback(() => {
+    Animated.spring(sheetTranslateY, {
+      toValue: 0,
+      useNativeDriver: true,
+      speed: 18,
+      bounciness: 5,
+    }).start();
+  }, [sheetTranslateY]);
+  const sheetDragResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_evt, gesture) =>
+          Math.abs(gesture.dy) > 2 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onPanResponderGrant: () => {
+          sheetTranslateY.stopAnimation();
+        },
+        onPanResponderMove: (_evt, gesture) => {
+          sheetTranslateY.setValue(Math.max(0, gesture.dy));
+        },
+        onPanResponderRelease: (_evt, gesture) => {
+          if (gesture.dy > 80 || gesture.vy > 0.9) {
+            closeWithDrag();
+            return;
+          }
+          resetSheetPosition();
+        },
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderTerminate: resetSheetPosition,
+      }),
+    [closeWithDrag, resetSheetPosition, sheetTranslateY],
+  );
 
   return (
     <Modal visible={item != null} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
-        <View style={styles.modalSheet}>
-          <Text style={styles.modalTitle}>Powiązania katalogu</Text>
-          <Text style={styles.confirmText} numberOfLines={2}>{item?.label}</Text>
+        <Animated.View
+          style={[
+            styles.modalSheet,
+            styles.catalogLinksSheet,
+            {transform: [{translateY: sheetTranslateY}]},
+          ]}>
+          <View style={styles.sheetHandleTouch} {...sheetDragResponder.panHandlers}>
+            <View style={styles.sheetHandle} />
+          </View>
+          <Text style={styles.catalogLinksTitle} numberOfLines={2}>
+            Produkty pasujące do: {item?.label}
+          </Text>
+          <Text style={styles.catalogLinksSubtitle}>
+            Te produkty będą liczone jako ta pozycja
+          </Text>
 
-          <Text style={styles.modalSectionTitle}>Powiązane produkty</Text>
+          <Text style={styles.catalogLinksSectionTitle}>Powiązane</Text>
           {item && item.linkedCatalogProducts.length > 0 ? (
             item.linkedCatalogProducts.map(product => (
-              <View key={product.id} style={styles.linkedCatalogRow}>
-                <View style={styles.linkedCatalogText}>
-                  <Text style={styles.catalogName} numberOfLines={1}>{product.name}</Text>
-                  <Text style={styles.catalogKind}>
-                    {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt katalogowy'}
+              <View key={product.id} style={styles.catalogLinkCard}>
+                <View style={styles.catalogLinkIcon}>
+                  <Package color={colors.accent} size={25} strokeWidth={2.1} />
+                </View>
+                <View style={styles.catalogLinkText}>
+                  <Text style={styles.catalogLinkName} numberOfLines={1}>{product.name}</Text>
+                  <Text style={styles.catalogLinkMeta}>
+                    {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt z katalogu'}
                   </Text>
                 </View>
                 <Pressable
                   disabled={busy}
                   onPress={() => onUnlink(product.id)}
-                  style={({pressed}) => [styles.smallDangerButton, busy && styles.disabled, pressed && styles.pressed]}>
-                  <Text style={styles.smallDangerButtonText}>Usuń</Text>
+                  style={({pressed}) => [
+                    styles.catalogLinkOutlineButton,
+                    busy && styles.disabled,
+                    pressed && styles.pressed,
+                  ]}>
+                  <Text style={styles.catalogLinkOutlineButtonText}>Usuń</Text>
                 </Pressable>
               </View>
             ))
           ) : (
-            <Text style={styles.catalogEmptyText}>Brak powiązań</Text>
+            <View style={styles.catalogLinksEmpty}>
+              <Text style={styles.catalogLinksEmptyText}>Brak powiązanych produktów</Text>
+            </View>
           )}
 
-          <TextInput
-            value={query}
-            onChangeText={onChangeQuery}
-            placeholder="Szukaj produktu z katalogu"
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
-          />
+          <View style={styles.catalogLinksSearchBox}>
+            <Search color={colors.textMuted} size={22} strokeWidth={2.1} />
+            <TextInput
+              value={query}
+              onChangeText={onChangeQuery}
+              placeholder="Szukaj w katalogu"
+              placeholderTextColor={colors.textMuted}
+              style={styles.catalogLinksSearchInput}
+            />
+          </View>
+          <Text style={styles.catalogLinksSectionTitle}>Wyniki</Text>
           {availableResults.length > 0 ? (
-            <ScrollView style={styles.catalogResults} keyboardShouldPersistTaps="handled">
+            <ScrollView style={styles.catalogLinksResults} keyboardShouldPersistTaps="handled">
               {availableResults.map(product => (
-                <Pressable
-                  key={product.id}
-                  disabled={busy}
-                  onPress={() => onLink(product)}
-                  style={({pressed}) => [styles.catalogRow, busy && styles.disabled, pressed && styles.pressed]}>
-                  <Text style={styles.catalogName}>{product.name}</Text>
-                  <Text style={styles.catalogKind}>
-                    {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt katalogowy'}
-                  </Text>
-                </Pressable>
+                <View key={product.id} style={styles.catalogLinkCard}>
+                  <View style={styles.catalogLinkIcon}>
+                    <Package color={colors.accent} size={25} strokeWidth={2.1} />
+                  </View>
+                  <View style={styles.catalogLinkText}>
+                    <Text style={styles.catalogLinkName} numberOfLines={1}>{product.name}</Text>
+                    <Text style={styles.catalogLinkMeta}>
+                      {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt z katalogu'}
+                    </Text>
+                  </View>
+                  <Pressable
+                    disabled={busy}
+                    onPress={() => onLink(product)}
+                    style={({pressed}) => [
+                      styles.catalogLinkOutlineButton,
+                      busy && styles.disabled,
+                      pressed && styles.pressed,
+                    ]}>
+                    <Text style={styles.catalogLinkOutlineButtonText}>Dodaj</Text>
+                  </Pressable>
+                </View>
               ))}
             </ScrollView>
-          ) : null}
+          ) : (
+            <View style={styles.catalogLinksEmpty}>
+              <Text style={styles.catalogLinksEmptyText}>
+                {query.trim() ? 'Brak wyników' : 'Wpisz nazwę produktu'}
+              </Text>
+            </View>
+          )}
 
-          <View style={styles.modalActions}>
-            <Pressable onPress={onClose} style={({pressed}) => [styles.secondaryButton, pressed && styles.pressed]}>
-              <Text style={styles.secondaryButtonText}>Zamknij</Text>
-            </Pressable>
-          </View>
-        </View>
+          <Pressable onPress={onClose} style={({pressed}) => [styles.catalogLinksDoneButton, pressed && styles.pressed]}>
+            <Text style={styles.catalogLinksDoneButtonText}>Gotowe</Text>
+          </Pressable>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -3017,44 +3102,133 @@ const styles = StyleSheet.create({
     marginTop: -4,
     marginBottom: 10,
   },
-  modalSectionTitle: {
-    color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '900',
-    marginBottom: 8,
+  catalogLinksSheet: {
+    paddingTop: 10,
+    maxHeight: '82%',
   },
-  linkedCatalogRow: {
+  catalogLinksTitle: {
+    color: colors.textPrimary,
+    fontSize: 22,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  catalogLinksSubtitle: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 22,
+  },
+  catalogLinksSectionTitle: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '900',
+    marginBottom: 10,
+  },
+  catalogLinkCard: {
+    minHeight: 72,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
-    padding: 10,
-    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.07,
+    shadowRadius: 12,
+    shadowOffset: {width: 0, height: 5},
+    elevation: 3,
   },
-  linkedCatalogText: {
+  catalogLinkIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  catalogLinkText: {
     flex: 1,
     minWidth: 0,
   },
-  catalogEmptyText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    marginBottom: 12,
+  catalogLinkName: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '900',
   },
-  smallDangerButton: {
-    minHeight: 34,
+  catalogLinkMeta: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    marginTop: 3,
+  },
+  catalogLinksEmpty: {
+    minHeight: 46,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.danger,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSubtle,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
+    marginBottom: 12,
   },
-  smallDangerButtonText: {
-    color: colors.danger,
-    fontSize: 12,
+  catalogLinksEmptyText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  catalogLinksSearchBox: {
+    minHeight: 52,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    marginTop: 8,
+    marginBottom: 18,
+  },
+  catalogLinksSearchInput: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontSize: 15,
+    paddingVertical: 0,
+  },
+  catalogLinksResults: {
+    maxHeight: 244,
+  },
+  catalogLinkOutlineButton: {
+    minHeight: 42,
+    minWidth: 84,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  catalogLinkOutlineButtonText: {
+    color: colors.success,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  catalogLinksDoneButton: {
+    minHeight: 54,
+    borderRadius: 8,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+  },
+  catalogLinksDoneButtonText: {
+    color: colors.successText,
+    fontSize: 16,
     fontWeight: '900',
   },
   catalogResults: {
