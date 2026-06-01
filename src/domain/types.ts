@@ -78,6 +78,8 @@ export interface ShoppingSuggestion {
   linkedCatalogProductIds: string[];
   name: string;
   normalizedName: string;
+  iconKey?: ShoppingListIconKey;
+  iconColorKey?: ShoppingListIconColorKey;
   missingQuantity: number;
   currentQuantity: number;
   targetQuantity: number;

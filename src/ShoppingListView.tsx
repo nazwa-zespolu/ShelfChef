@@ -698,9 +698,10 @@ export default function ShoppingListView({
         contentContainerStyle={[styles.suggestionsContent, suggestions.length === 0 && styles.emptyContent]}
         renderItem={({item}) => (
           <View style={styles.suggestionItemCard}>
-            <View style={styles.autoItemIcon}>
-              <Package color={colors.accent} size={24} strokeWidth={2.1} />
-            </View>
+            <ShoppingItemIconBubble
+              iconKey={item.iconKey ?? 'box'}
+              iconColorKey={item.iconColorKey ?? DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY}
+            />
             <View style={styles.suggestionItemText}>
               <Text style={styles.manualItemTitle} numberOfLines={1}>{item.name}</Text>
               <Text style={styles.manualItemMeta} numberOfLines={1}>{item.reason}</Text>
@@ -2253,38 +2254,6 @@ function DeleteListModal({
         </View>
       </View>
     </Modal>
-  );
-}
-
-function ModalActions({
-  busy,
-  submitDisabled,
-  submitLabel,
-  onClose,
-  onSubmit,
-}: {
-  busy: boolean;
-  submitDisabled?: boolean;
-  submitLabel: string;
-  onClose: () => void;
-  onSubmit: () => void;
-}) {
-  return (
-    <View style={styles.modalActions}>
-      <Pressable onPress={onClose} style={({pressed}) => [styles.secondaryButton, pressed && styles.pressed]}>
-        <Text style={styles.secondaryButtonText}>Anuluj</Text>
-      </Pressable>
-      <Pressable
-        disabled={busy || submitDisabled}
-        onPress={onSubmit}
-        style={({pressed}) => [
-          styles.primaryButton,
-          (busy || submitDisabled) && styles.disabled,
-          pressed && styles.pressed,
-        ]}>
-        <Text style={styles.primaryButtonText}>{submitLabel}</Text>
-      </Pressable>
-    </View>
   );
 }
 

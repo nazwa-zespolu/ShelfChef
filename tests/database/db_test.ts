@@ -470,10 +470,11 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
   if (normalized.startsWith('INSERT INTO SHOPPING_LIST_ITEMS')) {
     const [id, listId, catalogProductId, label] = params;
     const hasExplicitStatus = params.length >= 12;
-    const iconKey = hasExplicitStatus ? params[4] : 'box';
-    const iconColorKey = hasExplicitStatus ? params[5] : 'green';
-    const quantity = hasExplicitStatus ? params[6] : params[4];
-    const sortOrder = hasExplicitStatus ? params[7] : params[5];
+    const isSuggestionInsert = normalized.includes("'PLANNED', 'SUGGESTION'");
+    const iconKey = hasExplicitStatus || isSuggestionInsert ? params[4] : 'box';
+    const iconColorKey = hasExplicitStatus || isSuggestionInsert ? params[5] : 'green';
+    const quantity = hasExplicitStatus || isSuggestionInsert ? params[6] : params[4];
+    const sortOrder = hasExplicitStatus || isSuggestionInsert ? params[7] : params[5];
     shoppingListItems.set(id, {
       id,
       list_id: listId,
@@ -486,8 +487,8 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       status: hasExplicitStatus ? params[8] : 'planned',
       source: hasExplicitStatus ? params[9] : 'suggestion',
       stored_at: null,
-      created_at: hasExplicitStatus ? params[10] : params[6],
-      updated_at: hasExplicitStatus ? params[11] : params[7],
+      created_at: hasExplicitStatus ? params[10] : isSuggestionInsert ? params[8] : params[6],
+      updated_at: hasExplicitStatus ? params[11] : isSuggestionInsert ? params[9] : params[7],
     });
     return toRows([]);
   }

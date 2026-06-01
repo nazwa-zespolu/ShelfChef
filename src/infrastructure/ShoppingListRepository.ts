@@ -538,13 +538,15 @@ export class ShoppingListRepository {
                 created_at,
                 updated_at
               )
-              VALUES (?, ?, ?, ?, 'box', 'green', ?, ?, 'planned', 'suggestion', NULL, ?, ?)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planned', 'suggestion', NULL, ?, ?)
             `,
             [
               itemId,
               targetManualListId,
               suggestion.catalogProductId,
               suggestion.name,
+              suggestion.iconKey ?? 'box',
+              suggestion.iconColorKey ?? 'green',
               Math.max(1, suggestion.missingQuantity),
               nextSortOrder,
               timestamp,

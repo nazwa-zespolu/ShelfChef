@@ -176,6 +176,8 @@ export class ShoppingList {
             linkedCatalogProductIds: item.linkedCatalogProducts.map(product => product.id),
             name: suggestionName,
             normalizedName,
+            iconKey: item.iconKey,
+            iconColorKey: item.iconColorKey,
             missingQuantity,
             currentQuantity: displayQuantity,
             targetQuantity: item.quantity,
@@ -201,6 +203,8 @@ export class ShoppingList {
           existing.missingQuantity = missingQuantity;
           existing.currentQuantity = displayQuantity;
           existing.targetQuantity = item.quantity;
+          existing.iconKey = item.iconKey;
+          existing.iconColorKey = item.iconColorKey;
           existing.reason = this.buildMissingReason(displayQuantity, item.quantity);
           existing.priority = displayQuantity === 0 ? 'out' : 'low';
         }
