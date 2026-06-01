@@ -59,6 +59,8 @@ const milkItem: ShoppingListItem = {
   catalogProductId: "catalog-specific-111",
   linkedCatalogProducts: [],
   label: "Mleko",
+  iconKey: "box",
+  iconColorKey: "green",
   quantity: 3,
   sortOrder: 0,
   status: "planned" as const,

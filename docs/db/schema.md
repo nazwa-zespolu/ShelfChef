@@ -55,6 +55,8 @@ erDiagram
         TEXT list_id FK
         TEXT catalog_product_id FK
         TEXT label
+        TEXT icon_key
+        TEXT icon_color_key
         INTEGER quantity
         INTEGER sort_order
         TEXT status
@@ -88,6 +90,7 @@ erDiagram
 - `product_catalog.parent_catalog_product_id` laczy produkt konkretny z produktem ogolnym (`generic`).
 - `shopping_list_items.list_id` wskazuje liste zakupow.
 - `shopping_list_items.catalog_product_id` jest opcjonalne, bo zwykle pozycje tekstowe nie musza miec wpisu w katalogu.
+- `shopping_list_items.icon_key` i `shopping_list_items.icon_color_key` przechowuja recznie wybrany wyglad ikony pozycji.
 - `shopping_list_items.sort_order` zapisuje reczna kolejnosc produktow w konkretnej liscie.
 - `shopping_list_item_catalog_products` pozwala podpiac produkty katalogowe jako alternatywy dla pozycji listy, np. tekstowe `mleko` moze liczyc kilka konkretnych produktow z EAN.
 - `shopping_lists.icon_key` i `shopping_lists.icon_color_key` przechowuja wybrany wyglad ikony listy.

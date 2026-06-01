@@ -2,7 +2,7 @@ import { open } from 'react-native-quick-sqlite';
 
 // Otwarcie bazy danych
 export const db = open({ name: 'shelfchef.db' });
-const SHOPPING_LISTS_SCHEMA_VERSION = 8;
+const SHOPPING_LISTS_SCHEMA_VERSION = 9;
 
 const MOCK_DATA_SQL = [
   // 1. Product definitions (in English) - expanded base for the LLM
@@ -99,6 +99,8 @@ function migrateToShoppingListsSchema() {
         list_id TEXT NOT NULL,
         catalog_product_id TEXT,
         label TEXT NOT NULL,
+        icon_key TEXT NOT NULL DEFAULT 'box',
+        icon_color_key TEXT NOT NULL DEFAULT 'green',
         quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity > 0),
         sort_order INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL CHECK(status IN ('planned', 'purchased', 'unavailable', 'stored')),
@@ -259,6 +261,11 @@ function migrateShoppingListItemSortOrder() {
   db.execute('ALTER TABLE shopping_list_items ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
 }
 
+function migrateShoppingListItemIcons() {
+  db.execute("ALTER TABLE shopping_list_items ADD COLUMN icon_key TEXT NOT NULL DEFAULT 'box'");
+  db.execute("ALTER TABLE shopping_list_items ADD COLUMN icon_color_key TEXT NOT NULL DEFAULT 'green'");
+}
+
 function migrateCatalogConcreteToSpecific() {
   db.execute(`
       CREATE TABLE product_catalog_v2 (
@@ -358,6 +365,9 @@ function runMigrations() {
     }
     if (currentVersion >= 1 && currentVersion < 8) {
       createShoppingListItemCatalogProductsTable();
+    }
+    if (currentVersion >= 1 && currentVersion < 9) {
+      migrateShoppingListItemIcons();
     }
     db.execute(`PRAGMA user_version = ${SHOPPING_LISTS_SCHEMA_VERSION}`);
   });

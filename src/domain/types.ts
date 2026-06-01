@@ -56,6 +56,8 @@ export interface ShoppingListItem {
   catalogProductId: string | null;
   linkedCatalogProducts: CatalogProduct[];
   label: string;
+  iconKey: ShoppingListIconKey;
+  iconColorKey: ShoppingListIconColorKey;
   quantity: number;
   sortOrder: number;
   status: ShoppingItemStatus;

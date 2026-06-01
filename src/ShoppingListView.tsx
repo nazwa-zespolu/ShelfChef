@@ -6,6 +6,7 @@ import {
   BackHandler,
   type DimensionValue,
   FlatList,
+  Keyboard,
   Modal,
   PanResponder,
   Pressable,
@@ -142,6 +143,10 @@ export default function ShoppingListView({
   );
   const [addOpen, setAddOpen] = useState(false);
   const [addQuantity, setAddQuantity] = useState('1');
+  const [addIconKey, setAddIconKey] = useState<ShoppingListIconKey>('box');
+  const [addIconColorKey, setAddIconColorKey] = useState<ShoppingListIconColorKey>(
+    DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY,
+  );
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogResults, setCatalogResults] = useState<CatalogProduct[]>([]);
   const [selectedCatalog, setSelectedCatalog] = useState<CatalogProduct | null>(null);
@@ -331,6 +336,8 @@ export default function ShoppingListView({
 
   const openAddItem = useCallback(() => {
     setAddQuantity('1');
+    setAddIconKey('box');
+    setAddIconColorKey(DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY);
     setCatalogQuery('');
     setCatalogResults([]);
     setSelectedCatalog(null);
@@ -426,11 +433,15 @@ export default function ShoppingListView({
         await shoppingList.addItem(selectedList.id, {
           catalogProductId: selectedCatalog.id,
           label: selectedCatalog.name,
+          iconKey: addIconKey,
+          iconColorKey: addIconColorKey,
           quantity,
         });
       } else {
         await shoppingList.addItem(selectedList.id, {
           label: productLabel,
+          iconKey: addIconKey,
+          iconColorKey: addIconColorKey,
           quantity,
         });
       }
@@ -441,7 +452,7 @@ export default function ShoppingListView({
     } finally {
       setBusy(false);
     }
-  }, [addQuantity, catalogQuery, loadSelectedList, selectedCatalog, selectedList]);
+  }, [addIconColorKey, addIconKey, addQuantity, catalogQuery, loadSelectedList, selectedCatalog, selectedList]);
 
   const updateStatus = useCallback(
     async (itemId: string, status: ShoppingItemStatus) => {
@@ -980,11 +991,15 @@ export default function ShoppingListView({
       <AddItemModal
         visible={addOpen}
         quantity={addQuantity}
+        iconKey={addIconKey}
+        iconColorKey={addIconColorKey}
         catalogQuery={catalogQuery}
         catalogResults={catalogResults}
         selectedCatalog={selectedCatalog}
         busy={busy}
         onChangeQuantity={setAddQuantity}
+        onChangeIconKey={setAddIconKey}
+        onChangeIconColorKey={setAddIconColorKey}
         onChangeCatalogQuery={query => searchCatalog(query).catch(() => {})}
         onSelectCatalog={product => {
           setSelectedCatalog(product);
@@ -1171,7 +1186,6 @@ function ManualShoppingItemRow({
   const isPurchased = item.effectiveStatus === 'purchased';
   const nextToggleStatus: ShoppingItemStatus = isPurchased ? 'planned' : 'purchased';
   const canDecrease = item.quantity > 1 && !busy;
-  const ItemIcon = isPurchased ? Check : Package;
 
   const resetPosition = useCallback(() => {
     if (dragTimer.current) {
@@ -1242,13 +1256,11 @@ function ManualShoppingItemRow({
             dragging && styles.manualItemCardDragging,
           ]}>
           {isPurchased ? <View style={styles.manualItemStatusBar} /> : null}
-          <View
-            style={[styles.manualItemIcon, isPurchased && styles.manualItemIconPurchased]}
-            {...dragResponder.panHandlers}>
-            <ItemIcon
-              color={isPurchased ? colors.success : colors.accent}
-              size={24}
-              strokeWidth={2.1}
+          <View {...dragResponder.panHandlers}>
+            <ShoppingItemIconBubble
+              iconKey={item.iconKey}
+              iconColorKey={item.iconColorKey}
+              purchased={isPurchased}
             />
           </View>
           <View style={styles.manualItemText}>
@@ -1327,9 +1339,7 @@ function AutoShoppingItemRow({
       allowRightDelete={false}
       onDelete={() => { onDelete(item.id).catch(() => {}); }}>
       <View style={styles.autoItemCard}>
-        <View style={styles.autoItemIcon}>
-          <Package color={colors.accent} size={24} strokeWidth={2.1} />
-        </View>
+        <ShoppingItemIconBubble iconKey={item.iconKey} iconColorKey={item.iconColorKey} />
         <View style={styles.autoItemText}>
           <Text style={styles.manualItemTitle} numberOfLines={1}>{item.label}</Text>
           <Text style={styles.manualItemMeta} numberOfLines={1}>
@@ -1391,6 +1401,34 @@ function EmptyState({title}: {title: string}) {
   return (
     <View style={styles.emptyBox}>
       <Text style={styles.emptyTitle}>{title}</Text>
+    </View>
+  );
+}
+
+function ShoppingItemIconBubble({
+  iconKey,
+  iconColorKey,
+  purchased = false,
+}: {
+  iconKey: ShoppingListIconKey;
+  iconColorKey: ShoppingListIconColorKey;
+  purchased?: boolean;
+}) {
+  const icon = getShoppingListIconDefinition(iconKey);
+  const iconColor = getShoppingListIconColorDefinition(iconColorKey);
+  const Icon = icon.Icon;
+  return (
+    <View
+      style={[
+        styles.manualItemIcon,
+        {backgroundColor: iconColor.background},
+        purchased && styles.manualItemIconPurchased,
+      ]}>
+      <Icon
+        color={purchased ? colors.success : iconColor.color}
+        size={24}
+        strokeWidth={2.1}
+      />
     </View>
   );
 }
@@ -1475,7 +1513,7 @@ function CreateListModal({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
         <Animated.View style={[styles.createListSheet, {transform: [{translateY: sheetTranslateY}]}]}>
-          <View style={styles.sheetHandleTouch} {...sheetDragResponder.panHandlers}>
+          <View style={[styles.sheetHandleTouch, styles.addItemHandleTouch]} {...sheetDragResponder.panHandlers}>
             <View style={styles.sheetHandle} />
           </View>
           <Text style={styles.createTitle}>Nowa lista zakupów</Text>
@@ -1572,7 +1610,7 @@ function CreateListModal({
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.iconPickerRow}>
+            contentContainerStyle={[styles.iconPickerRow, styles.addItemIconPickerRow]}>
             {SHOPPING_LIST_ICONS.map(icon => {
               const active = icon.key === iconKey;
               const Icon = icon.Icon;
@@ -1582,12 +1620,14 @@ function CreateListModal({
                   onPress={() => onChangeIconKey(icon.key)}
                   style={({pressed}) => [
                     styles.iconChoiceShadow,
+                    styles.addItemIconChoiceShadow,
                     active && styles.iconChoiceShadowActive,
                     pressed && styles.pressed,
                   ]}>
                   <View
                     style={[
                       styles.iconChoice,
+                      styles.addItemIconChoice,
                       active && styles.iconChoiceActive,
                       active && {
                         borderColor: selectedColor.color,
@@ -1602,6 +1642,7 @@ function CreateListModal({
                     <Text
                       style={[
                         styles.iconChoiceLabel,
+                        styles.addItemIconChoiceLabel,
                         active && styles.iconChoiceLabelActive,
                         active && {color: selectedColor.color},
                       ]}
@@ -1635,11 +1676,15 @@ function CreateListModal({
 function AddItemModal({
   visible,
   quantity,
+  iconKey,
+  iconColorKey,
   catalogQuery,
   catalogResults,
   selectedCatalog,
   busy,
   onChangeQuantity,
+  onChangeIconKey,
+  onChangeIconColorKey,
   onChangeCatalogQuery,
   onSelectCatalog,
   onClose,
@@ -1647,93 +1692,26 @@ function AddItemModal({
 }: {
   visible: boolean;
   quantity: string;
+  iconKey: ShoppingListIconKey;
+  iconColorKey: ShoppingListIconColorKey;
   catalogQuery: string;
   catalogResults: CatalogProduct[];
   selectedCatalog: CatalogProduct | null;
   busy: boolean;
   onChangeQuantity: (quantity: string) => void;
+  onChangeIconKey: (iconKey: ShoppingListIconKey) => void;
+  onChangeIconColorKey: (iconColorKey: ShoppingListIconColorKey) => void;
   onChangeCatalogQuery: (query: string) => void;
   onSelectCatalog: (product: CatalogProduct) => void;
   onClose: () => void;
   onSubmit: () => void;
 }) {
   const quantityIsValid = parseQuantityInput(quantity) != null;
+  const parsedQuantity = parseQuantityInput(quantity) ?? 1;
   const productName = catalogQuery.trim();
   const canSubmit = quantityIsValid && (selectedCatalog != null || productName.length > 0);
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalSheet}>
-          <Text style={styles.modalTitle}>Dodaj produkt</Text>
-          <TextInput
-            value={catalogQuery}
-            onChangeText={onChangeCatalogQuery}
-            placeholder="Wpisz lub wyszukaj produkt"
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
-          />
-          {catalogResults.length > 0 ? (
-            <ScrollView style={styles.catalogResults} keyboardShouldPersistTaps="handled">
-              {catalogResults.map(product => {
-                const active = selectedCatalog?.id === product.id;
-                return (
-                  <Pressable
-                    key={product.id}
-                    onPress={() => onSelectCatalog(product)}
-                    style={({pressed}) => [styles.catalogRow, active && styles.catalogRowActive, pressed && styles.pressed]}>
-                    <Text style={styles.catalogName}>{product.name}</Text>
-                    <Text style={styles.catalogKind}>
-                      {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt katalogowy'}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          ) : null}
-          <TextInput
-            value={quantity}
-            onChangeText={onChangeQuantity}
-            placeholder="Ilość"
-            placeholderTextColor={colors.textMuted}
-            style={[styles.input, !quantityIsValid && styles.inputError]}
-          />
-          {!quantityIsValid ? (
-            <Text style={styles.fieldError}>Ilość musi być liczbą większą od 0</Text>
-          ) : null}
-          <ModalActions
-            busy={busy}
-            submitDisabled={!canSubmit}
-            onClose={onClose}
-            onSubmit={onSubmit}
-            submitLabel={selectedCatalog ? 'Dodaj z katalogu' : 'Dodaj'}
-          />
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-function CatalogLinksModal({
-  item,
-  query,
-  results,
-  busy,
-  onChangeQuery,
-  onLink,
-  onUnlink,
-  onClose,
-}: {
-  item: AutoShoppingListItemState | null;
-  query: string;
-  results: CatalogProduct[];
-  busy: boolean;
-  onChangeQuery: (query: string) => void;
-  onLink: (product: CatalogProduct) => void;
-  onUnlink: (catalogProductId: string) => void;
-  onClose: () => void;
-}) {
-  const linkedIds = new Set(item?.linkedCatalogProducts.map(product => product.id) ?? []);
-  const availableResults = results.filter(product => !linkedIds.has(product.id));
+  const canDecrease = parsedQuantity > 1 && !busy;
+  const selectedColor = getShoppingListIconColorDefinition(iconColorKey);
   const sheetTranslateY = useRef(new Animated.Value(0)).current;
   const closeWithDrag = useCallback(() => {
     Animated.timing(sheetTranslateY, {
@@ -1781,15 +1759,330 @@ function CatalogLinksModal({
   );
 
   return (
-    <Modal visible={item != null} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
         <Animated.View
           style={[
             styles.modalSheet,
-            styles.catalogLinksSheet,
+            styles.addItemSheet,
             {transform: [{translateY: sheetTranslateY}]},
           ]}>
-          <View style={styles.sheetHandleTouch} {...sheetDragResponder.panHandlers}>
+          <View style={[styles.sheetHandleTouch, styles.addItemHandleTouch]} {...sheetDragResponder.panHandlers}>
+            <View style={styles.sheetHandle} />
+          </View>
+          <Text style={styles.addItemTitle}>Dodaj produkt</Text>
+          <Text style={styles.addItemSubtitle}>Wpisz nazwę albo wybierz produkt z katalogu</Text>
+
+          <View style={styles.iconHeaderRow}>
+            <Text style={styles.iconHeaderLabel}>Ikona produktu</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.colorPickerRow}
+              style={styles.colorPicker}>
+              {SHOPPING_LIST_ICON_COLORS.map(colorOption => {
+                const active = colorOption.key === iconColorKey;
+                return (
+                  <Pressable
+                    key={colorOption.key}
+                    onPress={() => onChangeIconColorKey(colorOption.key)}
+                    accessibilityLabel={`Kolor ikony produktu: ${colorOption.label}`}
+                    style={({pressed}) => [
+                      styles.colorSwatchShadow,
+                      active && styles.colorSwatchShadowActive,
+                      pressed && styles.pressed,
+                    ]}>
+                    <View
+                      style={[
+                        styles.colorSwatch,
+                        {
+                          borderColor: active ? colorOption.color : colors.border,
+                          backgroundColor: active ? colorOption.background : colors.surface,
+                        },
+                        active && styles.colorSwatchActive,
+                      ]}>
+                      <View style={[styles.colorSwatchInner, {backgroundColor: colorOption.color}]} />
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.iconPickerRow}>
+            {SHOPPING_LIST_ICONS.map(icon => {
+              const active = icon.key === iconKey;
+              const Icon = icon.Icon;
+              return (
+                <Pressable
+                  key={icon.key}
+                  onPress={() => onChangeIconKey(icon.key)}
+                  style={({pressed}) => [
+                    styles.iconChoiceShadow,
+                    active && styles.iconChoiceShadowActive,
+                    pressed && styles.pressed,
+                  ]}>
+                  <View
+                    style={[
+                      styles.iconChoice,
+                      active && styles.iconChoiceActive,
+                      active && {
+                        borderColor: selectedColor.color,
+                        backgroundColor: selectedColor.background,
+                      },
+                    ]}>
+                    <Icon
+                      color={active ? selectedColor.color : colors.textSecondary}
+                      size={27}
+                      strokeWidth={2.1}
+                    />
+                    <Text
+                      style={[
+                        styles.iconChoiceLabel,
+                        active && styles.iconChoiceLabelActive,
+                        active && {color: selectedColor.color},
+                      ]}
+                      numberOfLines={1}>
+                      {icon.label}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          <View style={styles.addItemSearchQuantityRow}>
+            <View style={[styles.addItemSearchBox, styles.addItemSearchBoxCompact]}>
+              <Search color={colors.textMuted} size={22} strokeWidth={2.1} />
+              <TextInput
+                value={catalogQuery}
+                onChangeText={onChangeCatalogQuery}
+                placeholder="Nazwa produktu"
+                placeholderTextColor={colors.textMuted}
+                style={styles.addItemSearchInput}
+              />
+            </View>
+            <QuantityStepper
+              value={parsedQuantity}
+              canDecrease={canDecrease}
+              busy={busy}
+              onDecrease={() => onChangeQuantity(String(parsedQuantity - 1))}
+              onIncrease={() => onChangeQuantity(String(parsedQuantity + 1))}
+            />
+          </View>
+
+          <Text style={styles.addItemSectionTitle}>Wyniki z katalogu</Text>
+          {catalogResults.length > 0 ? (
+            <ScrollView style={styles.addItemResults} keyboardShouldPersistTaps="handled">
+              {catalogResults.map(product => {
+                const active = selectedCatalog?.id === product.id;
+                return (
+                  <View key={product.id} style={[styles.addItemCatalogCard, active && styles.addItemCatalogCardActive]}>
+                    <View style={styles.addItemProductIcon}>
+                      <Package color={colors.accent} size={25} strokeWidth={2.1} />
+                    </View>
+                    <View style={styles.addItemProductText}>
+                      <Text style={styles.addItemProductName} numberOfLines={1}>{product.name}</Text>
+                      <Text style={styles.addItemProductMeta}>
+                        {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt z katalogu'}
+                      </Text>
+                    </View>
+                    <Pressable
+                      disabled={busy}
+                      onPress={() => onSelectCatalog(product)}
+                      style={({pressed}) => [
+                        styles.addItemSelectButton,
+                        active && styles.addItemSelectButtonActive,
+                        busy && styles.disabled,
+                        pressed && styles.pressed,
+                      ]}>
+                      <Text style={[styles.addItemSelectButtonText, active && styles.addItemSelectButtonTextActive]}>
+                        {active ? 'Wybrano' : 'Wybierz'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          ) : (
+            <View style={styles.addItemEmptyResults}>
+              <Text style={styles.addItemEmptyText}>
+                {productName ? 'Brak wyników katalogu' : 'Wpisz nazwę produktu'}
+              </Text>
+            </View>
+          )}
+
+          {!quantityIsValid ? (
+            <Text style={styles.fieldError}>Ilość musi być liczbą większą od 0</Text>
+          ) : null}
+          <Pressable
+            disabled={busy || !canSubmit}
+            onPress={onSubmit}
+            style={({pressed}) => [
+              styles.addItemSubmitButton,
+              (busy || !canSubmit) && styles.disabled,
+              pressed && styles.pressed,
+            ]}>
+            <Text style={styles.addItemSubmitButtonText}>Dodaj produkt</Text>
+          </Pressable>
+          <Pressable onPress={onClose} disabled={busy} style={styles.addItemCancelButton}>
+            <Text style={styles.addItemCancelText}>Anuluj</Text>
+          </Pressable>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+function QuantityStepper({
+  value,
+  canDecrease,
+  busy,
+  onDecrease,
+  onIncrease,
+}: {
+  value: number;
+  canDecrease: boolean;
+  busy: boolean;
+  onDecrease: () => void;
+  onIncrease: () => void;
+}) {
+  return (
+    <View style={styles.addItemQuantityStepper}>
+      <Pressable
+        disabled={!canDecrease}
+        onPress={onDecrease}
+        style={({pressed}) => [
+          styles.addItemStepButton,
+          !canDecrease && styles.disabled,
+          pressed && styles.pressed,
+        ]}>
+        <Text style={styles.addItemStepText}>−</Text>
+      </Pressable>
+      <Text style={styles.addItemQuantityText}>{value}</Text>
+      <Pressable
+        disabled={busy}
+        onPress={onIncrease}
+        style={({pressed}) => [
+          styles.addItemStepButton,
+          busy && styles.disabled,
+          pressed && styles.pressed,
+        ]}>
+        <Text style={styles.addItemStepText}>+</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function CatalogLinksModal({
+  item,
+  query,
+  results,
+  busy,
+  onChangeQuery,
+  onLink,
+  onUnlink,
+  onClose,
+}: {
+  item: AutoShoppingListItemState | null;
+  query: string;
+  results: CatalogProduct[];
+  busy: boolean;
+  onChangeQuery: (query: string) => void;
+  onLink: (product: CatalogProduct) => void;
+  onUnlink: (catalogProductId: string) => void;
+  onClose: () => void;
+}) {
+  const linkedIds = new Set(item?.linkedCatalogProducts.map(product => product.id) ?? []);
+  const availableResults = results.filter(product => !linkedIds.has(product.id));
+  const searchActive = query.trim().length > 0;
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const sheetTranslateY = useRef(new Animated.Value(0)).current;
+  const closeWithDrag = useCallback(() => {
+    Animated.timing(sheetTranslateY, {
+      toValue: 420,
+      duration: 160,
+      useNativeDriver: true,
+    }).start(({finished}) => {
+      sheetTranslateY.setValue(0);
+      if (finished) {
+        onClose();
+      }
+    });
+  }, [onClose, sheetTranslateY]);
+  const resetSheetPosition = useCallback(() => {
+    Animated.spring(sheetTranslateY, {
+      toValue: 0,
+      useNativeDriver: true,
+      speed: 18,
+      bounciness: 5,
+    }).start();
+  }, [sheetTranslateY]);
+  const sheetDragResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_evt, gesture) =>
+          Math.abs(gesture.dy) > 2 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onPanResponderGrant: () => {
+          sheetTranslateY.stopAnimation();
+        },
+        onPanResponderMove: (_evt, gesture) => {
+          sheetTranslateY.setValue(Math.max(0, gesture.dy));
+        },
+        onPanResponderRelease: (_evt, gesture) => {
+          if (gesture.dy > 80 || gesture.vy > 0.9) {
+            closeWithDrag();
+            return;
+          }
+          resetSheetPosition();
+        },
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderTerminate: resetSheetPosition,
+      }),
+    [closeWithDrag, resetSheetPosition, sheetTranslateY],
+  );
+
+  React.useEffect(() => {
+    const showSubscription = Keyboard.addListener('keyboardDidShow', () => {
+      setKeyboardVisible(true);
+    });
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (item == null) {
+      setKeyboardVisible(false);
+    }
+  }, [item]);
+
+  return (
+    <Modal visible={item != null} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <Pressable
+          accessibilityLabel="Zamknij okno powiązań"
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
+        <Animated.View
+          style={[
+            styles.modalSheet,
+            styles.catalogLinksSheet,
+            keyboardVisible && styles.catalogLinksSheetKeyboard,
+            {transform: [{translateY: sheetTranslateY}]},
+          ]}>
+          <View
+            style={[styles.sheetHandleTouch, styles.catalogLinksHandleTouch]}
+            {...sheetDragResponder.panHandlers}>
             <View style={styles.sheetHandle} />
           </View>
           <Text style={styles.catalogLinksTitle} numberOfLines={2}>
@@ -1798,37 +2091,6 @@ function CatalogLinksModal({
           <Text style={styles.catalogLinksSubtitle}>
             Te produkty będą liczone jako ta pozycja
           </Text>
-
-          <Text style={styles.catalogLinksSectionTitle}>Powiązane</Text>
-          {item && item.linkedCatalogProducts.length > 0 ? (
-            item.linkedCatalogProducts.map(product => (
-              <View key={product.id} style={styles.catalogLinkCard}>
-                <View style={styles.catalogLinkIcon}>
-                  <Package color={colors.accent} size={25} strokeWidth={2.1} />
-                </View>
-                <View style={styles.catalogLinkText}>
-                  <Text style={styles.catalogLinkName} numberOfLines={1}>{product.name}</Text>
-                  <Text style={styles.catalogLinkMeta}>
-                    {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt z katalogu'}
-                  </Text>
-                </View>
-                <Pressable
-                  disabled={busy}
-                  onPress={() => onUnlink(product.id)}
-                  style={({pressed}) => [
-                    styles.catalogLinkOutlineButton,
-                    busy && styles.disabled,
-                    pressed && styles.pressed,
-                  ]}>
-                  <Text style={styles.catalogLinkOutlineButtonText}>Usuń</Text>
-                </Pressable>
-              </View>
-            ))
-          ) : (
-            <View style={styles.catalogLinksEmpty}>
-              <Text style={styles.catalogLinksEmptyText}>Brak powiązanych produktów</Text>
-            </View>
-          )}
 
           <View style={styles.catalogLinksSearchBox}>
             <Search color={colors.textMuted} size={22} strokeWidth={2.1} />
@@ -1840,44 +2102,84 @@ function CatalogLinksModal({
               style={styles.catalogLinksSearchInput}
             />
           </View>
-          <Text style={styles.catalogLinksSectionTitle}>Wyniki</Text>
-          {availableResults.length > 0 ? (
-            <ScrollView style={styles.catalogLinksResults} keyboardShouldPersistTaps="handled">
-              {availableResults.map(product => (
-                <View key={product.id} style={styles.catalogLinkCard}>
-                  <View style={styles.catalogLinkIcon}>
-                    <Package color={colors.accent} size={25} strokeWidth={2.1} />
-                  </View>
-                  <View style={styles.catalogLinkText}>
-                    <Text style={styles.catalogLinkName} numberOfLines={1}>{product.name}</Text>
-                    <Text style={styles.catalogLinkMeta}>
-                      {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt z katalogu'}
-                    </Text>
-                  </View>
-                  <Pressable
-                    disabled={busy}
-                    onPress={() => onLink(product)}
-                    style={({pressed}) => [
-                      styles.catalogLinkOutlineButton,
-                      busy && styles.disabled,
-                      pressed && styles.pressed,
-                    ]}>
-                    <Text style={styles.catalogLinkOutlineButtonText}>Dodaj</Text>
-                  </Pressable>
+          {searchActive ? (
+            <>
+              <Text style={styles.catalogLinksSectionTitle}>Wyniki</Text>
+              {availableResults.length > 0 ? (
+                <ScrollView
+                  style={[
+                    styles.catalogLinksResults,
+                    keyboardVisible && styles.catalogLinksResultsKeyboard,
+                  ]}
+                  keyboardShouldPersistTaps="handled">
+                  {availableResults.map(product => (
+                    <View key={product.id} style={styles.catalogLinkCard}>
+                      <View style={styles.catalogLinkIcon}>
+                        <Package color={colors.accent} size={25} strokeWidth={2.1} />
+                      </View>
+                      <View style={styles.catalogLinkText}>
+                        <Text style={styles.catalogLinkName} numberOfLines={1}>{product.name}</Text>
+                        <Text style={styles.catalogLinkMeta}>
+                          {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt z katalogu'}
+                        </Text>
+                      </View>
+                      <Pressable
+                        disabled={busy}
+                        onPress={() => {
+                          onLink(product);
+                          onChangeQuery('');
+                        }}
+                        style={({pressed}) => [
+                          styles.catalogLinkOutlineButton,
+                          busy && styles.disabled,
+                          pressed && styles.pressed,
+                        ]}>
+                        <Text style={styles.catalogLinkOutlineButtonText}>Dodaj</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </ScrollView>
+              ) : (
+                <View style={styles.catalogLinksEmpty}>
+                  <Text style={styles.catalogLinksEmptyText}>Brak wyników</Text>
                 </View>
-              ))}
-            </ScrollView>
+              )}
+            </>
           ) : (
-            <View style={styles.catalogLinksEmpty}>
-              <Text style={styles.catalogLinksEmptyText}>
-                {query.trim() ? 'Brak wyników' : 'Wpisz nazwę produktu'}
-              </Text>
-            </View>
+            <>
+              <Text style={styles.catalogLinksSectionTitle}>Powiązane</Text>
+              {item && item.linkedCatalogProducts.length > 0 ? (
+                item.linkedCatalogProducts.map(product => (
+                  <View key={product.id} style={styles.catalogLinkCard}>
+                    <View style={styles.catalogLinkIcon}>
+                      <Package color={colors.accent} size={25} strokeWidth={2.1} />
+                    </View>
+                    <View style={styles.catalogLinkText}>
+                      <Text style={styles.catalogLinkName} numberOfLines={1}>{product.name}</Text>
+                      <Text style={styles.catalogLinkMeta}>
+                        {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt z katalogu'}
+                      </Text>
+                    </View>
+                    <Pressable
+                      disabled={busy}
+                      onPress={() => onUnlink(product.id)}
+                      style={({pressed}) => [
+                        styles.catalogLinkOutlineButton,
+                        busy && styles.disabled,
+                        pressed && styles.pressed,
+                      ]}>
+                      <Text style={styles.catalogLinkOutlineButtonText}>Usuń</Text>
+                    </Pressable>
+                  </View>
+                ))
+              ) : (
+                <View style={styles.catalogLinksEmpty}>
+                  <Text style={styles.catalogLinksEmptyText}>Brak powiązanych produktów</Text>
+                </View>
+              )}
+            </>
           )}
 
-          <Pressable onPress={onClose} style={({pressed}) => [styles.catalogLinksDoneButton, pressed && styles.pressed]}>
-            <Text style={styles.catalogLinksDoneButtonText}>Gotowe</Text>
-          </Pressable>
         </Animated.View>
       </View>
     </Modal>
@@ -2816,7 +3118,7 @@ const styles = StyleSheet.create({
   },
   sheetHandleTouch: {
     alignSelf: 'center',
-    width: '100%',
+    width: 120,
     minHeight: 36,
     alignItems: 'center',
     justifyContent: 'center',
@@ -3062,6 +3364,243 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '900',
   },
+  addItemSheet: {
+    paddingTop: 4,
+    maxHeight: '98%',
+  },
+  addItemHandleTouch: {
+    minHeight: 22,
+    marginBottom: 0,
+  },
+  addItemTitle: {
+    color: colors.textPrimary,
+    fontSize: 23,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginTop: 0,
+    marginBottom: 4,
+  },
+  addItemSubtitle: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  addItemIconPickerRow: {
+    paddingTop: 2,
+    paddingBottom: 6,
+  },
+  addItemIconChoiceShadow: {
+    width: 68,
+    minHeight: 72,
+  },
+  addItemIconChoice: {
+    width: 68,
+    minHeight: 72,
+    gap: 5,
+    paddingHorizontal: 6,
+  },
+  addItemIconChoiceLabel: {
+    fontSize: 10,
+  },
+  addItemSearchBox: {
+    minHeight: 52,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 1,
+  },
+  addItemSearchQuantityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 16,
+  },
+  addItemSearchBoxCompact: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  addItemSearchInput: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontSize: 15,
+    paddingVertical: 0,
+  },
+  addItemPreviewCard: {
+    minHeight: 74,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.07,
+    shadowRadius: 12,
+    shadowOffset: {width: 0, height: 5},
+    elevation: 3,
+  },
+  addItemSelectedPreviewCard: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+  },
+  addItemProductIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addItemProductText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  addItemProductName: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  addItemProductMeta: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    marginTop: 3,
+  },
+  addItemSectionTitle: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '900',
+    marginBottom: 10,
+  },
+  addItemResults: {
+    maxHeight: 430,
+  },
+  addItemCatalogCard: {
+    minHeight: 72,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: {width: 0, height: 4},
+    elevation: 2,
+  },
+  addItemCatalogCardActive: {
+    borderColor: colors.accent,
+  },
+  addItemSelectButton: {
+    minHeight: 40,
+    minWidth: 84,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  addItemSelectButtonActive: {
+    backgroundColor: colors.accentSoft,
+  },
+  addItemSelectButtonText: {
+    color: colors.success,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  addItemSelectButtonTextActive: {
+    color: colors.accent,
+  },
+  addItemEmptyResults: {
+    minHeight: 48,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    marginBottom: 12,
+  },
+  addItemEmptyText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  addItemQuantityStepper: {
+    height: 52,
+    minWidth: 110,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSubtle,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  addItemStepButton: {
+    width: 36,
+    height: 50,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceSubtle,
+  },
+  addItemStepText: {
+    color: colors.textPrimary,
+    fontSize: 20,
+    fontWeight: '900',
+  },
+  addItemQuantityText: {
+    width: 36,
+    textAlign: 'center',
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  addItemSubmitButton: {
+    minHeight: 54,
+    borderRadius: 8,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+  },
+  addItemSubmitButtonText: {
+    color: colors.successText,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  addItemCancelButton: {
+    minHeight: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  addItemCancelText: {
+    color: colors.accent,
+    fontSize: 15,
+    fontWeight: '900',
+  },
   modalTitle: {
     color: colors.textPrimary,
     fontSize: 18,
@@ -3103,21 +3642,37 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   catalogLinksSheet: {
-    paddingTop: 10,
-    maxHeight: '82%',
+    paddingTop: 6,
+    maxHeight: '78%',
+  },
+  catalogLinksSheetKeyboard: {
+    height: '94%',
+    maxHeight: '94%',
+  },
+  catalogLinksHandleTouch: {
+    alignSelf: 'stretch',
+    width: 'auto',
+    minHeight: 58,
+    marginHorizontal: -16,
+    marginTop: -10,
+    marginBottom: -18,
+    paddingHorizontal: 16,
+    justifyContent: 'flex-start',
+    paddingTop: 8,
   },
   catalogLinksTitle: {
     color: colors.textPrimary,
     fontSize: 22,
     fontWeight: '900',
     textAlign: 'center',
-    marginBottom: 6,
+    marginTop: 0,
+    marginBottom: 4,
   },
   catalogLinksSubtitle: {
     color: colors.textSecondary,
     fontSize: 14,
     textAlign: 'center',
-    marginBottom: 22,
+    marginBottom: 14,
   },
   catalogLinksSectionTitle: {
     color: colors.textPrimary,
@@ -3191,8 +3746,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     paddingHorizontal: 12,
-    marginTop: 8,
-    marginBottom: 18,
+    marginBottom: 12,
   },
   catalogLinksSearchInput: {
     flex: 1,
@@ -3201,7 +3755,10 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   catalogLinksResults: {
-    maxHeight: 244,
+    maxHeight: 260,
+  },
+  catalogLinksResultsKeyboard: {
+    maxHeight: 430,
   },
   catalogLinkOutlineButton: {
     minHeight: 42,

@@ -45,6 +45,8 @@ type ShoppingListItemRow = {
   list_id: string;
   catalog_product_id: string | null;
   label: string;
+  icon_key: string;
+  icon_color_key: string;
   quantity: number;
   sort_order: number;
   status: 'planned' | 'purchased' | 'unavailable' | 'stored';
@@ -135,6 +137,20 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
   if (normalized.startsWith('ALTER TABLE SHOPPING_LIST_ITEMS ADD COLUMN SORT_ORDER')) {
     for (const row of shoppingListItems.values()) {
       row.sort_order = row.sort_order ?? 0;
+    }
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('ALTER TABLE SHOPPING_LIST_ITEMS ADD COLUMN ICON_KEY')) {
+    for (const row of shoppingListItems.values()) {
+      row.icon_key = row.icon_key ?? 'box';
+    }
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('ALTER TABLE SHOPPING_LIST_ITEMS ADD COLUMN ICON_COLOR_KEY')) {
+    for (const row of shoppingListItems.values()) {
+      row.icon_color_key = row.icon_color_key ?? 'green';
     }
     return toRows([]);
   }
@@ -452,21 +468,26 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
   }
 
   if (normalized.startsWith('INSERT INTO SHOPPING_LIST_ITEMS')) {
-    const [id, listId, catalogProductId, label, quantity] = params;
-    const hasExplicitStatus = params.length === 10;
-    const sortOrder = hasExplicitStatus ? params[5] : params[5];
+    const [id, listId, catalogProductId, label] = params;
+    const hasExplicitStatus = params.length >= 12;
+    const iconKey = hasExplicitStatus ? params[4] : 'box';
+    const iconColorKey = hasExplicitStatus ? params[5] : 'green';
+    const quantity = hasExplicitStatus ? params[6] : params[4];
+    const sortOrder = hasExplicitStatus ? params[7] : params[5];
     shoppingListItems.set(id, {
       id,
       list_id: listId,
       catalog_product_id: catalogProductId ?? null,
       label,
+      icon_key: iconKey,
+      icon_color_key: iconColorKey,
       quantity,
       sort_order: sortOrder,
-      status: hasExplicitStatus ? params[6] : 'planned',
-      source: hasExplicitStatus ? params[7] : 'suggestion',
+      status: hasExplicitStatus ? params[8] : 'planned',
+      source: hasExplicitStatus ? params[9] : 'suggestion',
       stored_at: null,
-      created_at: hasExplicitStatus ? params[8] : params[6],
-      updated_at: hasExplicitStatus ? params[9] : params[7],
+      created_at: hasExplicitStatus ? params[10] : params[6],
+      updated_at: hasExplicitStatus ? params[11] : params[7],
     });
     return toRows([]);
   }
@@ -822,7 +843,7 @@ describe('ProductRepository + database integration', () => {
     const version = db.execute('PRAGMA user_version').rows!.item(0);
     const lists = db.execute('SELECT * FROM shopping_lists').rows!;
 
-    expect(version.user_version).toBe(8);
+    expect(version.user_version).toBe(9);
     expect(lists.length).toBe(1);
     expect(lists.item(0)).toMatchObject({
       id: 'default-auto-minimum',

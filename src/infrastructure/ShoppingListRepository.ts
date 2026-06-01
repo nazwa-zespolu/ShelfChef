@@ -16,6 +16,8 @@ import {db, runInTransaction} from './db/init';
 export type AddShoppingItemInput = {
   catalogProductId?: string | null;
   label: string;
+  iconKey?: ShoppingListIconKey;
+  iconColorKey?: ShoppingListIconColorKey;
   quantity?: number;
   source?: ShoppingItemSource;
   status?: ShoppingItemStatus;
@@ -80,6 +82,8 @@ function mapShoppingItem(row: Record<string, any>): ShoppingListItem {
     catalogProductId: row.catalog_product_id ?? null,
     linkedCatalogProducts: [],
     label: row.label,
+    iconKey: row.icon_key ?? 'box',
+    iconColorKey: row.icon_color_key ?? 'green',
     quantity: Number(row.quantity),
     sortOrder: Number(row.sort_order ?? 0),
     status: row.status,
@@ -270,6 +274,8 @@ export class ShoppingListRepository {
           list_id,
           catalog_product_id,
           label,
+          icon_key,
+          icon_color_key,
           quantity,
           sort_order,
           status,
@@ -278,13 +284,15 @@ export class ShoppingListRepository {
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
       `,
       [
         id,
         listId,
         input.catalogProductId ?? null,
         input.label.trim(),
+        input.iconKey ?? 'box',
+        input.iconColorKey ?? 'green',
         quantity,
         sortOrder,
         status,
@@ -299,6 +307,8 @@ export class ShoppingListRepository {
       catalogProductId: input.catalogProductId ?? null,
       linkedCatalogProducts: [],
       label: input.label.trim(),
+      iconKey: input.iconKey ?? 'box',
+      iconColorKey: input.iconColorKey ?? 'green',
       quantity,
       sortOrder,
       status,
@@ -518,6 +528,8 @@ export class ShoppingListRepository {
                 list_id,
                 catalog_product_id,
                 label,
+                icon_key,
+                icon_color_key,
                 quantity,
                 sort_order,
                 status,
@@ -526,7 +538,7 @@ export class ShoppingListRepository {
                 created_at,
                 updated_at
               )
-              VALUES (?, ?, ?, ?, ?, ?, 'planned', 'suggestion', NULL, ?, ?)
+              VALUES (?, ?, ?, ?, 'box', 'green', ?, ?, 'planned', 'suggestion', NULL, ?, ?)
             `,
             [
               itemId,
