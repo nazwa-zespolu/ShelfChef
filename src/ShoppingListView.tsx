@@ -1512,6 +1512,11 @@ function CreateListModal({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
+        <Pressable
+          accessibilityLabel="Zamknij tworzenie listy"
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
         <Animated.View style={[styles.createListSheet, {transform: [{translateY: sheetTranslateY}]}]}>
           <View style={[styles.sheetHandleTouch, styles.addItemHandleTouch]} {...sheetDragResponder.panHandlers}>
             <View style={styles.sheetHandle} />
@@ -1661,11 +1666,8 @@ function CreateListModal({
               styles.createSubmitButton,
               (busy || name.trim().length === 0) && styles.disabled,
               pressed && styles.pressed,
-            ]}>
+          ]}>
             <Text style={styles.createSubmitButtonText}>Utwórz listę</Text>
-          </Pressable>
-          <Pressable onPress={onClose} disabled={busy} style={styles.createCancelButton}>
-            <Text style={styles.createCancelText}>Anuluj</Text>
           </Pressable>
         </Animated.View>
       </View>
@@ -1800,6 +1802,27 @@ function AddItemModal({
           <Text style={styles.addItemTitle}>Dodaj produkt</Text>
           <Text style={styles.addItemSubtitle}>Wpisz nazwę albo wybierz produkt z katalogu</Text>
 
+          <Text style={styles.addItemInputLabel}>Nazwa produktu</Text>
+          <View style={styles.addItemSearchQuantityRow}>
+            <View style={[styles.addItemSearchBox, styles.addItemSearchBoxCompact]}>
+              <Search color={colors.textMuted} size={22} strokeWidth={2.1} />
+              <TextInput
+                value={catalogQuery}
+                onChangeText={onChangeCatalogQuery}
+                placeholder="Nazwa produktu"
+                placeholderTextColor={colors.textMuted}
+                style={styles.addItemSearchInput}
+              />
+            </View>
+            <QuantityStepper
+              value={parsedQuantity}
+              canDecrease={canDecrease}
+              busy={busy}
+              onDecrease={() => onChangeQuantity(String(parsedQuantity - 1))}
+              onIncrease={() => onChangeQuantity(String(parsedQuantity + 1))}
+            />
+          </View>
+
           {!keyboardVisible ? (
             <>
               <View style={styles.iconHeaderRow}>
@@ -1886,27 +1909,6 @@ function AddItemModal({
               </ScrollView>
             </>
           ) : null}
-
-          <Text style={styles.addItemInputLabel}>Nazwa produktu</Text>
-          <View style={styles.addItemSearchQuantityRow}>
-            <View style={[styles.addItemSearchBox, styles.addItemSearchBoxCompact]}>
-              <Search color={colors.textMuted} size={22} strokeWidth={2.1} />
-              <TextInput
-                value={catalogQuery}
-                onChangeText={onChangeCatalogQuery}
-                placeholder="Nazwa produktu"
-                placeholderTextColor={colors.textMuted}
-                style={styles.addItemSearchInput}
-              />
-            </View>
-            <QuantityStepper
-              value={parsedQuantity}
-              canDecrease={canDecrease}
-              busy={busy}
-              onDecrease={() => onChangeQuantity(String(parsedQuantity - 1))}
-              onIncrease={() => onChangeQuantity(String(parsedQuantity + 1))}
-            />
-          </View>
 
           <Text style={styles.addItemSectionTitle}>Wyniki z katalogu</Text>
           {catalogResults.length > 0 ? (
