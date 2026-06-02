@@ -121,9 +121,7 @@ export class ShoppingList {
 
     const catalogIndex = await this.loadCatalogIndex();
     const inventory = await this.loadFreshInventory();
-    const usedInventoryIds = new Set<string>();
     const displayQuantityByInventoryKey = new Map<string, number>();
-    const consumedQuantityByInventoryKey = new Map<string, number>();
     const grouped = new Map<string, ShoppingSuggestion>();
 
     for (const list of lists) {
@@ -152,19 +150,7 @@ export class ShoppingList {
           displayQuantityByInventoryKey.set(inventoryKey, displayQuantity);
         }
 
-        let consumedQuantity = consumedQuantityByInventoryKey.get(inventoryKey);
-        if (consumedQuantity == null) {
-          consumedQuantity = this.consumeFreshInventoryForItem(
-            item,
-            catalogProduct,
-            catalogIndex,
-            inventory,
-            usedInventoryIds,
-            item.quantity,
-          );
-          consumedQuantityByInventoryKey.set(inventoryKey, consumedQuantity);
-        }
-        const missingQuantity = Math.max(0, item.quantity - consumedQuantity);
+        const missingQuantity = Math.max(0, item.quantity - displayQuantity);
         if (missingQuantity === 0) {
           continue;
         }

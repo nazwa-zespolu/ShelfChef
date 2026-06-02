@@ -96,7 +96,7 @@ function createRepositories(items = [milkItem]) {
         id: "inv-1",
         ean: "111",
         name: "Mleko",
-        expiryDate: "2999-01-01",
+        expiryDate: "2999-01-01" as string | null,
         isOpened: false,
       },
     ]),
@@ -191,6 +191,55 @@ describe("UC-06: ShoppingList - domain rules", () => {
       targetQuantity: 5,
       reason: "Masz 1 z 5",
       sourceAutoListIds: ["auto-1", "auto-2"],
+    });
+  });
+
+  it("keeps replenishment shortage consistent with displayed inventory count", async () => {
+    const {shoppingRepository, productRepository} = createRepositories();
+    shoppingRepository.getLists.mockResolvedValueOnce([
+      autoList,
+      {...autoList, id: "auto-2", name: "Minimum 2"},
+    ]);
+    shoppingRepository.getItems.mockImplementation(async (listId: string) =>
+      listId === autoList.id
+        ? [
+            {
+              ...milkItem,
+              id: "text-milk",
+              catalogProductId: null,
+              label: "Mleko",
+              quantity: 7,
+            },
+          ]
+        : [{...milkItem, id: "specific-milk", listId, quantity: 13}],
+    );
+    productRepository.getFullInventory.mockResolvedValueOnce([
+      ...Array.from({length: 7}, (_, index) => ({
+        id: `inv-no-expiry-${index}`,
+        ean: "111",
+        name: "Mleko",
+        expiryDate: null,
+        isOpened: false,
+      })),
+      {
+        id: "inv-with-expiry",
+        ean: "111",
+        name: "Mleko",
+        expiryDate: "2999-01-01",
+        isOpened: false,
+      },
+    ]);
+    const shoppingList = new ShoppingList(shoppingRepository as any, productRepository as any);
+
+    const suggestions = await shoppingList.generateReplenishmentSuggestions();
+
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]).toMatchObject({
+      catalogProductId: "catalog-specific-111",
+      currentQuantity: 8,
+      missingQuantity: 5,
+      targetQuantity: 13,
+      reason: "Masz 8 z 13",
     });
   });
 
