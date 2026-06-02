@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from './theme/colors';
 import { ProductRepository } from './infrastructure/ProductRepository';
 import {
-  QWEN2_5_3B_QUANTIZED,
+  QWEN2_5_1_5B_QUANTIZED,
   Message,
   useLLM,
 } from 'react-native-executorch';
@@ -50,6 +50,22 @@ function normalizeLlmOutput(response: unknown): string {
   }
 }
 
+function inferPromptKind(systemPrompt: string, userPrompt: string): string {
+  const system = systemPrompt.toLowerCase();
+  const user = userPrompt.toLowerCase();
+
+  if (system.includes('normalize ingredient names')) {
+    return 'normalization';
+  }
+  if (system.includes('recipe ideation assistant')) {
+    return 'recipe-generation';
+  }
+  if (user.includes('text to repair')) {
+    return 'json-repair';
+  }
+  return 'unknown';
+}
+
 const repo = new ProductRepository();
 
 export default function RecipeGeneratorView({ onRequestClose }: RecipeGeneratorViewProps) {
@@ -60,7 +76,7 @@ export default function RecipeGeneratorView({ onRequestClose }: RecipeGeneratorV
   const checkModelDownloaded = useCallback(async () => {
     try {
       const downloaded = await BareResourceFetcher.listDownloadedModels();
-      const modelFileName = QWEN2_5_3B_QUANTIZED.modelSource.split('/').pop()?.toLowerCase();
+      const modelFileName = QWEN2_5_1_5B_QUANTIZED.modelSource.split('/').pop()?.toLowerCase();
       if (!modelFileName) {
         return false;
       }
@@ -165,7 +181,7 @@ export default function RecipeGeneratorView({ onRequestClose }: RecipeGeneratorV
 }
 
 function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }) {
-  const llm = useLLM({model: QWEN2_5_3B_QUANTIZED});
+  const llm = useLLM({model: QWEN2_5_1_5B_QUANTIZED});
   const [screen, setScreen] = useState<FlowScreen>('preferences');
   const [dishType, setDishType] = useState<DishType>('dinner');
   const [diet, setDiet] = useState<DietPreference>('none');
@@ -175,21 +191,54 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [isRunningPipeline, setIsRunningPipeline] = useState(false);
   const [remountKey, setRemountKey] = useState(0);
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [debugEvents, setDebugEvents] = useState<string[]>([]);
+  const [debugDbSnapshot, setDebugDbSnapshot] = useState('');
+  const debugEnabledRef = useRef(false);
 
   const pendingCloseRef = useRef(false);
   const generationConfiguredRef = useRef(false);
+  const debugSeqRef = useRef(0);
+
+  useEffect(() => {
+    debugEnabledRef.current = debugEnabled;
+  }, [debugEnabled]);
+
+  const pushDebugEvent = useCallback((label: string, payload?: unknown) => {
+    if (!debugEnabledRef.current) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    debugSeqRef.current += 1;
+    const payloadText =
+      payload === undefined
+        ? ''
+        : `\n${typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2)}`;
+    const entry = `[${debugSeqRef.current}] ${timestamp} ${label}${payloadText}`;
+
+    console.log('[RecipeDebug]', label, payload);
+    setDebugEvents(prev => [entry, ...prev].slice(0, 40));
+  }, []);
 
   const modelClient = useMemo(
     () => ({
       complete: async (systemPrompt: string, userPrompt: string): Promise<string> => {
+        const kind = inferPromptKind(systemPrompt, userPrompt);
+        pushDebugEvent(`llm request (${kind})`, {
+          systemPrompt,
+          userPrompt,
+        });
         const response = await llm.generate([
           { role: 'system', content: systemPrompt } as Message,
           { role: 'user', content: userPrompt } as Message,
         ]);
-        return normalizeLlmOutput(response);
+        const normalizedResponse = normalizeLlmOutput(response);
+        pushDebugEvent(`llm response (${kind})`, normalizedResponse);
+        return normalizedResponse;
       },
     }),
-    [llm],
+    [llm, pushDebugEvent],
   );
 
   const lazyNormalizationService = useMemo(
@@ -261,6 +310,7 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
         batchTimeInterval: 500,
         temperature: 0.35,
         topP: 0.9,
+        //repetitionPenalty: 1.1,
       },
     });
   }, [llm.isReady, llm.error]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -278,17 +328,28 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
     }
 
     try {
+      pushDebugEvent('pipeline started', { dishType, diet });
       const result = await pipeline.run(
         {
           dishType,
           diet,
           maxDishes: 5,
+          normalizationBatchSize: 10,
         },
-        stage => setProgressStage(stage),
+        stage => {
+          pushDebugEvent('pipeline stage', stage);
+          setProgressStage(stage);
+        },
       );
+      pushDebugEvent('pipeline finished', {
+        dishes: result.dishes,
+        normalization: result.normalization,
+        retriesUsed: result.retriesUsed,
+      });
       setDishes(result.dishes);
       setScreen('results');
     } catch (error) {
+      pushDebugEvent('pipeline error', String(error));
       if (error instanceof RecipeGenerationError) {
         if (error.code === 'EMPTY_PANTRY') {
           setGenerateError('Spiżarnia jest pusta. Dodaj produkty i spróbuj ponownie.');
@@ -305,6 +366,58 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
       setIsRunningPipeline(false);
     }
   }, [diet, dishType, llm.isReady, pipeline]);
+
+  const refreshDebugSnapshot = useCallback(async () => {
+    try {
+      const snapshot = await repo.getDebugSnapshot(300);
+      const snapshotText = JSON.stringify(snapshot, null, 2);
+      setDebugDbSnapshot(snapshotText);
+      pushDebugEvent('sqlite snapshot refreshed', snapshot);
+    } catch (error) {
+      const message = `Nie udało się pobrać snapshotu SQLite: ${String(error)}`;
+      setDebugDbSnapshot(message);
+      pushDebugEvent('sqlite snapshot error', message);
+    }
+  }, [pushDebugEvent]);
+
+  const resetNormalizedNames = useCallback(async () => {
+    try {
+      const changed = await repo.resetAllNormalizedNames();
+      pushDebugEvent('normalized names reset', { changed });
+      await refreshDebugSnapshot();
+    } catch (error) {
+      pushDebugEvent('normalized names reset error', String(error));
+    }
+  }, [pushDebugEvent, refreshDebugSnapshot]);
+
+  useEffect(() => {
+    if (!__DEV__) {
+      return;
+    }
+
+    (globalThis as any).__SHELFCHEF_DEBUG__ = {
+      resetNormalizedNames: async () => {
+        const changed = await repo.resetAllNormalizedNames();
+        console.log('[ShelfChefDebug] resetNormalizedNames changed:', changed);
+        return changed;
+      },
+      getDbSnapshot: async (limit = 200) => {
+        const snapshot = await repo.getDebugSnapshot(limit);
+        console.log('[ShelfChefDebug] getDbSnapshot', snapshot);
+        return snapshot;
+      },
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!debugEnabled) {
+      return;
+    }
+    if (debugDbSnapshot) {
+      return;
+    }
+    refreshDebugSnapshot().catch(() => {});
+  }, [debugEnabled, debugDbSnapshot, refreshDebugSnapshot]);
 
   const retryModel = useCallback(() => {
     setGenerateError(null);
@@ -358,6 +471,24 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
                 generate().catch(() => {});
               }}
               onRetryModel={retryModel}
+              debugEnabled={debugEnabled}
+              debugSnapshot={debugDbSnapshot}
+              debugEvents={debugEvents}
+              onToggleDebug={() => {
+                setDebugEnabled(prev => {
+                  const next = !prev;
+                  if (next) {
+                    pushDebugEvent('debug mode enabled');
+                  }
+                  return next;
+                });
+              }}
+              onRefreshDebugSnapshot={() => {
+                refreshDebugSnapshot().catch(() => {});
+              }}
+              onResetNormalizedNames={() => {
+                resetNormalizedNames().catch(() => {});
+              }}
             />
           ) : null}
 

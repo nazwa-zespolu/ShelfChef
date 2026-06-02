@@ -11,6 +11,12 @@ export interface NormalizationUpdateRecord {
   normalizedName: string;
 }
 
+export interface ProductRepositoryDebugSnapshot {
+  productDefinitions: Record<string, unknown>[];
+  inventory: Record<string, unknown>[];
+  appSettings: Record<string, unknown>[];
+}
+
 export class ProductRepository {
   private static readonly RECIPE_MODEL_CONSENT_KEY = 'recipe_model_download_consent';
 
@@ -108,6 +114,28 @@ export class ProductRepository {
     return updatedCount;
   }
 
+  async resetAllNormalizedNames(): Promise<number> {
+    const before = db.execute(
+      `SELECT COUNT(*) AS count
+       FROM product_definitions
+       WHERE normalized_name IS NOT NULL
+         AND TRIM(normalized_name) <> ''`,
+    );
+    const resetCount =
+      before.rows && before.rows.length > 0
+        ? Number(before.rows.item(0).count ?? 0)
+        : 0;
+
+    db.execute(
+      `UPDATE product_definitions
+       SET normalized_name = NULL
+       WHERE normalized_name IS NOT NULL
+         AND TRIM(normalized_name) <> ''`,
+    );
+
+    return resetCount;
+  }
+
   async getRecipeIngredientNames(): Promise<string[]> {
     const result = db.execute(
       `SELECT i.custom_name, d.normalized_name, d.name
@@ -134,6 +162,44 @@ export class ProductRepository {
     }
 
     return names;
+  }
+
+  async getDebugSnapshot(limit = 200): Promise<ProductRepositoryDebugSnapshot> {
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 200;
+
+    const productDefinitions = this.rowsToArray(
+      db.execute(
+        `SELECT ean, name, normalized_name, brand, category
+         FROM product_definitions
+         ORDER BY ean
+         LIMIT ?`,
+        [safeLimit],
+      ),
+    );
+    const inventory = this.rowsToArray(
+      db.execute(
+        `SELECT id, product_ean, custom_name, expiry_date, is_opened, opened_at
+         FROM inventory
+         ORDER BY expiry_date ASC
+         LIMIT ?`,
+        [safeLimit],
+      ),
+    );
+    const appSettings = this.rowsToArray(
+      db.execute(
+        `SELECT key, value
+         FROM app_settings
+         ORDER BY key
+         LIMIT ?`,
+        [safeLimit],
+      ),
+    );
+
+    return {
+      productDefinitions,
+      inventory,
+      appSettings,
+    };
   }
 
   async getFullInventory(): Promise<InventoryItem[]> {
@@ -192,5 +258,19 @@ export class ProductRepository {
       'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
       [ProductRepository.RECIPE_MODEL_CONSENT_KEY, granted ? '1' : '0'],
     );
+  }
+
+  private rowsToArray(result: {
+    rows?: { length: number; item: (index: number) => Record<string, unknown> };
+  }): Record<string, unknown>[] {
+    if (!result.rows) {
+      return [];
+    }
+
+    const out: Record<string, unknown>[] = [];
+    for (let i = 0; i < result.rows.length; i++) {
+      out.push(result.rows.item(i));
+    }
+    return out;
   }
 }

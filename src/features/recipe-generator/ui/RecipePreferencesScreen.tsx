@@ -13,6 +13,12 @@ type Props = {
   onDietChange: (value: DietPreference) => void;
   onStart: () => void;
   onRetryModel: () => void;
+  debugEnabled: boolean;
+  debugSnapshot: string;
+  debugEvents: string[];
+  onToggleDebug: () => void;
+  onRefreshDebugSnapshot: () => void;
+  onResetNormalizedNames: () => void;
 };
 
 const DISH_TYPES: { value: DishType; label: string }[] = [
@@ -43,6 +49,12 @@ export function RecipePreferencesScreen({
   onDietChange,
   onStart,
   onRetryModel,
+  debugEnabled,
+  debugSnapshot,
+  debugEvents,
+  onToggleDebug,
+  onRefreshDebugSnapshot,
+  onResetNormalizedNames,
 }: Props) {
   return (
     <View style={styles.body}>
@@ -109,6 +121,42 @@ export function RecipePreferencesScreen({
         style={[styles.primaryButton, !isModelReady && styles.primaryButtonDisabled]}>
         <Text style={styles.primaryButtonText}>Generuj propozycje</Text>
       </Pressable>
+
+      <View style={styles.debugCard}>
+        <View style={styles.debugHeader}>
+          <Text style={styles.cardTitle}>Debug</Text>
+          <Pressable style={styles.secondaryButton} onPress={onToggleDebug}>
+            <Text style={styles.secondaryButtonText}>
+              {debugEnabled ? 'Wylacz' : 'Wlacz'}
+            </Text>
+          </Pressable>
+        </View>
+
+        {debugEnabled ? (
+          <View style={styles.debugBody}>
+            <Pressable style={styles.secondaryButton} onPress={onRefreshDebugSnapshot}>
+              <Text style={styles.secondaryButtonText}>Odswiez snapshot SQLite</Text>
+            </Pressable>
+            <Pressable style={styles.secondaryButton} onPress={onResetNormalizedNames}>
+              <Text style={styles.secondaryButtonText}>Reset normalized_name</Text>
+            </Pressable>
+
+            <Text style={styles.debugLabel}>Ostatnie logi</Text>
+            <Text style={styles.debugBlock}>
+              {debugEvents.length > 0 ? debugEvents.join('\n\n') : 'Brak logow debug.'}
+            </Text>
+
+            <Text style={styles.debugLabel}>Snapshot bazy</Text>
+            <Text style={styles.debugBlock}>
+              {debugSnapshot || 'Kliknij "Odswiez snapshot SQLite".'}
+            </Text>
+          </View>
+        ) : (
+          <Text style={styles.cardLine}>
+            Po wlaczeniu debug zobaczysz prompty, odpowiedzi modelu i stan SQLite.
+          </Text>
+        )}
+      </View>
     </View>
   );
 }
@@ -200,5 +248,38 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontWeight: '700',
     fontSize: 13,
+  },
+  debugCard: {
+    marginTop: 8,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    borderColor: colors.border,
+    borderWidth: 1,
+    padding: 12,
+    gap: 10,
+  },
+  debugHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  debugBody: {
+    gap: 10,
+  },
+  debugLabel: {
+    color: colors.textPrimary,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  debugBlock: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 10,
   },
 });
