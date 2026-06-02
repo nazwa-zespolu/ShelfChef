@@ -32,6 +32,35 @@ type CatalogIndex = {
   specificByEan: Map<string, CatalogProduct>;
 };
 
+function formatDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeExpiryDateKey(value: string | null): string | null {
+  if (value == null || value.trim() === '') {
+    return null;
+  }
+  const trimmed = value.trim();
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  }
+  const polishMatch = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (polishMatch) {
+    const day = polishMatch[1].padStart(2, '0');
+    const month = polishMatch[2].padStart(2, '0');
+    return `${polishMatch[3]}-${month}-${day}`;
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return formatDateKey(parsed);
+}
+
 export class ShoppingList {
   private shoppingRepository?: ShoppingListRepository;
   private productRepository?: ProductRepository;
@@ -248,11 +277,12 @@ export class ShoppingList {
   }
 
   private async loadFreshInventory(): Promise<InventoryItem[]> {
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = formatDateKey(new Date());
     const inventory = await this.requireProductRepository().getFullInventory();
-    return inventory.filter(
-      item => item.expiryDate == null || item.expiryDate >= todayIso,
-    );
+    return inventory.filter(item => {
+      const expiryDate = normalizeExpiryDateKey(item.expiryDate);
+      return expiryDate == null || expiryDate >= todayIso;
+    });
   }
 
   private toEffectiveAutoItemState(

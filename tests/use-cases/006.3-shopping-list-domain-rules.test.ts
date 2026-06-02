@@ -225,7 +225,7 @@ describe("UC-06: ShoppingList - domain rules", () => {
         id: "inv-with-expiry",
         ean: "111",
         name: "Mleko",
-        expiryDate: "2999-01-01",
+        expiryDate: "03.06.2999",
         isOpened: false,
       },
     ]);
