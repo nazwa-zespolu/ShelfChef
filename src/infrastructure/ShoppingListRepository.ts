@@ -53,6 +53,7 @@ function mapCatalogProduct(row: Record<string, any>): CatalogProduct {
     normalizedName: row.normalized_name,
     kind: row.kind,
     productEan: row.product_ean ?? null,
+    imageUrl: row.image_url ?? null,
     parentCatalogProductId: row.parent_catalog_product_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -84,6 +85,7 @@ function mapShoppingItem(row: Record<string, any>): ShoppingListItem {
     label: row.label,
     iconKey: row.icon_key ?? 'box',
     iconColorKey: row.icon_color_key ?? 'green',
+    imageUrl: row.image_url ?? null,
     quantity: Number(row.quantity),
     sortOrder: Number(row.sort_order ?? 0),
     status: row.status,
@@ -219,10 +221,14 @@ export class ShoppingListRepository {
   async getItems(listId: string): Promise<ShoppingListItem[]> {
     const result = db.execute(
       `
-        SELECT *
-        FROM shopping_list_items
-        WHERE list_id = ?
-        ORDER BY sort_order ASC, created_at ASC
+        SELECT
+          item.*,
+          definition.image_url
+        FROM shopping_list_items item
+        LEFT JOIN product_catalog catalog ON item.catalog_product_id = catalog.id
+        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
+        WHERE item.list_id = ?
+        ORDER BY item.sort_order ASC, item.created_at ASC
       `,
       [listId],
     );
@@ -238,9 +244,12 @@ export class ShoppingListRepository {
   async getCatalogProducts(): Promise<CatalogProduct[]> {
     const result = db.execute(
       `
-        SELECT *
-        FROM product_catalog
-        ORDER BY kind ASC, name ASC
+        SELECT
+          catalog.*,
+          definition.image_url
+        FROM product_catalog catalog
+        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
+        ORDER BY catalog.kind ASC, catalog.name ASC
       `,
     );
     const products: CatalogProduct[] = [];
@@ -309,6 +318,7 @@ export class ShoppingListRepository {
       label: input.label.trim(),
       iconKey: input.iconKey ?? 'box',
       iconColorKey: input.iconColorKey ?? 'green',
+      imageUrl: null,
       quantity,
       sortOrder,
       status,
@@ -448,13 +458,24 @@ export class ShoppingListRepository {
       kind: 'generic',
       productEan: null,
       parentCatalogProductId: null,
+      imageUrl: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
   }
 
   async findCatalogProductById(id: string): Promise<CatalogProduct | null> {
-    const result = db.execute('SELECT * FROM product_catalog WHERE id = ?', [id]);
+    const result = db.execute(
+      `
+        SELECT
+          catalog.*,
+          definition.image_url
+        FROM product_catalog catalog
+        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
+        WHERE catalog.id = ?
+      `,
+      [id],
+    );
     if (!result.rows || result.rows.length === 0) {
       return null;
     }
@@ -466,7 +487,15 @@ export class ShoppingListRepository {
     normalizedName: string,
   ): Promise<CatalogProduct | null> {
     const result = db.execute(
-      'SELECT * FROM product_catalog WHERE kind = ? AND normalized_name = ?',
+      `
+        SELECT
+          catalog.*,
+          definition.image_url
+        FROM product_catalog catalog
+        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
+        WHERE catalog.kind = ?
+          AND catalog.normalized_name = ?
+      `,
       [kind, normalizedName],
     );
     if (!result.rows || result.rows.length === 0) {
@@ -479,10 +508,13 @@ export class ShoppingListRepository {
     const q = `%${normalizeProductName(query)}%`;
     const result = db.execute(
       `
-        SELECT *
-        FROM product_catalog
-        WHERE normalized_name LIKE ?
-        ORDER BY kind ASC, name ASC
+        SELECT
+          catalog.*,
+          definition.image_url
+        FROM product_catalog catalog
+        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
+        WHERE catalog.normalized_name LIKE ?
+        ORDER BY catalog.kind ASC, catalog.name ASC
         LIMIT 20
       `,
       [q],
@@ -729,11 +761,13 @@ export class ShoppingListRepository {
           catalog.normalized_name,
           catalog.kind,
           catalog.product_ean,
+          definition.image_url,
           catalog.parent_catalog_product_id,
           catalog.created_at,
           catalog.updated_at
         FROM shopping_list_item_catalog_products link
         INNER JOIN product_catalog catalog ON catalog.id = link.catalog_product_id
+        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
         WHERE link.item_id IN (${placeholders})
         ORDER BY catalog.name ASC
       `,

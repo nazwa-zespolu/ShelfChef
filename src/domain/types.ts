@@ -21,6 +21,7 @@ export interface CatalogProduct {
   normalizedName: string;
   kind: CatalogProductKind;
   productEan: string | null;
+  imageUrl: string | null;
   parentCatalogProductId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -58,6 +59,7 @@ export interface ShoppingListItem {
   label: string;
   iconKey: ShoppingListIconKey;
   iconColorKey: ShoppingListIconColorKey;
+  imageUrl: string | null;
   quantity: number;
   sortOrder: number;
   status: ShoppingItemStatus;
@@ -80,6 +82,7 @@ export interface ShoppingSuggestion {
   normalizedName: string;
   iconKey?: ShoppingListIconKey;
   iconColorKey?: ShoppingListIconColorKey;
+  imageUrl?: string | null;
   missingQuantity: number;
   currentQuantity: number;
   targetQuantity: number;

@@ -12,6 +12,7 @@ function mapCatalogProduct(row: Record<string, any>): CatalogProduct {
     normalizedName: row.normalized_name,
     kind: row.kind,
     productEan: row.product_ean ?? null,
+    imageUrl: row.image_url ?? null,
     parentCatalogProductId: row.parent_catalog_product_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -77,7 +78,17 @@ export class ProductRepository {
   }
 
   async findCatalogProductByEan(ean: string): Promise<CatalogProduct | null> {
-    const result = db.execute('SELECT * FROM product_catalog WHERE product_ean = ?', [ean]);
+    const result = db.execute(
+      `
+        SELECT
+          catalog.*,
+          definition.image_url
+        FROM product_catalog catalog
+        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
+        WHERE catalog.product_ean = ?
+      `,
+      [ean],
+    );
     if (!result.rows || result.rows.length === 0) {
       return null;
     }

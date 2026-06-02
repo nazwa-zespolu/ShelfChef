@@ -6,6 +6,7 @@ import {
   BackHandler,
   type DimensionValue,
   FlatList,
+  Image,
   Keyboard,
   Modal,
   PanResponder,
@@ -18,7 +19,7 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Check, ClipboardList, Link, Lock, Package, Plus, RefreshCcw, Search, ShoppingBag, Unlock} from 'lucide-react-native';
+import {Check, ClipboardList, Link, Lock, Plus, RefreshCcw, Search, ShoppingBag, Unlock} from 'lucide-react-native';
 import {
   AutoShoppingListItemState,
   CatalogProduct,
@@ -701,6 +702,7 @@ export default function ShoppingListView({
             <ShoppingItemIconBubble
               iconKey={item.iconKey ?? 'box'}
               iconColorKey={item.iconColorKey ?? DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY}
+              imageUrl={item.imageUrl}
             />
             <View style={styles.suggestionItemText}>
               <Text style={styles.manualItemTitle} numberOfLines={1}>{item.name}</Text>
@@ -1261,6 +1263,7 @@ function ManualShoppingItemRow({
             <ShoppingItemIconBubble
               iconKey={item.iconKey}
               iconColorKey={item.iconColorKey}
+              imageUrl={item.imageUrl}
               purchased={isPurchased}
             />
           </View>
@@ -1340,7 +1343,11 @@ function AutoShoppingItemRow({
       allowRightDelete={false}
       onDelete={() => { onDelete(item.id).catch(() => {}); }}>
       <View style={styles.autoItemCard}>
-        <ShoppingItemIconBubble iconKey={item.iconKey} iconColorKey={item.iconColorKey} />
+        <ShoppingItemIconBubble
+          iconKey={item.iconKey}
+          iconColorKey={item.iconColorKey}
+          imageUrl={item.imageUrl}
+        />
         <View style={styles.autoItemText}>
           <Text style={styles.manualItemTitle} numberOfLines={1}>{item.label}</Text>
           <Text style={styles.manualItemMeta} numberOfLines={1}>
@@ -1409,27 +1416,41 @@ function EmptyState({title}: {title: string}) {
 function ShoppingItemIconBubble({
   iconKey,
   iconColorKey,
+  imageUrl,
   purchased = false,
 }: {
   iconKey: ShoppingListIconKey;
   iconColorKey: ShoppingListIconColorKey;
+  imageUrl?: string | null;
   purchased?: boolean;
 }) {
+  const [imageFailed, setImageFailed] = useState(false);
   const icon = getShoppingListIconDefinition(iconKey);
   const iconColor = getShoppingListIconColorDefinition(iconColorKey);
   const Icon = icon.Icon;
+  const shouldShowImage = imageUrl != null && imageUrl.trim().length > 0 && !imageFailed;
   return (
     <View
       style={[
         styles.manualItemIcon,
         {backgroundColor: iconColor.background},
+        shouldShowImage && styles.manualItemImageBubble,
         purchased && styles.manualItemIconPurchased,
       ]}>
-      <Icon
-        color={purchased ? colors.success : iconColor.color}
-        size={24}
-        strokeWidth={2.1}
-      />
+      {shouldShowImage ? (
+        <Image
+          source={{uri: imageUrl}}
+          style={styles.manualItemImage}
+          resizeMode="cover"
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        <Icon
+          color={purchased ? colors.success : iconColor.color}
+          size={24}
+          strokeWidth={2.1}
+        />
+      )}
     </View>
   );
 }
@@ -1918,9 +1939,11 @@ function AddItemModal({
                 const active = selectedCatalog?.id === product.id;
                 return (
                   <View key={product.id} style={[styles.addItemCatalogCard, active && styles.addItemCatalogCardActive]}>
-                    <View style={styles.addItemProductIcon}>
-                      <Package color={colors.accent} size={25} strokeWidth={2.1} />
-                    </View>
+                    <ShoppingItemIconBubble
+                      iconKey="box"
+                      iconColorKey={DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY}
+                      imageUrl={product.imageUrl}
+                    />
                     <View style={styles.addItemProductText}>
                       <Text style={styles.addItemProductName} numberOfLines={1}>{product.name}</Text>
                       <Text style={styles.addItemProductMeta}>
@@ -2149,9 +2172,11 @@ function CatalogLinksModal({
                   keyboardShouldPersistTaps="handled">
                   {availableResults.map(product => (
                     <View key={product.id} style={styles.catalogLinkCard}>
-                      <View style={styles.catalogLinkIcon}>
-                        <Package color={colors.accent} size={25} strokeWidth={2.1} />
-                      </View>
+                      <ShoppingItemIconBubble
+                        iconKey="box"
+                        iconColorKey={DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY}
+                        imageUrl={product.imageUrl}
+                      />
                       <View style={styles.catalogLinkText}>
                         <Text style={styles.catalogLinkName} numberOfLines={1}>{product.name}</Text>
                         <Text style={styles.catalogLinkMeta}>
@@ -2186,9 +2211,11 @@ function CatalogLinksModal({
               {item && item.linkedCatalogProducts.length > 0 ? (
                 item.linkedCatalogProducts.map(product => (
                   <View key={product.id} style={styles.catalogLinkCard}>
-                    <View style={styles.catalogLinkIcon}>
-                      <Package color={colors.accent} size={25} strokeWidth={2.1} />
-                    </View>
+                    <ShoppingItemIconBubble
+                      iconKey="box"
+                      iconColorKey={DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY}
+                      imageUrl={product.imageUrl}
+                    />
                     <View style={styles.catalogLinkText}>
                       <Text style={styles.catalogLinkName} numberOfLines={1}>{product.name}</Text>
                       <Text style={styles.catalogLinkMeta}>
@@ -2758,14 +2785,6 @@ const styles = StyleSheet.create({
     shadowOffset: {width: 0, height: 6},
     elevation: 3,
   },
-  autoItemIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: 999,
-    backgroundColor: colors.surfaceSubtle,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   autoItemText: {
     flex: 1,
     minWidth: 0,
@@ -2827,6 +2846,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  manualItemImageBubble: {
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  manualItemImage: {
+    width: '100%',
+    height: '100%',
   },
   manualItemIconPurchased: {
     backgroundColor: colors.accentSoft,
@@ -3473,14 +3502,6 @@ const styles = StyleSheet.create({
     borderColor: colors.accent,
     backgroundColor: colors.accentSoft,
   },
-  addItemProductIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   addItemProductText: {
     flex: 1,
     minWidth: 0,
@@ -3712,14 +3733,6 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: {width: 0, height: 5},
     elevation: 3,
-  },
-  catalogLinkIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   catalogLinkText: {
     flex: 1,

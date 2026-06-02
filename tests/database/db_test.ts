@@ -78,6 +78,19 @@ const shoppingListItems = new Map<string, ShoppingListItemRow>();
 const shoppingListItemCatalogProducts = new Map<string, ShoppingListItemCatalogProductRow>();
 let userVersion = 0;
 
+const withCatalogImage = (row: ProductCatalogRow): Record<string, unknown> => ({
+  ...row,
+  image_url: row.product_ean ? productDefinitions.get(row.product_ean)?.image_url ?? null : null,
+});
+
+const withShoppingItemImage = (row: ShoppingListItemRow): Record<string, unknown> => {
+  const catalog = row.catalog_product_id ? productCatalog.get(row.catalog_product_id) : undefined;
+  return {
+    ...row,
+    image_url: catalog?.product_ean ? productDefinitions.get(catalog.product_ean)?.image_url ?? null : null,
+  };
+};
+
 const toRows = (data: Record<string, unknown>[]): SQLiteResult => ({
   rows: {
     length: data.length,
@@ -241,19 +254,53 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     return toRows([]);
   }
 
+  if (normalized.includes('FROM PRODUCT_CATALOG CATALOG')) {
+    const catalogRows = Array.from(productCatalog.values());
+    if (normalized.includes('WHERE CATALOG.PRODUCT_EAN = ?')) {
+      const row = catalogRows.find(item => item.product_ean === params[0]);
+      return toRows(row ? [withCatalogImage(row)] : []);
+    }
+    if (normalized.includes('WHERE CATALOG.ID = ?')) {
+      const row = productCatalog.get(params[0]);
+      return toRows(row ? [withCatalogImage(row)] : []);
+    }
+    if (normalized.includes('WHERE CATALOG.KIND = ?') && normalized.includes('CATALOG.NORMALIZED_NAME = ?')) {
+      const [kind, normalizedName] = params;
+      const row = catalogRows.find(
+        item => item.kind === kind && item.normalized_name === normalizedName,
+      );
+      return toRows(row ? [withCatalogImage(row)] : []);
+    }
+    if (normalized.includes('WHERE CATALOG.NORMALIZED_NAME LIKE ?')) {
+      const query = String(params[0]).split('%').join('');
+      return toRows(
+        catalogRows
+          .filter(item => item.normalized_name.includes(query))
+          .sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name))
+          .slice(0, 20)
+          .map(withCatalogImage),
+      );
+    }
+    return toRows(
+      catalogRows
+        .sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name))
+        .map(withCatalogImage),
+    );
+  }
+
   if (normalized.startsWith('SELECT * FROM PRODUCT_CATALOG')) {
     if (normalized.includes('WHERE PRODUCT_EAN = ?')) {
       const row = Array.from(productCatalog.values()).find(item => item.product_ean === params[0]);
-      return toRows(row ? [row] : []);
+      return toRows(row ? [withCatalogImage(row)] : []);
     }
     if (normalized.includes('WHERE KIND = ? AND NORMALIZED_NAME = ?')) {
       const [kind, normalizedName] = params;
       const row = Array.from(productCatalog.values()).find(
         item => item.kind === kind && item.normalized_name === normalizedName,
       );
-      return toRows(row ? [row] : []);
+      return toRows(row ? [withCatalogImage(row)] : []);
     }
-    return toRows(Array.from(productCatalog.values()));
+    return toRows(Array.from(productCatalog.values()).map(withCatalogImage));
   }
 
   if (normalized.startsWith('SELECT * FROM SHOPPING_LISTS')) {
@@ -269,13 +316,23 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     );
   }
 
+  if (normalized.includes('FROM SHOPPING_LIST_ITEMS ITEM')) {
+    const [listId] = params;
+    return toRows(
+      Array.from(shoppingListItems.values())
+        .filter(item => item.list_id === listId)
+        .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at))
+        .map(withShoppingItemImage),
+    );
+  }
+
   if (normalized.startsWith('SELECT * FROM SHOPPING_LIST_ITEMS')) {
     if (normalized.includes('WHERE LIST_ID = ? AND CATALOG_PRODUCT_ID = ?')) {
       const [listId, catalogProductId] = params;
       const row = Array.from(shoppingListItems.values())
         .filter(item => item.list_id === listId && item.catalog_product_id === catalogProductId)
         .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
-      return toRows(row ? [row] : []);
+      return toRows(row ? [withShoppingItemImage(row)] : []);
     }
     if (
       normalized.includes('WHERE LIST_ID = ? AND CATALOG_PRODUCT_ID IS NULL AND LOWER(TRIM(LABEL)) = ?')
@@ -289,17 +346,18 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
             item.label.trim().toLowerCase() === normalizedLabel,
         )
         .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
-      return toRows(row ? [row] : []);
+      return toRows(row ? [withShoppingItemImage(row)] : []);
     }
     if (normalized.includes('WHERE LIST_ID = ?')) {
       const [listId] = params;
       return toRows(
         Array.from(shoppingListItems.values())
           .filter(item => item.list_id === listId)
-          .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at)),
+          .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at))
+          .map(withShoppingItemImage),
       );
     }
-    return toRows(Array.from(shoppingListItems.values()));
+    return toRows(Array.from(shoppingListItems.values()).map(withShoppingItemImage));
   }
 
   if (normalized.startsWith('SELECT CATALOG_PRODUCT_ID FROM SHOPPING_LIST_ITEMS WHERE ID = ?')) {
@@ -317,7 +375,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       }
       const catalog = productCatalog.get(link.catalog_product_id);
       if (catalog) {
-        rows.push({item_id: link.item_id, ...catalog});
+        rows.push({item_id: link.item_id, ...withCatalogImage(catalog)});
       }
     }
     rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
@@ -749,7 +807,7 @@ describe('ProductRepository + database integration', () => {
       ean: '5901234123457',
       name: 'Mleko 2%',
       brand: 'Lacpol',
-      imageUrl: undefined,
+      imageUrl: 'https://img/mleko.jpg',
       category: 'Nabial',
     });
 
@@ -765,6 +823,9 @@ describe('ProductRepository + database integration', () => {
       kind: 'specific',
       product_ean: '5901234123457',
       parent_catalog_product_id: null,
+    });
+    await expect(repository.findCatalogProductByEan('5901234123457')).resolves.toMatchObject({
+      imageUrl: 'https://img/mleko.jpg',
     });
   });
 
@@ -918,7 +979,7 @@ describe('ProductRepository + database integration', () => {
       ean: '5901234123457',
       name: 'Mleko 2%',
       brand: 'Lacpol',
-      imageUrl: undefined,
+      imageUrl: 'https://img/mleko.jpg',
       category: 'Nabial',
     });
     const catalog = db.execute('SELECT * FROM product_catalog WHERE product_ean = ?', [
@@ -938,7 +999,9 @@ describe('ProductRepository + database integration', () => {
       id: 'catalog-specific-5901234123457',
       name: 'Mleko 2%',
       kind: 'specific',
+      imageUrl: 'https://img/mleko.jpg',
     });
+    expect(linkedItems[0].linkedCatalogProducts[0].imageUrl).toBe('https://img/mleko.jpg');
 
     await shoppingListRepository.unlinkCatalogProductFromItem(item.id, catalog.id as string);
     const unlinkedItems = await shoppingListRepository.getItems(list.id);

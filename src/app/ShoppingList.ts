@@ -178,6 +178,7 @@ export class ShoppingList {
             normalizedName,
             iconKey: item.iconKey,
             iconColorKey: item.iconColorKey,
+            imageUrl: item.imageUrl ?? catalogProduct?.imageUrl ?? null,
             missingQuantity,
             currentQuantity: displayQuantity,
             targetQuantity: item.quantity,
@@ -205,6 +206,7 @@ export class ShoppingList {
           existing.targetQuantity = item.quantity;
           existing.iconKey = item.iconKey;
           existing.iconColorKey = item.iconColorKey;
+          existing.imageUrl = item.imageUrl ?? catalogProduct?.imageUrl ?? null;
           existing.reason = this.buildMissingReason(displayQuantity, item.quantity);
           existing.priority = displayQuantity === 0 ? 'out' : 'low';
         }
