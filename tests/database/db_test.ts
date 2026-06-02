@@ -625,12 +625,17 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
         const definition = catalog?.product_ean
           ? productDefinitions.get(catalog.product_ean)
           : undefined;
+        const linkedSpecificEans = Array.from(shoppingListItemCatalogProducts.values())
+          .filter(link => link.item_id === item.id)
+          .map(link => productCatalog.get(link.catalog_product_id)?.product_ean ?? null)
+          .filter((ean): ean is string => ean != null);
         return {
           id: item.id,
           label: item.label,
           quantity: item.quantity,
           catalog_product_id: item.catalog_product_id,
           product_ean: definition?.ean ?? null,
+          linked_product_ean: linkedSpecificEans.length === 1 ? linkedSpecificEans[0] : null,
         };
       });
     return toRows(rows);
@@ -1223,6 +1228,37 @@ describe('ProductRepository + database integration', () => {
     expect(inventoryItems).toHaveLength(2);
     expect(inventoryItems[0].name).toBe('Mleko');
     expect(inventoryItems[1].name).toBe('Mleko');
+  });
+
+  it('finalizuje tekstową pozycję z jednoznacznym powiązaniem katalogowym jako produkt po EAN', async () => {
+    await repository.saveDefinition({
+      ean: '5901234123457',
+      name: 'Mleko 2%',
+      brand: 'Lacpol',
+      imageUrl: 'https://img/mleko.jpg',
+      category: 'Nabial',
+    });
+    const catalog = db.execute('SELECT * FROM product_catalog WHERE product_ean = ?', [
+      '5901234123457',
+    ]).rows!.item(0);
+    const manual = await shoppingListRepository.createList('Cotygodniowe', 'manual');
+    const item = await shoppingListRepository.addItem(manual.id, {
+      label: 'Mleko do kawy',
+      quantity: 1,
+      status: 'purchased',
+    });
+
+    await shoppingListRepository.linkCatalogProductToItem(item.id, catalog.id as string);
+    await shoppingListRepository.completePurchase(manual.id, {[item.id]: null});
+
+    const inventoryItems = await repository.getFullInventory();
+
+    expect(inventoryItems).toHaveLength(1);
+    expect(inventoryItems[0]).toMatchObject({
+      ean: '5901234123457',
+      name: 'Mleko 2%',
+      imageUrl: 'https://img/mleko.jpg',
+    });
   });
 
   it('po finalizacji produktów z sugestii przestaje pokazywać je w Do uzupełnienia', async () => {

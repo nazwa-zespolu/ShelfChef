@@ -648,10 +648,24 @@ export class ShoppingListRepository {
             i.label,
             i.quantity,
             i.catalog_product_id,
-            d.ean AS product_ean
+            d.ean AS product_ean,
+            linked.linked_product_ean
           FROM shopping_list_items i
           LEFT JOIN product_catalog c ON i.catalog_product_id = c.id
           LEFT JOIN product_definitions d ON c.product_ean = d.ean
+          LEFT JOIN (
+            SELECT
+              link.item_id,
+              CASE
+                WHEN COUNT(catalog.product_ean) = 1 THEN MAX(catalog.product_ean)
+                ELSE NULL
+              END AS linked_product_ean
+            FROM shopping_list_item_catalog_products link
+            INNER JOIN product_catalog catalog ON catalog.id = link.catalog_product_id
+            WHERE catalog.kind = 'specific'
+              AND catalog.product_ean IS NOT NULL
+            GROUP BY link.item_id
+          ) linked ON linked.item_id = i.id
           WHERE i.list_id = ?
             AND i.status = 'purchased'
         `,
@@ -669,7 +683,7 @@ export class ShoppingListRepository {
               'INSERT INTO inventory (id, product_ean, custom_name, expiry_date) VALUES (?, ?, ?, ?)',
               [
                 inventoryId,
-                row.product_ean ?? null,
+                row.product_ean ?? row.linked_product_ean ?? null,
                 row.label,
                 expiryDateByItemId[row.id] ?? null,
               ],
