@@ -5,6 +5,7 @@ import {
   Alert,
   BackHandler,
   type DimensionValue,
+  Easing,
   FlatList,
   Image,
   Keyboard,
@@ -171,6 +172,8 @@ export default function ShoppingListView({
   const toastRunId = useRef(0);
   const [catalogLinksFeedback, setCatalogLinksFeedback] = useState<string | null>(null);
   const catalogLinksFeedbackRunId = useRef(0);
+  const hasPlayedSwipeHint = useRef(false);
+  const [swipeHintItemId, setSwipeHintItemId] = useState<string | null>(null);
 
   const manualLists = useMemo(() => lists.filter(list => list.type === 'manual'), [lists]);
   const filteredLists = useMemo(() => {
@@ -528,27 +531,39 @@ export default function ShoppingListView({
     if (!selectedCatalog && !productLabel) {
       return;
     }
+    const shouldPlaySwipeHint =
+      selectedList.type === 'manual' &&
+      items.length === 0 &&
+      lists.length <= 3 &&
+      !hasPlayedSwipeHint.current;
 
     setBusy(true);
     try {
+      let addedItemId: string | null = null;
       if (selectedCatalog) {
-        await shoppingList.addItem(selectedList.id, {
+        const addedItem = await shoppingList.addItem(selectedList.id, {
           catalogProductId: selectedCatalog.id,
           label: selectedCatalog.name,
           iconKey: addIconKey,
           iconColorKey: addIconColorKey,
           quantity,
         });
+        addedItemId = addedItem.id;
       } else {
-        await shoppingList.addItem(selectedList.id, {
+        const addedItem = await shoppingList.addItem(selectedList.id, {
           label: productLabel,
           iconKey: addIconKey,
           iconColorKey: addIconColorKey,
           quantity,
         });
+        addedItemId = addedItem.id;
       }
       setAddOpen(false);
       await loadSelectedList(selectedList);
+      if (shouldPlaySwipeHint && addedItemId) {
+        hasPlayedSwipeHint.current = true;
+        setSwipeHintItemId(addedItemId);
+      }
       const nextSuggestions = await shoppingList.generateReplenishmentSuggestions();
       setSuggestions(nextSuggestions);
       showToast(
@@ -559,7 +574,7 @@ export default function ShoppingListView({
     } finally {
       setBusy(false);
     }
-  }, [addIconColorKey, addIconKey, addQuantity, catalogQuery, loadSelectedList, selectedCatalog, selectedList, showToast]);
+  }, [addIconColorKey, addIconKey, addQuantity, catalogQuery, items.length, lists.length, loadSelectedList, selectedCatalog, selectedList, showToast]);
 
   const updateStatus = useCallback(
     async (itemId: string, status: ShoppingItemStatus) => {
@@ -738,11 +753,15 @@ export default function ShoppingListView({
       item={item}
       busy={busy}
       reorderEnabled={itemSearch.trim().length === 0}
+      playSwipeHint={swipeHintItemId === item.id}
       onDelete={deleteItem}
       onMove={moveItem}
       onUpdateQuantity={updateQuantity}
       onUpdateStatus={updateStatus}
       onOpenLinks={openCatalogLinks}
+      onSwipeHintComplete={() => {
+        setSwipeHintItemId(current => (current === item.id ? null : current));
+      }}
     />
   );
 
@@ -833,6 +852,9 @@ export default function ShoppingListView({
         ListEmptyComponent={
           <View style={styles.emptyBox}>
             <Text style={styles.emptyTitle}>Wszystko uzupełnione</Text>
+            <Text style={styles.emptyDescription}>
+              Braki z aktywnych list auto pojawią się tutaj.
+            </Text>
           </View>
         }
       />
@@ -899,7 +921,14 @@ export default function ShoppingListView({
             ]}
             renderItem={renderManualItem}
             ListEmptyComponent={
-              <EmptyState title={items.length === 0 ? 'Pusta lista' : 'Brak pasujących produktów'} />
+              items.length === 0 ? (
+                <EmptyState
+                  title="Dodaj pierwszy produkt"
+                  description="Przesuń w prawo, żeby oznaczyć jako kupiony. W lewo, żeby usunąć."
+                />
+              ) : (
+                <EmptyState title="Brak pasujących produktów" />
+              )
             }
           />
           <View style={[styles.manualBottomBar, {paddingBottom: insets.bottom + 10}]}>
@@ -993,7 +1022,14 @@ export default function ShoppingListView({
           ]}
           renderItem={renderAutoItem}
           ListEmptyComponent={
-            <EmptyState title={items.length === 0 ? 'Pusta lista' : 'Brak pasujących produktów'} />
+            items.length === 0 ? (
+              <EmptyState
+                title="Dodaj minimum zapasów"
+                description="Dodaj produkty, które chcesz mieć w zapasach. Braki pojawią się w Do uzupełnienia."
+              />
+            ) : (
+              <EmptyState title="Brak pasujących produktów" />
+            )
           }
         />
         <View style={[styles.manualBottomBar, {paddingBottom: insets.bottom + 10}]}>
@@ -1094,7 +1130,20 @@ export default function ShoppingListView({
         renderItem={renderListRow}
         ListHeaderComponent={renderReplenishmentTile}
         contentContainerStyle={styles.listContent}
-        ListEmptyComponent={<EmptyState title={lists.length === 0 ? 'Brak list' : 'Brak pasujących list'} />}
+        ListEmptyComponent={
+          lists.length === 0 ? (
+            <EmptyState
+              title="Zacznij od pierwszej listy"
+              description="Manualna sprawdzi się na zakupy, auto pokaże braki w zapasach."
+              details={[
+                'Przytrzymaj ikonę, aby zmienić kolejność.',
+                'Przesuń listę w lewo, aby usunąć.',
+              ]}
+            />
+          ) : (
+            <EmptyState title="Brak pasujących list" />
+          )
+        }
       />
     </View>
   );
@@ -1354,6 +1403,8 @@ function ManualShoppingItemRow({
   onUpdateQuantity,
   onUpdateStatus,
   onOpenLinks,
+  playSwipeHint,
+  onSwipeHintComplete,
 }: {
   item: AutoShoppingListItemState;
   busy: boolean;
@@ -1363,8 +1414,12 @@ function ManualShoppingItemRow({
   onUpdateQuantity: (id: string, quantity: number) => Promise<void>;
   onUpdateStatus: (id: string, status: ShoppingItemStatus) => Promise<void>;
   onOpenLinks: (item: AutoShoppingListItemState) => void;
+  playSwipeHint: boolean;
+  onSwipeHintComplete: () => void;
 }) {
   const translateY = useRef(new Animated.Value(0)).current;
+  const hintTranslateX = useRef(new Animated.Value(0)).current;
+  const hasPlayedThisHint = useRef(false);
   const dragActive = useRef(false);
   const dragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const movedAt = useRef(0);
@@ -1426,6 +1481,45 @@ function ManualShoppingItemRow({
     [item.id, onMove, reorderEnabled, resetPosition, translateY],
   );
 
+  React.useEffect(() => {
+    if (!playSwipeHint || hasPlayedThisHint.current) {
+      return;
+    }
+    hasPlayedThisHint.current = true;
+    hintTranslateX.setValue(0);
+    Animated.sequence([
+      Animated.delay(520),
+      Animated.timing(hintTranslateX, {
+        toValue: 86,
+        duration: 460,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.delay(170),
+      Animated.timing(hintTranslateX, {
+        toValue: 0,
+        useNativeDriver: true,
+        duration: 280,
+        easing: Easing.inOut(Easing.cubic),
+      }),
+      Animated.timing(hintTranslateX, {
+        toValue: -86,
+        duration: 460,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.delay(170),
+      Animated.timing(hintTranslateX, {
+        toValue: 0,
+        useNativeDriver: true,
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
+      }),
+    ]).start(() => {
+      onSwipeHintComplete();
+    });
+  }, [hintTranslateX, onSwipeHintComplete, playSwipeHint]);
+
   return (
     <SwipeToDeleteCard
       borderRadius={8}
@@ -1434,7 +1528,17 @@ function ManualShoppingItemRow({
       onSwipeRight={() => { onUpdateStatus(item.id, nextToggleStatus).catch(() => {}); }}
       rightLabel={isPurchased ? 'Cofnij' : 'Kupione'}
       rightActionTone={isPurchased ? 'warning' : 'success'}>
-      <Animated.View style={{transform: [{translateY}]}}>
+      {playSwipeHint ? (
+        <View pointerEvents="none" style={styles.swipeHintBackground}>
+          <View style={[styles.swipeHintAction, styles.swipeHintActionDone]}>
+            <Text style={styles.swipeHintActionText}>Kupione</Text>
+          </View>
+          <View style={[styles.swipeHintAction, styles.swipeHintActionDelete]}>
+            <Text style={styles.swipeHintActionText}>Usuń</Text>
+          </View>
+        </View>
+      ) : null}
+      <Animated.View style={{transform: [{translateY}, {translateX: hintTranslateX}]}}>
         <View
           style={[
             styles.manualItemCard,
@@ -1588,10 +1692,30 @@ function Header({title, onBack}: {title: string; onBack: () => void}) {
   );
 }
 
-function EmptyState({title}: {title: string}) {
+function EmptyState({
+  title,
+  description,
+  details = [],
+}: {
+  title: string;
+  description?: string;
+  details?: string[];
+}) {
   return (
     <View style={styles.emptyBox}>
       <Text style={styles.emptyTitle}>{title}</Text>
+      {description ? (
+        <Text style={styles.emptyDescription}>{description}</Text>
+      ) : null}
+      {details.length > 0 ? (
+        <View style={styles.emptyDetails}>
+          {details.map(detail => (
+            <Text key={detail} style={styles.emptyDetailText}>
+              {detail}
+            </Text>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -2991,6 +3115,31 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.14,
     elevation: 5,
   },
+  swipeHintBackground: {
+    ...StyleSheet.absoluteFill,
+    borderRadius: 8,
+    overflow: 'hidden',
+    flexDirection: 'row',
+  },
+  swipeHintAction: {
+    flex: 1,
+    minHeight: 78,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  swipeHintActionDone: {
+    alignItems: 'flex-start',
+    backgroundColor: colors.success,
+  },
+  swipeHintActionDelete: {
+    alignItems: 'flex-end',
+    backgroundColor: colors.danger,
+  },
+  swipeHintActionText: {
+    color: colors.successText,
+    fontSize: 13,
+    fontWeight: '900',
+  },
   autoItemCard: {
     minHeight: 78,
     borderRadius: 8,
@@ -3297,6 +3446,29 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 15,
     fontWeight: '700',
+    textAlign: 'center',
+  },
+  emptyDescription: {
+    maxWidth: 300,
+    color: colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 20,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  emptyDetails: {
+    marginTop: 12,
+    gap: 4,
+    alignItems: 'center',
+  },
+  emptyDetailText: {
+    maxWidth: 310,
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 19,
+    textAlign: 'center',
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFill,
