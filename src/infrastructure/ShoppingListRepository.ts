@@ -23,6 +23,12 @@ export type AddShoppingItemInput = {
   status?: ShoppingItemStatus;
 };
 
+export type UpdateShoppingListInput = {
+  name: string;
+  iconKey: ShoppingListIconKey;
+  iconColorKey: ShoppingListIconColorKey;
+};
+
 export type AddAllSuggestionsSummary = {
   added: number;
   reactivated: number;
@@ -168,6 +174,33 @@ export class ShoppingListRepository {
       return null;
     }
     return mapShoppingList(result.rows.item(0));
+  }
+
+  async updateList(
+    id: string,
+    input: UpdateShoppingListInput,
+  ): Promise<ShoppingListSummary> {
+    const name = input.name.trim();
+    if (!name) {
+      throw new Error('Shopping list name cannot be empty');
+    }
+    const timestamp = nowIso();
+    db.execute(
+      `
+        UPDATE shopping_lists
+        SET name = ?,
+            icon_key = ?,
+            icon_color_key = ?,
+            updated_at = ?
+        WHERE id = ?
+      `,
+      [name, input.iconKey, input.iconColorKey, timestamp, id],
+    );
+    const updated = await this.getListById(id);
+    if (!updated) {
+      throw new Error(`Shopping list not found: ${id}`);
+    }
+    return updated;
   }
 
   async deleteList(id: string): Promise<void> {

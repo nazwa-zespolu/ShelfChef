@@ -85,6 +85,19 @@ export class ShoppingList {
       : repository.createList(name, type, iconKey, iconColorKey);
   }
 
+  async updateList(
+    id: string,
+    name: string,
+    iconKey: ShoppingListIconKey,
+    iconColorKey: ShoppingListIconColorKey,
+  ): Promise<ShoppingListSummary> {
+    return this.requireShoppingRepository().updateList(id, {
+      name,
+      iconKey,
+      iconColorKey,
+    });
+  }
+
   async addItem(listId: string, input: AddShoppingItemInput): Promise<ShoppingListItem> {
     return this.requireShoppingRepository().addItem(listId, input);
   }

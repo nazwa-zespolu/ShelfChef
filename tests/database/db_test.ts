@@ -525,6 +525,19 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     return toRows([]);
   }
 
+  if (normalized.startsWith('UPDATE SHOPPING_LISTS SET NAME = ?')) {
+    const [name, iconKey, iconColorKey, updatedAt, id] = params;
+    const row = shoppingLists.get(id);
+    if (row) {
+      row.name = name;
+      row.icon_key = iconKey;
+      row.icon_color_key = iconColorKey;
+      row.updated_at = updatedAt;
+      shoppingLists.set(id, row);
+    }
+    return toRows([]);
+  }
+
   if (normalized.startsWith('INSERT INTO SHOPPING_LIST_ITEMS')) {
     const [id, listId, catalogProductId, label] = params;
     const hasExplicitStatus = params.length >= 12;
@@ -977,6 +990,26 @@ describe('ProductRepository + database integration', () => {
       source: 'manual',
     });
     expect(items.map(i => i.label)).toEqual(['Chleb', 'Mleko']);
+  });
+
+  it('edytuje nazwę, ikonę i kolor listy bez zmiany typu', async () => {
+    const list = await shoppingListRepository.createList('Cotygodniowe', 'manual', 'cart', 'blue');
+
+    const updated = await shoppingListRepository.updateList(list.id, {
+      name: 'Zakupy weekendowe',
+      iconKey: 'basket',
+      iconColorKey: 'amber',
+    });
+    const stored = await shoppingListRepository.getListById(list.id);
+
+    expect(updated).toMatchObject({
+      id: list.id,
+      name: 'Zakupy weekendowe',
+      type: 'manual',
+      iconKey: 'basket',
+      iconColorKey: 'amber',
+    });
+    expect(stored).toMatchObject(updated);
   });
 
   it('zapisuje powiązania pozycji listy z produktami katalogowymi', async () => {

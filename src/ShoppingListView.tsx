@@ -19,7 +19,7 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Check, ClipboardList, Link, Lock, Plus, RefreshCcw, Search, ShoppingBag, Unlock} from 'lucide-react-native';
+import {Check, ClipboardList, Link, Lock, Plus, RefreshCcw, Search, Settings, ShoppingBag, Unlock} from 'lucide-react-native';
 import {
   AutoShoppingListItemState,
   CatalogProduct,
@@ -142,6 +142,12 @@ export default function ShoppingListView({
   const [createIconColorKey, setCreateIconColorKey] = useState<ShoppingListIconColorKey>(
     DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY,
   );
+  const [editOpen, setEditOpen] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editIconKey, setEditIconKey] = useState<ShoppingListIconKey>('basket');
+  const [editIconColorKey, setEditIconColorKey] = useState<ShoppingListIconColorKey>(
+    DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY,
+  );
   const [addOpen, setAddOpen] = useState(false);
   const [addQuantity, setAddQuantity] = useState('1');
   const [addIconKey, setAddIconKey] = useState<ShoppingListIconKey>('box');
@@ -238,6 +244,10 @@ export default function ShoppingListView({
       setCreateOpen(false);
       return true;
     }
+    if (editOpen) {
+      setEditOpen(false);
+      return true;
+    }
     if (mode === 'details' || mode === 'suggestions') {
       setMode('lists');
       return true;
@@ -245,7 +255,7 @@ export default function ShoppingListView({
 
     onRequestClose();
     return true;
-  }, [addOpen, createOpen, linkingItem, mode, onRequestClose, pendingDeleteList]);
+  }, [addOpen, createOpen, editOpen, linkingItem, mode, onRequestClose, pendingDeleteList]);
 
   React.useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', goBackOneLevel);
@@ -302,6 +312,42 @@ export default function ShoppingListView({
       setBusy(false);
     }
   }, [createIconColorKey, createIconKey, createName, createType, loadLists, openList]);
+
+  const openEditList = useCallback(() => {
+    if (!selectedList) {
+      return;
+    }
+    setEditName(selectedList.name);
+    setEditIconKey(selectedList.iconKey);
+    setEditIconColorKey(selectedList.iconColorKey);
+    setEditOpen(true);
+  }, [selectedList]);
+
+  const updateListSettings = useCallback(async () => {
+    if (!selectedList) {
+      return;
+    }
+    const name = editName.trim();
+    if (!name) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const updated = await shoppingList.updateList(
+        selectedList.id,
+        name,
+        editIconKey,
+        editIconColorKey,
+      );
+      setEditOpen(false);
+      setSelectedList(updated);
+      setLists(current => current.map(list => (list.id === updated.id ? updated : list)));
+      await loadSelectedList(updated);
+      await loadLists();
+    } finally {
+      setBusy(false);
+    }
+  }, [editIconColorKey, editIconKey, editName, loadLists, loadSelectedList, selectedList]);
 
   const moveList = useCallback(async (listId: string, direction: -1 | 1) => {
     const currentIndex = lists.findIndex(list => list.id === listId);
@@ -748,7 +794,16 @@ export default function ShoppingListView({
                 <Text style={styles.manualTypeBadgeText}>Manualna</Text>
               </View>
             </View>
-            <Text style={styles.manualDetailsTitle} numberOfLines={1}>{selectedList.name}</Text>
+            <View style={styles.detailsTitleRow}>
+              <Text style={[styles.manualDetailsTitle, styles.detailsTitleText]} numberOfLines={1}>{selectedList.name}</Text>
+              <Pressable
+                onPress={openEditList}
+                accessibilityLabel="Ustawienia listy"
+                hitSlop={8}
+                style={({pressed}) => [styles.listSettingsButton, pressed && styles.pressed]}>
+                <Settings color={colors.accent} size={22} strokeWidth={2.2} />
+              </Pressable>
+            </View>
             <Text style={styles.manualDetailsMeta}>
               {pluralizeItems(totalCount)} · {purchasedLabel(purchasedCount)}
             </Text>
@@ -827,7 +882,16 @@ export default function ShoppingListView({
               </View>
             </View>
           </View>
-          <Text style={styles.manualDetailsTitle} numberOfLines={1}>{selectedList.name}</Text>
+          <View style={styles.detailsTitleRow}>
+            <Text style={[styles.manualDetailsTitle, styles.detailsTitleText]} numberOfLines={1}>{selectedList.name}</Text>
+            <Pressable
+              onPress={openEditList}
+              accessibilityLabel="Ustawienia listy"
+              hitSlop={8}
+              style={({pressed}) => [styles.listSettingsButton, pressed && styles.pressed]}>
+              <Settings color={colors.accent} size={22} strokeWidth={2.2} />
+            </Pressable>
+          </View>
           <Text style={styles.manualDetailsMeta}>
             {pluralizeItems(totalCount)} · {missingCount === 1 ? '1 do uzupełnienia' : `${missingCount} do uzupełnienia`}
           </Text>
@@ -977,8 +1041,9 @@ export default function ShoppingListView({
           <ActivityIndicator color={colors.success} />
         </View>
       ) : null}
-      <CreateListModal
+      <ListFormModal
         visible={createOpen}
+        mode="create"
         name={createName}
         type={createType}
         iconKey={createIconKey}
@@ -990,6 +1055,21 @@ export default function ShoppingListView({
         onChangeIconColorKey={setCreateIconColorKey}
         onClose={() => setCreateOpen(false)}
         onSubmit={createList}
+      />
+      <ListFormModal
+        visible={editOpen}
+        mode="edit"
+        name={editName}
+        type={selectedList?.type ?? 'manual'}
+        iconKey={editIconKey}
+        iconColorKey={editIconColorKey}
+        busy={busy}
+        onChangeName={setEditName}
+        onChangeType={() => {}}
+        onChangeIconKey={setEditIconKey}
+        onChangeIconColorKey={setEditIconColorKey}
+        onClose={() => setEditOpen(false)}
+        onSubmit={updateListSettings}
       />
       <AddItemModal
         visible={addOpen}
@@ -1455,8 +1535,9 @@ function ShoppingItemIconBubble({
   );
 }
 
-function CreateListModal({
+function ListFormModal({
   visible,
+  mode,
   name,
   type,
   iconKey,
@@ -1470,6 +1551,7 @@ function CreateListModal({
   onSubmit,
 }: {
   visible: boolean;
+  mode: 'create' | 'edit';
   name: string;
   type: ShoppingListType;
   iconKey: ShoppingListIconKey;
@@ -1482,6 +1564,7 @@ function CreateListModal({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const isEditing = mode === 'edit';
   const selectedIcon = getShoppingListIconDefinition(iconKey);
   const selectedColor = getShoppingListIconColorDefinition(iconColorKey);
   const SelectedIcon = selectedIcon.Icon;
@@ -1535,7 +1618,7 @@ function CreateListModal({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalBackdrop}>
         <Pressable
-          accessibilityLabel="Zamknij tworzenie listy"
+          accessibilityLabel={isEditing ? 'Zamknij ustawienia listy' : 'Zamknij tworzenie listy'}
           onPress={onClose}
           style={StyleSheet.absoluteFill}
         />
@@ -1543,8 +1626,12 @@ function CreateListModal({
           <View style={[styles.sheetHandleTouch, styles.addItemHandleTouch]} {...sheetDragResponder.panHandlers}>
             <View style={styles.sheetHandle} />
           </View>
-          <Text style={styles.createTitle}>Nowa lista zakupów</Text>
-          <Text style={styles.createSubtitle}>Nadaj nazwę i wybierz typ listy.</Text>
+          <Text style={styles.createTitle}>
+            {isEditing ? 'Ustawienia listy' : 'Nowa lista zakupów'}
+          </Text>
+          <Text style={styles.createSubtitle}>
+            {isEditing ? 'Zmień nazwę, ikonę i kolor listy.' : 'Nadaj nazwę i wybierz typ listy.'}
+          </Text>
           <View style={styles.createPreview}>
             <View style={[styles.createPreviewIcon, {backgroundColor: selectedColor.background}]}>
               <SelectedIcon color={selectedColor.color} size={30} strokeWidth={2.2} />
@@ -1566,39 +1653,43 @@ function CreateListModal({
             placeholderTextColor={colors.textMuted}
             style={[styles.input, styles.createInput]}
           />
-          <Text style={styles.fieldLabel}>Typ listy</Text>
-          <View style={styles.createTypeRow}>
-            {(['manual', 'auto'] as ShoppingListType[]).map(option => {
-              const active = type === option;
-              const TypeIcon = option === 'manual' ? ClipboardList : RefreshCcw;
-              const typeColor = option === 'manual' ? colors.accent : colors.warning;
-              return (
-                <Pressable
-                  key={option}
-                  onPress={() => onChangeType(option)}
-                  style={({pressed}) => [
-                    styles.createTypeOption,
-                    option === 'manual' ? styles.createTypeOptionManual : styles.createTypeOptionAuto,
-                    active && styles.createTypeOptionActive,
-                    active && (option === 'manual' ? styles.createTypeOptionManualActive : styles.createTypeOptionAutoActive),
-                    pressed && styles.pressed,
-                  ]}>
-                  <TypeIcon
-                    color={active ? typeColor : colors.textSecondary}
-                    size={20}
-                    strokeWidth={2.2}
-                  />
-                  <Text
-                    style={[
-                      styles.createTypeTitle,
-                      active && (option === 'manual' ? styles.createTypeTitleManualActive : styles.createTypeTitleAutoActive),
-                    ]}>
-                    {option === 'manual' ? 'Manualna' : 'Auto'}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          {!isEditing ? (
+            <>
+              <Text style={styles.fieldLabel}>Typ listy</Text>
+              <View style={styles.createTypeRow}>
+                {(['manual', 'auto'] as ShoppingListType[]).map(option => {
+                  const active = type === option;
+                  const TypeIcon = option === 'manual' ? ClipboardList : RefreshCcw;
+                  const typeColor = option === 'manual' ? colors.accent : colors.warning;
+                  return (
+                    <Pressable
+                      key={option}
+                      onPress={() => onChangeType(option)}
+                      style={({pressed}) => [
+                        styles.createTypeOption,
+                        option === 'manual' ? styles.createTypeOptionManual : styles.createTypeOptionAuto,
+                        active && styles.createTypeOptionActive,
+                        active && (option === 'manual' ? styles.createTypeOptionManualActive : styles.createTypeOptionAutoActive),
+                        pressed && styles.pressed,
+                      ]}>
+                      <TypeIcon
+                        color={active ? typeColor : colors.textSecondary}
+                        size={20}
+                        strokeWidth={2.2}
+                      />
+                      <Text
+                        style={[
+                          styles.createTypeTitle,
+                          active && (option === 'manual' ? styles.createTypeTitleManualActive : styles.createTypeTitleAutoActive),
+                        ]}>
+                        {option === 'manual' ? 'Manualna' : 'Auto'}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </>
+          ) : null}
           <View style={styles.iconHeaderRow}>
             <Text style={styles.iconHeaderLabel}>Ikona listy</Text>
             <ScrollView
@@ -1689,7 +1780,9 @@ function CreateListModal({
               (busy || name.trim().length === 0) && styles.disabled,
               pressed && styles.pressed,
           ]}>
-            <Text style={styles.createSubmitButtonText}>Utwórz listę</Text>
+            <Text style={styles.createSubmitButtonText}>
+              {isEditing ? 'Zapisz zmiany' : 'Utwórz listę'}
+            </Text>
           </Pressable>
         </Animated.View>
       </View>
@@ -2641,6 +2734,23 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: 38,
     fontWeight: '900',
+  },
+  detailsTitleRow: {
+    minHeight: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  detailsTitleText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  listSettingsButton: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   manualTypeBadge: {
     borderRadius: 8,
