@@ -166,6 +166,11 @@ export default function ShoppingListView({
   const [itemSearch, setItemSearch] = useState('');
   const [listFilter, setListFilter] = useState<ListFilter>('all');
   const [listStats, setListStats] = useState<Record<string, ShoppingListCardStats>>({});
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastAnim = useRef(new Animated.Value(0)).current;
+  const toastRunId = useRef(0);
+  const [catalogLinksFeedback, setCatalogLinksFeedback] = useState<string | null>(null);
+  const catalogLinksFeedbackRunId = useRef(0);
 
   const manualLists = useMemo(() => lists.filter(list => list.type === 'manual'), [lists]);
   const filteredLists = useMemo(() => {
@@ -187,6 +192,49 @@ export default function ShoppingListView({
     }
     return items.filter(item => item.label.toLowerCase().includes(query));
   }, [itemSearch, items]);
+
+  const toastTop = useMemo(() => {
+    return insets.top + 12;
+  }, [insets.top]);
+
+  const showToast = useCallback(
+    (message: string) => {
+      const runId = toastRunId.current + 1;
+      toastRunId.current = runId;
+      toastAnim.stopAnimation();
+      toastAnim.setValue(0);
+      setToastMessage(message);
+      Animated.sequence([
+        Animated.timing(toastAnim, {
+          toValue: 1,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+        Animated.delay(1450),
+        Animated.timing(toastAnim, {
+          toValue: 2,
+          duration: 240,
+          useNativeDriver: true,
+        }),
+      ]).start(({finished}) => {
+        if (finished && toastRunId.current === runId) {
+          setToastMessage(null);
+        }
+      });
+    },
+    [toastAnim],
+  );
+
+  const showCatalogLinksFeedback = useCallback((message: string) => {
+    const runId = catalogLinksFeedbackRunId.current + 1;
+    catalogLinksFeedbackRunId.current = runId;
+    setCatalogLinksFeedback(message);
+    setTimeout(() => {
+      if (catalogLinksFeedbackRunId.current === runId) {
+        setCatalogLinksFeedback(null);
+      }
+    }, 1800);
+  }, []);
 
   const loadLists = useCallback(async () => {
     setLoading(true);
@@ -308,10 +356,11 @@ export default function ShoppingListView({
       setCreateOpen(false);
       await loadLists();
       openList(created);
+      showToast(`Utworzono listę: ${created.name}`);
     } finally {
       setBusy(false);
     }
-  }, [createIconColorKey, createIconKey, createName, createType, loadLists, openList]);
+  }, [createIconColorKey, createIconKey, createName, createType, loadLists, openList, showToast]);
 
   const openEditList = useCallback(() => {
     if (!selectedList) {
@@ -344,10 +393,11 @@ export default function ShoppingListView({
       setLists(current => current.map(list => (list.id === updated.id ? updated : list)));
       await loadSelectedList(updated);
       await loadLists();
+      showToast('Zapisano ustawienia listy');
     } finally {
       setBusy(false);
     }
-  }, [editIconColorKey, editIconKey, editName, loadLists, loadSelectedList, selectedList]);
+  }, [editIconColorKey, editIconKey, editName, loadLists, loadSelectedList, selectedList, showToast]);
 
   const moveList = useCallback(async (listId: string, direction: -1 | 1) => {
     const currentIndex = lists.findIndex(list => list.id === listId);
@@ -371,15 +421,17 @@ export default function ShoppingListView({
     if (!pendingDeleteList) {
       return;
     }
+    const deletedListName = pendingDeleteList.name;
     setBusy(true);
     try {
       await shoppingRepository.deleteList(pendingDeleteList.id);
       setPendingDeleteList(null);
       await loadLists();
+      showToast(`Usunięto listę: ${deletedListName}`);
     } finally {
       setBusy(false);
     }
-  }, [loadLists, pendingDeleteList]);
+  }, [loadLists, pendingDeleteList, showToast]);
 
   const openAddItem = useCallback(() => {
     setAddQuantity('1');
@@ -409,6 +461,7 @@ export default function ShoppingListView({
     setLinkingItem(item);
     setLinkCatalogQuery('');
     setLinkCatalogResults([]);
+    setCatalogLinksFeedback(null);
   }, []);
 
   const searchCatalogLinks = useCallback(async (query: string) => {
@@ -435,11 +488,12 @@ export default function ShoppingListView({
         setLinkCatalogResults([]);
         const nextSuggestions = await shoppingList.generateReplenishmentSuggestions();
         setSuggestions(nextSuggestions);
+        showCatalogLinksFeedback(`Powiązano z katalogiem: ${product.name}`);
       } finally {
         setBusy(false);
       }
     },
-    [linkingItem, loadSelectedList, selectedList],
+    [linkingItem, loadSelectedList, selectedList, showCatalogLinksFeedback],
   );
 
   const unlinkCatalogProduct = useCallback(
@@ -454,11 +508,12 @@ export default function ShoppingListView({
         setLinkingItem(details.items.find(item => item.id === linkingItem.id) ?? null);
         const nextSuggestions = await shoppingList.generateReplenishmentSuggestions();
         setSuggestions(nextSuggestions);
+        showCatalogLinksFeedback('Usunięto powiązanie z katalogiem');
       } finally {
         setBusy(false);
       }
     },
-    [linkingItem, loadSelectedList, selectedList],
+    [linkingItem, loadSelectedList, selectedList, showCatalogLinksFeedback],
   );
 
   const addItem = useCallback(async () => {
@@ -496,10 +551,15 @@ export default function ShoppingListView({
       await loadSelectedList(selectedList);
       const nextSuggestions = await shoppingList.generateReplenishmentSuggestions();
       setSuggestions(nextSuggestions);
+      showToast(
+        selectedCatalog
+          ? `Dodano z katalogu: ${selectedCatalog.name}`
+          : `Dodano produkt tekstowy: ${productLabel}`,
+      );
     } finally {
       setBusy(false);
     }
-  }, [addIconColorKey, addIconKey, addQuantity, catalogQuery, loadSelectedList, selectedCatalog, selectedList]);
+  }, [addIconColorKey, addIconKey, addQuantity, catalogQuery, loadSelectedList, selectedCatalog, selectedList, showToast]);
 
   const updateStatus = useCallback(
     async (itemId: string, status: ShoppingItemStatus) => {
@@ -559,15 +619,17 @@ export default function ShoppingListView({
       if (!selectedList) {
         return;
       }
+      const deletedItemLabel = items.find(item => item.id === itemId)?.label ?? 'Produkt';
       setBusy(true);
       try {
         await shoppingRepository.deleteItem(itemId);
         await loadSelectedList(selectedList);
+        showToast(`Usunięto produkt: ${deletedItemLabel}`);
       } finally {
         setBusy(false);
       }
     },
-    [loadSelectedList, selectedList],
+    [items, loadSelectedList, selectedList, showToast],
   );
 
   const toggleLock = useCallback(async () => {
@@ -607,17 +669,22 @@ export default function ShoppingListView({
     }
     setBusy(true);
     try {
-      await shoppingList.addAllSuggestionsToList(targetListId);
+      const summary = await shoppingList.addAllSuggestionsToList(targetListId);
       const [nextLists, nextSuggestions] = await Promise.all([
         shoppingRepository.getLists(),
         shoppingList.generateReplenishmentSuggestions(),
       ]);
       setLists(nextLists);
       setSuggestions(nextSuggestions);
+      showToast(
+        summary.added + summary.reactivated > 0
+          ? 'Dodano sugestie do listy'
+          : 'Lista jest już aktualna',
+      );
     } finally {
       setBusy(false);
     }
-  }, [targetListId]);
+  }, [showToast, targetListId]);
 
   const completePurchase = useCallback(async () => {
     if (!selectedList) {
@@ -648,12 +715,13 @@ export default function ShoppingListView({
       await loadSelectedList(selectedList);
       await loadLists();
       onInventoryChanged?.();
+      showToast('Zakupy sfinalizowane');
     } catch (e) {
       console.error('[ShelfChef] refresh after completePurchase failed', e);
     } finally {
       setBusy(false);
     }
-  }, [items, loadLists, loadSelectedList, onInventoryChanged, selectedList]);
+  }, [items, loadLists, loadSelectedList, onInventoryChanged, selectedList, showToast]);
 
   const renderListRow = ({item}: {item: ShoppingListSummary}) => (
     <SortableListRow
@@ -1095,11 +1163,15 @@ export default function ShoppingListView({
         item={linkingItem}
         query={linkCatalogQuery}
         results={linkCatalogResults}
+        feedback={catalogLinksFeedback}
         busy={busy}
         onChangeQuery={query => searchCatalogLinks(query).catch(() => {})}
         onLink={product => { linkCatalogProduct(product).catch(() => {}); }}
         onUnlink={catalogProductId => { unlinkCatalogProduct(catalogProductId).catch(() => {}); }}
-        onClose={() => setLinkingItem(null)}
+        onClose={() => {
+          setLinkingItem(null);
+          setCatalogLinksFeedback(null);
+        }}
       />
       <DeleteListModal
         list={pendingDeleteList}
@@ -1107,6 +1179,37 @@ export default function ShoppingListView({
         onClose={() => setPendingDeleteList(null)}
         onSubmit={deleteList}
       />
+      {toastMessage ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.toastOverlay,
+            {
+              top: toastTop,
+              opacity: toastAnim.interpolate({
+                inputRange: [0, 1, 2],
+                outputRange: [0, 1, 0],
+              }),
+              transform: [
+                {
+                  translateY: toastAnim.interpolate({
+                    inputRange: [0, 1, 2],
+                    outputRange: [8, 0, -14],
+                  }),
+                },
+              ],
+            },
+          ]}>
+          <View style={styles.toastBubble}>
+            <View style={styles.toastIcon}>
+              <Check color={colors.successText} size={15} strokeWidth={3} />
+            </View>
+            <Text style={styles.toastText} numberOfLines={1}>
+              {toastMessage}
+            </Text>
+          </View>
+        </Animated.View>
+      ) : null}
     </View>
   );
 }
@@ -2131,6 +2234,7 @@ function CatalogLinksModal({
   item,
   query,
   results,
+  feedback,
   busy,
   onChangeQuery,
   onLink,
@@ -2140,6 +2244,7 @@ function CatalogLinksModal({
   item: AutoShoppingListItemState | null;
   query: string;
   results: CatalogProduct[];
+  feedback: string | null;
   busy: boolean;
   onChangeQuery: (query: string) => void;
   onLink: (product: CatalogProduct) => void;
@@ -2242,6 +2347,14 @@ function CatalogLinksModal({
           <Text style={styles.catalogLinksSubtitle}>
             Te produkty będą liczone jako ta pozycja
           </Text>
+          {feedback ? (
+            <View style={styles.catalogLinksFeedback}>
+              <Check color={colors.success} size={16} strokeWidth={3} />
+              <Text style={styles.catalogLinksFeedbackText} numberOfLines={1}>
+                {feedback}
+              </Text>
+            </View>
+          ) : null}
 
           <View style={styles.catalogLinksSearchBox}>
             <Search color={colors.textMuted} size={22} strokeWidth={2.1} />
@@ -3190,6 +3303,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  toastOverlay: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 1000,
+    elevation: 1000,
+    alignItems: 'center',
+  },
+  toastBubble: {
+    maxWidth: 520,
+    minHeight: 44,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: colors.success,
+    backgroundColor: colors.surfaceSubtle,
+    paddingVertical: 10,
+    paddingLeft: 12,
+    paddingRight: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  toastIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toastText: {
+    flexShrink: 1,
+    color: colors.textPrimary,
+    fontSize: 15,
+    fontWeight: '900',
+  },
   mergeBar: {
     paddingHorizontal: 16,
     paddingBottom: 14,
@@ -3818,7 +3967,26 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 14,
     textAlign: 'center',
-    marginBottom: 14,
+    marginBottom: 12,
+  },
+  catalogLinksFeedback: {
+    minHeight: 36,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.success,
+    backgroundColor: colors.surfaceSubtle,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  catalogLinksFeedbackText: {
+    flexShrink: 1,
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '900',
   },
   catalogLinksSectionTitle: {
     color: colors.textPrimary,
