@@ -20,11 +20,26 @@ export type RecipeGenerationProgressStage =
   | 'parsing'
   | 'done';
 
+export interface CategorizationProgress {
+  completed: number;
+  total: number;
+}
+
+export interface RecipeGenerationProgressEvent {
+  stage: RecipeGenerationProgressStage;
+  categorization?: CategorizationProgress;
+}
+
+export function dietRequiresCategorization(diet: DietPreference): boolean {
+  return diet !== 'none' && diet !== 'low-carb';
+}
+
 export interface RecipeGenerationRequest {
   dishType: DishType;
   diet: DietPreference;
   maxDishes?: number;
   categorizationBatchSize?: number;
+  skipCategorization?: boolean;
 }
 
 export interface RecipeGenerationResult {

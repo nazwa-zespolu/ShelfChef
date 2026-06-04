@@ -27,6 +27,7 @@ const createPipeline = (deps: {
 describe('RecipeGenerationPipeline', () => {
   it('runs happy path end-to-end with dietary filtering', async () => {
     const repository: Partial<ProductRepository> = {
+      countItemsPendingDietaryCategorization: jest.fn().mockResolvedValue(1),
       getItemsPendingDietaryCategorization: jest
         .fn()
         .mockResolvedValueOnce([{ productEan: '100', inventoryId: 'inv-1', name: 'Jajka' }])
@@ -80,11 +81,50 @@ describe('RecipeGenerationPipeline', () => {
       skipped: 0,
       retriesUsed: 0,
       failed: false,
+      skippedStage: false,
+    });
+  });
+
+  it('skips categorization stage when skipCategorization is true', async () => {
+    const repository: Partial<ProductRepository> = {
+      countItemsPendingDietaryCategorization: jest.fn(),
+      getItemsPendingDietaryCategorization: jest.fn(),
+      batchUpdateDietaryCategorization: jest.fn(),
+      getRecipeIngredientNames: jest.fn().mockResolvedValue(['Jajka']),
+    };
+    const lazyDietaryCategorizationService: Partial<LazyDietaryCategorizationService> = {
+      categorizeBatch: jest.fn(),
+    };
+    const complete = jest.fn<Promise<string>, [string, string]>(
+      async () => '{"dishes":["Omlet"]}',
+    );
+    const pipeline = createPipeline({
+      repository,
+      lazyDietaryCategorizationService,
+      complete,
+    });
+
+    const result = await pipeline.run({
+      dishType: 'dinner',
+      diet: 'none',
+      skipCategorization: true,
+    });
+
+    expect(result.dishes).toEqual(['Omlet']);
+    expect(repository.getItemsPendingDietaryCategorization).not.toHaveBeenCalled();
+    expect(result.categorization).toEqual({
+      attempted: 0,
+      categorized: 0,
+      skipped: 0,
+      retriesUsed: 0,
+      failed: false,
+      skippedStage: true,
     });
   });
 
   it('continues recipe generation when categorization stage fails', async () => {
     const repository: Partial<ProductRepository> = {
+      countItemsPendingDietaryCategorization: jest.fn().mockResolvedValue(1),
       getItemsPendingDietaryCategorization: jest
         .fn()
         .mockRejectedValue(new Error('db read failed')),
@@ -114,6 +154,7 @@ describe('RecipeGenerationPipeline', () => {
 
   it('throws controlled error after JSON retries are exhausted', async () => {
     const repository: Partial<ProductRepository> = {
+      countItemsPendingDietaryCategorization: jest.fn().mockResolvedValue(0),
       getItemsPendingDietaryCategorization: jest.fn().mockResolvedValue([]),
       batchUpdateDietaryCategorization: jest.fn().mockResolvedValue(0),
       getRecipeIngredientNames: jest.fn().mockResolvedValue(['Jajka']),

@@ -20,7 +20,9 @@ import { LazyDietaryCategorizationService } from './features/recipe-generator/ap
 import { RecipeGenerationService } from './features/recipe-generator/application/recipeGenerationService';
 import { RecipeGenerationPipeline } from './features/recipe-generator/application/recipeGenerationPipeline';
 import {
+  CategorizationProgress,
   DietPreference,
+  dietRequiresCategorization,
   DishType,
   RecipeGenerationError,
   RecipeGenerationProgressStage,
@@ -179,9 +181,12 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
   const [screen, setScreen] = useState<FlowScreen>('preferences');
   const [dishType, setDishType] = useState<DishType>('dinner');
   const [diet, setDiet] = useState<DietPreference>('none');
+  const [skipCategorization, setSkipCategorization] = useState(true);
   const [dishes, setDishes] = useState<string[]>([]);
   const [progressStage, setProgressStage] =
     useState<RecipeGenerationProgressStage>('categorizing');
+  const [categorizationProgress, setCategorizationProgress] =
+    useState<CategorizationProgress | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [isRunningPipeline, setIsRunningPipeline] = useState(false);
   const [remountKey, setRemountKey] = useState(0);
@@ -320,6 +325,7 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
     setIsRunningPipeline(true);
     setScreen('progress');
     setProgressStage('categorizing');
+    setCategorizationProgress(null);
 
     if (!llm.isReady) {
       setGenerateError('Model jeszcze się ładuje.');
@@ -330,17 +336,23 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
 
 
     try {
-      pushDebugEvent('pipeline started', { dishType, diet });
+      pushDebugEvent('pipeline started', { dishType, diet, skipCategorization });
       const result = await pipeline.run(
         {
           dishType,
           diet,
           maxDishes: maxDishes,
           categorizationBatchSize: categorizationBatchSize,
+          skipCategorization,
         },
-        stage => {
-          pushDebugEvent('pipeline stage', stage);
-          setProgressStage(stage);
+        event => {
+          pushDebugEvent('pipeline stage', event);
+          setProgressStage(event.stage);
+          if (event.categorization) {
+            setCategorizationProgress(event.categorization);
+          } else if (event.stage !== 'categorizing') {
+            setCategorizationProgress(null);
+          }
         },
       );
       pushDebugEvent('pipeline finished', {
@@ -367,7 +379,7 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
     } finally {
       setIsRunningPipeline(false);
     }
-  }, [diet, dishType, llm.isReady, pipeline]);
+  }, [diet, dishType, llm.isReady, pipeline, skipCategorization, pushDebugEvent]);
 
   const refreshDebugSnapshot = useCallback(async () => {
     try {
@@ -464,11 +476,16 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
             <RecipePreferencesScreen
               dishType={dishType}
               diet={diet}
+              skipCategorization={skipCategorization}
               isModelReady={llm.isReady}
               downloadProgress={progressPct}
               modelError={llmError}
               onDishTypeChange={setDishType}
-              onDietChange={setDiet}
+              onDietChange={value => {
+                setDiet(value);
+                setSkipCategorization(!dietRequiresCategorization(value));
+              }}
+              onSkipCategorizationChange={setSkipCategorization}
               onStart={() => {
                 generate().catch(() => {});
               }}
@@ -497,6 +514,7 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
           {screen === 'progress' ? (
             <RecipeGenerationProgressScreen
               stage={progressStage}
+              categorizationProgress={categorizationProgress}
               error={generateError}
               isGenerating={isRunningPipeline || llm.isGenerating}
               onCancel={() => llm.interrupt()}

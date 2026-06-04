@@ -6,11 +6,13 @@ import { DietPreference, DishType } from '../domain/recipeGenerationTypes';
 type Props = {
   dishType: DishType;
   diet: DietPreference;
+  skipCategorization: boolean;
   isModelReady: boolean;
   downloadProgress: number;
   modelError: string | null;
   onDishTypeChange: (value: DishType) => void;
   onDietChange: (value: DietPreference) => void;
+  onSkipCategorizationChange: (value: boolean) => void;
   onStart: () => void;
   onRetryModel: () => void;
   debugEnabled: boolean;
@@ -42,11 +44,13 @@ const DIETS: { value: DietPreference; label: string }[] = [
 export function RecipePreferencesScreen({
   dishType,
   diet,
+  skipCategorization,
   isModelReady,
   downloadProgress,
   modelError,
   onDishTypeChange,
   onDietChange,
+  onSkipCategorizationChange,
   onStart,
   onRetryModel,
   debugEnabled,
@@ -99,6 +103,32 @@ export function RecipePreferencesScreen({
           </Pressable>
         ))}
       </View>
+
+      <Pressable
+        onPress={() => onSkipCategorizationChange(!skipCategorization)}
+        style={[
+          styles.skipCategorizationRow,
+          skipCategorization && styles.skipCategorizationRowActive,
+        ]}>
+        <View
+          style={[
+            styles.skipCategorizationCheckbox,
+            skipCategorization && styles.skipCategorizationCheckboxActive,
+          ]}>
+          {skipCategorization ? (
+            <Text style={styles.skipCategorizationCheckmark}>✓</Text>
+          ) : null}
+        </View>
+        <View style={styles.skipCategorizationTextBlock}>
+          <Text style={styles.skipCategorizationTitle}>
+            Pomin kategoryzacje produktow
+          </Text>
+          <Text style={styles.skipCategorizationHint}>
+            Przydatne przy diecie bez ograniczen lub low-carb — szybsze
+            generowanie bez oceny produktow przez model.
+          </Text>
+        </View>
+      </Pressable>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Model AI</Text>
@@ -197,6 +227,55 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: colors.textPrimary,
+  },
+  skipCategorizationRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSubtle,
+  },
+  skipCategorizationRowActive: {
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accent,
+  },
+  skipCategorizationCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  skipCategorizationCheckboxActive: {
+    backgroundColor: colors.success,
+    borderColor: colors.success,
+  },
+  skipCategorizationCheckmark: {
+    color: colors.successText,
+    fontWeight: '800',
+    fontSize: 14,
+    lineHeight: 16,
+  },
+  skipCategorizationTextBlock: {
+    flex: 1,
+    gap: 4,
+  },
+  skipCategorizationTitle: {
+    color: colors.textPrimary,
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  skipCategorizationHint: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
   },
   card: {
     marginTop: 8,

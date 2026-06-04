@@ -1,10 +1,14 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../../../theme/colors';
-import { RecipeGenerationProgressStage } from '../domain/recipeGenerationTypes';
+import {
+  CategorizationProgress,
+  RecipeGenerationProgressStage,
+} from '../domain/recipeGenerationTypes';
 
 type Props = {
   stage: RecipeGenerationProgressStage;
+  categorizationProgress: CategorizationProgress | null;
   error: string | null;
   isGenerating: boolean;
   onCancel: () => void;
@@ -21,12 +25,27 @@ const STAGE_LABELS: Record<RecipeGenerationProgressStage, string> = {
 
 export function RecipeGenerationProgressScreen({
   stage,
+  categorizationProgress,
   error,
   isGenerating,
   onCancel,
   onRetry,
   onBack,
 }: Props) {
+  const showCategorizationProgress =
+    stage === 'categorizing' &&
+    categorizationProgress != null &&
+    categorizationProgress.total > 0;
+  const categorizationPct = showCategorizationProgress
+    ? Math.min(
+        100,
+        Math.round(
+          (categorizationProgress.completed / categorizationProgress.total) *
+            100,
+        ),
+      )
+    : 0;
+
   return (
     <View style={styles.body}>
       <View style={styles.card}>
@@ -35,6 +54,22 @@ export function RecipeGenerationProgressScreen({
           <ActivityIndicator color={colors.success} animating={isGenerating} />
           <Text style={styles.stageText}>{STAGE_LABELS[stage]}</Text>
         </View>
+        {showCategorizationProgress ? (
+          <View style={styles.progressSection}>
+            <Text style={styles.progressLabel}>
+              Produkty: {categorizationProgress.completed} /{' '}
+              {categorizationProgress.total}
+            </Text>
+            <View style={styles.progressTrack}>
+              <View
+                style={[
+                  styles.progressFill,
+                  { width: `${categorizationPct}%` },
+                ]}
+              />
+            </View>
+          </View>
+        ) : null}
       </View>
 
       {error ? (
@@ -89,6 +124,27 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 14,
     fontWeight: '700',
+  },
+  progressSection: {
+    gap: 8,
+    marginTop: 4,
+  },
+  progressLabel: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: colors.surfaceMuted,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: colors.success,
+    minWidth: 4,
   },
   errorBox: {
     backgroundColor: colors.surfaceMuted,

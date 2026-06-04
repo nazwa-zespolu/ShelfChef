@@ -76,6 +76,31 @@ export class ProductRepository {
     );
   }
 
+  async countItemsPendingDietaryCategorization(): Promise<number> {
+    const result = db.execute(
+      `SELECT COUNT(*) AS count
+       FROM inventory i
+       LEFT JOIN product_definitions d ON i.product_ean = d.ean
+       WHERE (
+         i.product_ean IS NOT NULL
+         AND TRIM(COALESCE(d.name, '')) <> ''
+         AND d.is_vegetarian IS NULL
+       ) OR (
+         i.product_ean IS NULL
+         AND TRIM(COALESCE(i.custom_name, '')) <> ''
+         AND i.is_vegetarian IS NULL
+       )`,
+    );
+
+    if (!result.rows || result.rows.length === 0) {
+      return 0;
+    }
+
+    const raw = result.rows.item(0).count;
+    const count = Number(raw);
+    return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  }
+
   async getItemsPendingDietaryCategorization(
     limit = 50,
   ): Promise<DietaryCategorizationCandidate[]> {
