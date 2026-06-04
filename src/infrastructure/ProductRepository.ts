@@ -3,6 +3,8 @@ import { ProductDefinition, InventoryItem } from '../domain/types';
 
 export class ProductRepository {
   private static readonly RECIPE_MODEL_CONSENT_KEY = 'recipe_model_download_consent';
+  private static readonly RECIPE_MODEL_CHOICE_KEY = 'recipe_model_choice';
+  private static readonly RECIPE_MODEL_DECLINED_KEY = 'recipe_model_declined';
 
   async findDefinitionByEan(ean: string): Promise<ProductDefinition | null> {
     const result = db.execute('SELECT * FROM product_definitions WHERE ean = ?', [ean]);
@@ -89,10 +91,43 @@ export class ProductRepository {
     return row.value === '1';
   }
 
-  async setRecipeModelConsent(granted: boolean): Promise<void> {
+  async getRecipeModelChoice(): Promise<string | null> {
+    const result = db.execute('SELECT value FROM app_settings WHERE key = ?', [
+      ProductRepository.RECIPE_MODEL_CHOICE_KEY,
+    ]);
+    if (!result.rows || result.rows.length === 0) {
+      return null;
+    }
+    return result.rows.item(0).value ?? null;
+  }
+
+  async setRecipeModelChoice(modelId: string | null): Promise<void> {
+    if (modelId == null) {
+      db.execute('DELETE FROM app_settings WHERE key = ?', [
+        ProductRepository.RECIPE_MODEL_CHOICE_KEY,
+      ]);
+      return;
+    }
     db.execute(
       'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
-      [ProductRepository.RECIPE_MODEL_CONSENT_KEY, granted ? '1' : '0'],
+      [ProductRepository.RECIPE_MODEL_CHOICE_KEY, modelId],
+    );
+  }
+
+  async getRecipeModelDeclined(): Promise<boolean> {
+    const result = db.execute('SELECT value FROM app_settings WHERE key = ?', [
+      ProductRepository.RECIPE_MODEL_DECLINED_KEY,
+    ]);
+    if (!result.rows || result.rows.length === 0) {
+      return false;
+    }
+    return result.rows.item(0).value === '1';
+  }
+
+  async setRecipeModelDeclined(declined: boolean): Promise<void> {
+    db.execute(
+      'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
+      [ProductRepository.RECIPE_MODEL_DECLINED_KEY, declined ? '1' : '0'],
     );
   }
 }

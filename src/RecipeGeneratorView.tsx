@@ -13,14 +13,22 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {colors} from './theme/colors';
 import {ProductRepository} from './infrastructure/ProductRepository';
 import {InventoryItem} from './domain/types';
-import {QWEN2_5_3B_QUANTIZED, Message, useLLM} from 'react-native-executorch';
+import {useLLM} from 'react-native-executorch';
 import {BareResourceFetcher} from 'react-native-executorch-bare-resource-fetcher';
+import {
+  RECIPE_MODEL_OPTIONS,
+  RecipeModelId,
+  buildRecipeMessages,
+  getRecipeModelConfig,
+  isRecipeModelId,
+  modelFileNameFromConfig,
+} from './recipeGeneratorModels';
 
 type RecipeGeneratorViewProps = {
   onRequestClose?: () => void;
 };
 
-type ConsentState = 'unknown' | 'accepted' | 'declined';
+type GeneratorScreen = 'booting' | 'picker' | 'active' | 'declined';
 
 function uniqByName(items: InventoryItem[], max = 80): string[] {
   const out: string[] = [];
@@ -132,58 +140,102 @@ function parseDishes(raw: string): string[] {
 
 const repo = new ProductRepository();
 
-export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorViewProps) {
-  const insets = useSafeAreaInsets();
-  const [consent, setConsent] = useState<ConsentState>('unknown');
-  const [consentBooting, setConsentBooting] = useState(true);
-
-  const checkModelDownloaded = useCallback(async () => {
-    try {
-      const downloaded = await BareResourceFetcher.listDownloadedModels();
-      const modelFileName = QWEN2_5_3B_QUANTIZED.modelSource.split('/').pop()?.toLowerCase();
-      if (!modelFileName) {
-        return false;
-      }
-      return downloaded.some(path => path.toLowerCase().includes(modelFileName));
-    } catch {
+async function isModelDownloaded(modelId: RecipeModelId): Promise<boolean> {
+  try {
+    const downloaded = await BareResourceFetcher.listDownloadedModels();
+    const modelFileName = modelFileNameFromConfig(getRecipeModelConfig(modelId));
+    if (!modelFileName) {
       return false;
     }
-  }, []);
+    return downloaded.some(path => path.toLowerCase().includes(modelFileName));
+  } catch {
+    return false;
+  }
+}
+
+export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorViewProps) {
+  const insets = useSafeAreaInsets();
+  const [booting, setBooting] = useState(true);
+  const [screen, setScreen] = useState<GeneratorScreen>('picker');
+  const [selectedModelId, setSelectedModelId] = useState<RecipeModelId | null>(null);
+  const [modelReady, setModelReady] = useState(false);
 
   useEffect(() => {
-    const bootstrapConsent = async () => {
+    const bootstrap = async () => {
       try {
-        const savedConsent = await repo.getRecipeModelConsent();
-        if (!savedConsent) {
-          setConsent('unknown');
+        if (await repo.getRecipeModelDeclined()) {
+          setScreen('declined');
           return;
         }
-        const hasModel = await checkModelDownloaded();
-        setConsent(hasModel ? 'accepted' : 'unknown');
+
+        let choice = await repo.getRecipeModelChoice();
+        if (!isRecipeModelId(choice)) {
+          const legacyConsent = await repo.getRecipeModelConsent();
+          if (legacyConsent) {
+            choice = 'qwen3b';
+            await repo.setRecipeModelChoice(choice);
+          }
+        }
+
+        if (!isRecipeModelId(choice)) {
+          setScreen('picker');
+          return;
+        }
+
+        setSelectedModelId(choice);
+        const ready = await isModelDownloaded(choice);
+        setModelReady(ready);
+        setScreen(ready ? 'active' : 'picker');
+      } catch {
+        setScreen('picker');
       } finally {
-        setConsentBooting(false);
+        setBooting(false);
       }
     };
-    bootstrapConsent().catch(() => {
-      setConsent('unknown');
-      setConsentBooting(false);
+    bootstrap().catch(() => {
+      setScreen('picker');
+      setBooting(false);
     });
-  }, [checkModelDownloaded]);
-
-  const acceptConsent = useCallback(() => {
-    repo.setRecipeModelConsent(true).catch(() => {});
-    setConsent('accepted');
   }, []);
 
-  const declineConsent = useCallback(() => {
-    repo.setRecipeModelConsent(false).catch(() => {});
-    setConsent('declined');
+  const selectModel = useCallback((modelId: RecipeModelId) => {
+    repo.setRecipeModelChoice(modelId).catch(() => {});
+    repo.setRecipeModelDeclined(false).catch(() => {});
+    setSelectedModelId(modelId);
+    setModelReady(false);
+    setScreen('active');
+    isModelDownloaded(modelId)
+      .then(ready => setModelReady(ready))
+      .catch(() => setModelReady(false));
   }, []);
+
+  const continueWithModel = useCallback(() => {
+    if (selectedModelId) {
+      setScreen('active');
+    }
+  }, [selectedModelId]);
+
+  const declineModel = useCallback(() => {
+    repo.setRecipeModelDeclined(true).catch(() => {});
+    repo.setRecipeModelChoice(null).catch(() => {});
+    setSelectedModelId(null);
+    setScreen('declined');
+  }, []);
+
+  const openPicker = useCallback(() => {
+    repo.setRecipeModelDeclined(false).catch(() => {});
+    if (selectedModelId) {
+      isModelDownloaded(selectedModelId)
+        .then(ready => setModelReady(ready))
+        .catch(() => setModelReady(false));
+    }
+    setScreen('picker');
+  }, [selectedModelId]);
 
   return (
     <View style={[styles.root, {paddingTop: insets.top + 8}]}>
 
-      {consentBooting ? (
+      {booting ? (
         <View style={styles.body}>
           <Text style={styles.title}>Generator przepisów</Text>
           <View style={styles.row}>
@@ -193,43 +245,62 @@ export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorVie
         </View>
       ) : null}
 
-      {!consentBooting && consent === 'unknown' ? (
-        <View style={styles.body}>
+      {!booting && screen === 'picker' ? (
+        <ScrollView style={styles.body} contentContainerStyle={styles.pickerContent}>
           <Text style={styles.title}>Generator przepisów</Text>
           <Text style={styles.hint}>
-            Ten generator działa offline na urządzeniu, ale wymaga jednorazowego pobrania modelu AI. Pobieranie może
-            zająć kilka minut i zużyć transfer.
+            Generator działa offline na urządzeniu. Wybierz model AI do jednorazowego pobrania — rozmiar i język
+            propozycji zależą od wyboru. Pobieranie może zająć kilka minut i zużyć transfer.
           </Text>
 
-          <View style={styles.ctaRow}>
+          {RECIPE_MODEL_OPTIONS.map(option => (
             <Pressable
-              onPress={acceptConsent}
-              style={({pressed}) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}>
-              <Text style={styles.primaryButtonText}>Pobierz i uruchom</Text>
+              key={option.id}
+              onPress={() => selectModel(option.id)}
+              style={({pressed}) => [
+                styles.modelOption,
+                selectedModelId === option.id && styles.modelOptionSelected,
+                pressed && styles.modelOptionPressed,
+              ]}>
+              <View style={styles.modelOptionHeader}>
+                <Text style={styles.modelOptionTitle}>{option.title}</Text>
+                <Text style={styles.modelOptionSize}>{option.sizeHint}</Text>
+              </View>
+              <Text style={styles.modelOptionSubtitle}>{option.subtitle}</Text>
             </Pressable>
+          ))}
+
+          <View style={styles.ctaRow}>
+            {modelReady && selectedModelId ? (
+              <Pressable
+                onPress={continueWithModel}
+                style={({pressed}) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
+                <Text style={styles.secondaryButtonText}>Kontynuuj bez zmiany</Text>
+              </Pressable>
+            ) : null}
             <Pressable
-              onPress={declineConsent}
+              onPress={declineModel}
               style={({pressed}) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
-              <Text style={styles.secondaryButtonText}>Nie, dziękuję</Text>
+              <Text style={styles.secondaryButtonText}>Nie teraz</Text>
             </Pressable>
           </View>
-        </View>
+        </ScrollView>
       ) : null}
 
-      {!consentBooting && consent === 'declined' ? (
+      {!booting && screen === 'declined' ? (
         <View style={styles.body}>
           <Text style={styles.title}>Generator przepisów</Text>
           <Text style={styles.hint}>
-            Aby korzystać z generatora, potrzebujesz zgody na pobranie modelu AI na urządzenie (3GB).
+            Aby korzystać z generatora, wybierz i pobierz model AI na urządzenie (od ok. 1 GB do ok. 3 GB).
           </Text>
           <View style={styles.ctaRow}>
             <Pressable
-              onPress={acceptConsent}
+              onPress={openPicker}
               style={({pressed}) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}>
-              <Text style={styles.primaryButtonText}>Zgadzam się</Text>
+              <Text style={styles.primaryButtonText}>Wybierz model</Text>
             </Pressable>
             <Pressable
-              onPress={declineConsent}
+              onPress={declineModel}
               style={({pressed}) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
               <Text style={styles.secondaryButtonText}>Nie teraz</Text>
             </Pressable>
@@ -237,13 +308,24 @@ export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorVie
         </View>
       ) : null}
 
-      {!consentBooting && consent === 'accepted' ? <RecipeGeneratorLLM onRequestClose={onRequestClose} /> : null}
+      {!booting && screen === 'active' && selectedModelId ? (
+        <RecipeGeneratorLLM modelId={selectedModelId} onRequestClose={onRequestClose} onChangeModel={openPicker} />
+      ) : null}
     </View>
   );
 }
 
-function RecipeGeneratorLLM({onRequestClose}: {onRequestClose?: () => void}) {
-  const llm = useLLM({model: QWEN2_5_3B_QUANTIZED});
+function RecipeGeneratorLLM({
+  modelId,
+  onRequestClose,
+  onChangeModel,
+}: {
+  modelId: RecipeModelId;
+  onRequestClose?: () => void;
+  onChangeModel?: () => void;
+}) {
+  const modelOption = RECIPE_MODEL_OPTIONS.find(o => o.id === modelId);
+  const llm = useLLM({model: getRecipeModelConfig(modelId)});
   const [dishNames, setDishNames] = useState<string[]>([]);
   const [rawLlmOutput, setRawLlmOutput] = useState<string | null>(null);
   const [inventory, setInventory] = useState<InventoryItem[] | null>(null);
@@ -334,32 +416,8 @@ function RecipeGeneratorLLM({onRequestClose}: {onRequestClose?: () => void}) {
       return;
     }
 
-    const system: Message = {
-      role: 'system',
-      content:
-        'You are a kitchen assistant. Respond ONLY with JSON in the format {"dishes":["..."]}.' +
-        ' No comments, no Markdown, no extra fields. Only dish names.' +
-        ' Each element of the dishes array MUST be a single string (the dish name), not an object.' +
-        ' Suggest only dishes that can be made using given ingredients.',
-   
-    };
-    // const system: Message = {
-    //   role: 'system',
-    //   content:
-    //     'Jesteś szefem kuchni i planujesz dania na podstawie składników, które są w lodówce i spiżarni.' +
-    //     'Nie wszystkie skladniki musisz wykorzytać a te których ci brakuje mozna dokupić.',
-    // };
-
-    const user: Message = {
-      role: 'user',
-      content:
-        'My ingredients:\n' +
-        ingredients.map(x => `- ${x}`).join('\n') +
-        '\n\nPropose 5 dishes. If some ingredients are missing its ok. Return only JSON as instructed.',
-    };
-
     try {
-      const response = await llm.generate([system, user]);
+      const response = await llm.generate(buildRecipeMessages(modelId, ingredients));
       const rawText = normalizeLlmOutput(response);
       setRawLlmOutput(rawText);
 
@@ -374,7 +432,7 @@ function RecipeGeneratorLLM({onRequestClose}: {onRequestClose?: () => void}) {
     } catch {
       setGenerateError('Generowanie nie powiodło się.');
     }
-  }, [ingredients, inventory, llm]);
+  }, [ingredients, inventory, llm, modelId]);
 
   const retryModel = useCallback(() => {
     setDishNames([]);
@@ -405,6 +463,11 @@ function RecipeGeneratorLLM({onRequestClose}: {onRequestClose?: () => void}) {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Model AI</Text>
+        {modelOption ? (
+          <Text style={styles.cardLine}>
+            {modelOption.title} · {modelOption.sizeHint}
+          </Text>
+        ) : null}
         {!llm.isReady ? (
           <View style={styles.row}>
             <ActivityIndicator color={colors.success} />
@@ -416,6 +479,11 @@ function RecipeGeneratorLLM({onRequestClose}: {onRequestClose?: () => void}) {
         ) : (
           <Text style={styles.cardLine}>Gotowe do generowania.</Text>
         )}
+        {onChangeModel && llm.isReady ? (
+          <Pressable style={styles.smallButton} onPress={onChangeModel}>
+            <Text style={styles.smallButtonText}>Zmień model</Text>
+          </Pressable>
+        ) : null}
         {llm.error ? (
           <View style={styles.errorBox}>
             <Text style={styles.errorTitle}>Błąd modelu</Text>
@@ -571,6 +639,46 @@ const styles = StyleSheet.create({
   ctaRow: {
     marginTop: 18,
     gap: 10,
+  },
+  pickerContent: {
+    paddingBottom: 32,
+  },
+  modelOption: {
+    marginTop: 12,
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modelOptionSelected: {
+    borderColor: colors.success,
+  },
+  modelOptionPressed: {
+    opacity: 0.92,
+  },
+  modelOptionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 4,
+  },
+  modelOptionTitle: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  modelOptionSize: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  modelOptionSubtitle: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
   },
   actionsRow: {
     marginTop: 6,
