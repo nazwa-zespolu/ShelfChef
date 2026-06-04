@@ -315,7 +315,7 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
         outputTokenBatchSize: 32,
         batchTimeInterval: 500,
         temperature: 0.35,
-        topP: 0.9,
+        topP: 0.5,
       },
     });
   }, [llm.isReady, llm.error]); // eslint-disable-line react-hooks/exhaustive-deps
