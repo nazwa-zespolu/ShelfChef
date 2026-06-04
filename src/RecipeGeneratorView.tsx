@@ -1,7 +1,6 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Platform,
   Pressable,
   ScrollView,
@@ -14,21 +13,27 @@ import {colors} from './theme/colors';
 import {ProductRepository} from './infrastructure/ProductRepository';
 import {InventoryItem} from './domain/types';
 import {useLLM} from 'react-native-executorch';
-import {BareResourceFetcher} from 'react-native-executorch-bare-resource-fetcher';
 import {
+  DIET_OPTIONS,
+  DietPreference,
+  MEAL_OPTIONS,
+  MealType,
   RECIPE_MODEL_OPTIONS,
   RecipeModelId,
   buildRecipeMessages,
   getRecipeModelConfig,
-  isRecipeModelId,
-  modelFileNameFromConfig,
 } from './recipeGeneratorModels';
+import {
+  RecipeModelDownloadState,
+  deleteRecipeModel,
+  listRecipeModelDownloadState,
+} from './recipeModelStorage';
 
 type RecipeGeneratorViewProps = {
   onRequestClose?: () => void;
 };
 
-type GeneratorScreen = 'booting' | 'picker' | 'active' | 'declined';
+type GeneratorScreen = 'booting' | 'consent' | 'declined' | 'modelPicker' | 'session';
 
 function uniqByName(items: InventoryItem[], max = 80): string[] {
   const out: string[] = [];
@@ -127,7 +132,6 @@ function parseDishes(raw: string): string[] {
     }
   }
 
-  // Heuristic fallback: bullet/line list
   return text
     .split(/\r?\n/)
     .map(l => l.trim())
@@ -140,25 +144,55 @@ function parseDishes(raw: string): string[] {
 
 const repo = new ProductRepository();
 
-async function isModelDownloaded(modelId: RecipeModelId): Promise<boolean> {
-  try {
-    const downloaded = await BareResourceFetcher.listDownloadedModels();
-    const modelFileName = modelFileNameFromConfig(getRecipeModelConfig(modelId));
-    if (!modelFileName) {
-      return false;
-    }
-    return downloaded.some(path => path.toLowerCase().includes(modelFileName));
-  } catch {
-    return false;
-  }
+function SelectionGroup<T extends string>({
+  title,
+  options,
+  value,
+  onChange,
+}: {
+  title: string;
+  options: {id: T; label: string}[];
+  value: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>{title}</Text>
+      <View style={styles.chipRow}>
+        {options.map(option => {
+          const selected = option.id === value;
+          return (
+            <Pressable
+              key={option.id}
+              onPress={() => onChange(option.id)}
+              style={({pressed}) => [
+                styles.chip,
+                selected && styles.chipSelected,
+                pressed && styles.chipPressed,
+              ]}>
+              <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{option.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
 }
 
 export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorViewProps) {
   const insets = useSafeAreaInsets();
   const [booting, setBooting] = useState(true);
-  const [screen, setScreen] = useState<GeneratorScreen>('picker');
-  const [selectedModelId, setSelectedModelId] = useState<RecipeModelId | null>(null);
-  const [modelReady, setModelReady] = useState(false);
+  const [screen, setScreen] = useState<GeneratorScreen>('consent');
+  const [activeModelId, setActiveModelId] = useState<RecipeModelId | null>(null);
+  const [downloadState, setDownloadState] = useState<RecipeModelDownloadState | null>(null);
+  const [storageBusy, setStorageBusy] = useState(false);
+  const [storageError, setStorageError] = useState<string | null>(null);
+
+  const refreshDownloadState = useCallback(async () => {
+    const state = await listRecipeModelDownloadState();
+    setDownloadState(state);
+    return state;
+  }, []);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -167,140 +201,119 @@ export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorVie
           setScreen('declined');
           return;
         }
-
-        let choice = await repo.getRecipeModelChoice();
-        if (!isRecipeModelId(choice)) {
-          const legacyConsent = await repo.getRecipeModelConsent();
-          if (legacyConsent) {
-            choice = 'qwen3b';
-            await repo.setRecipeModelChoice(choice);
-          }
-        }
-
-        if (!isRecipeModelId(choice)) {
-          setScreen('picker');
+        if (!(await repo.getRecipeModelConsent())) {
+          setScreen('consent');
           return;
         }
-
-        setSelectedModelId(choice);
-        const ready = await isModelDownloaded(choice);
-        setModelReady(ready);
-        setScreen(ready ? 'active' : 'picker');
+        setScreen('modelPicker');
+        await refreshDownloadState();
       } catch {
-        setScreen('picker');
+        setScreen('consent');
       } finally {
         setBooting(false);
       }
     };
     bootstrap().catch(() => {
-      setScreen('picker');
+      setScreen('consent');
       setBooting(false);
     });
-  }, []);
+  }, [refreshDownloadState]);
 
-  const selectModel = useCallback((modelId: RecipeModelId) => {
-    repo.setRecipeModelChoice(modelId).catch(() => {});
+  const acceptConsent = useCallback(() => {
+    repo.setRecipeModelConsent(true).catch(() => {});
     repo.setRecipeModelDeclined(false).catch(() => {});
-    setSelectedModelId(modelId);
-    setModelReady(false);
-    setScreen('active');
-    isModelDownloaded(modelId)
-      .then(ready => setModelReady(ready))
-      .catch(() => setModelReady(false));
-  }, []);
+    setScreen('modelPicker');
+    refreshDownloadState().catch(() => {});
+  }, [refreshDownloadState]);
 
-  const continueWithModel = useCallback(() => {
-    if (selectedModelId) {
-      setScreen('active');
-    }
-  }, [selectedModelId]);
-
-  const declineModel = useCallback(() => {
+  const declineFlow = useCallback(() => {
     repo.setRecipeModelDeclined(true).catch(() => {});
+    repo.setRecipeModelConsent(false).catch(() => {});
     repo.setRecipeModelChoice(null).catch(() => {});
-    setSelectedModelId(null);
+    setActiveModelId(null);
     setScreen('declined');
   }, []);
 
-  const openPicker = useCallback(() => {
-    repo.setRecipeModelDeclined(false).catch(() => {});
-    if (selectedModelId) {
-      isModelDownloaded(selectedModelId)
-        .then(ready => setModelReady(ready))
-        .catch(() => setModelReady(false));
-    }
-    setScreen('picker');
-  }, [selectedModelId]);
+  const startSession = useCallback((modelId: RecipeModelId) => {
+    repo.setRecipeModelChoice(modelId).catch(() => {});
+    setActiveModelId(modelId);
+    setScreen('session');
+  }, []);
+
+  const endSession = useCallback(() => {
+    setActiveModelId(null);
+    setScreen('modelPicker');
+    refreshDownloadState().catch(() => {});
+  }, [refreshDownloadState]);
+
+  const handleDeleteModel = useCallback(
+    async (modelId: RecipeModelId) => {
+      setStorageError(null);
+      setStorageBusy(true);
+      try {
+        await deleteRecipeModel(modelId);
+        if (activeModelId === modelId) {
+          setActiveModelId(null);
+          setScreen('modelPicker');
+        }
+        await refreshDownloadState();
+      } catch {
+        setStorageError('Nie udało się usunąć modelu z urządzenia.');
+      } finally {
+        setStorageBusy(false);
+      }
+    },
+    [activeModelId, refreshDownloadState],
+  );
 
   return (
     <View style={[styles.root, {paddingTop: insets.top + 8}]}>
-
       {booting ? (
         <View style={styles.body}>
           <Text style={styles.title}>Generator przepisów</Text>
           <View style={styles.row}>
             <ActivityIndicator color={colors.success} />
-            <Text style={styles.cardLine}>Sprawdzam zapisane ustawienia i model…</Text>
+            <Text style={styles.cardLine}>Sprawdzam ustawienia…</Text>
           </View>
         </View>
       ) : null}
 
-      {!booting && screen === 'picker' ? (
-        <ScrollView style={styles.body} contentContainerStyle={styles.pickerContent}>
+      {!booting && screen === 'consent' ? (
+        <View style={styles.body}>
           <Text style={styles.title}>Generator przepisów</Text>
           <Text style={styles.hint}>
-            Generator działa offline na urządzeniu. Wybierz model AI do jednorazowego pobrania — rozmiar i język
-            propozycji zależą od wyboru. Pobieranie może zająć kilka minut i zużyć transfer.
+            Generator działa offline na urządzeniu. Po zgodzie wybierzesz model AI do pobrania (od ok. 1 GB do ok.
+            3 GB). Pobieranie może zająć kilka minut i zużyć transfer danych.
           </Text>
-
-          {RECIPE_MODEL_OPTIONS.map(option => (
-            <Pressable
-              key={option.id}
-              onPress={() => selectModel(option.id)}
-              style={({pressed}) => [
-                styles.modelOption,
-                selectedModelId === option.id && styles.modelOptionSelected,
-                pressed && styles.modelOptionPressed,
-              ]}>
-              <View style={styles.modelOptionHeader}>
-                <Text style={styles.modelOptionTitle}>{option.title}</Text>
-                <Text style={styles.modelOptionSize}>{option.sizeHint}</Text>
-              </View>
-              <Text style={styles.modelOptionSubtitle}>{option.subtitle}</Text>
-            </Pressable>
-          ))}
-
           <View style={styles.ctaRow}>
-            {modelReady && selectedModelId ? (
-              <Pressable
-                onPress={continueWithModel}
-                style={({pressed}) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
-                <Text style={styles.secondaryButtonText}>Kontynuuj bez zmiany</Text>
-              </Pressable>
-            ) : null}
             <Pressable
-              onPress={declineModel}
+              onPress={acceptConsent}
+              style={({pressed}) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}>
+              <Text style={styles.primaryButtonText}>Zgadzam się — wybierz model</Text>
+            </Pressable>
+            <Pressable
+              onPress={declineFlow}
               style={({pressed}) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
               <Text style={styles.secondaryButtonText}>Nie teraz</Text>
             </Pressable>
           </View>
-        </ScrollView>
+        </View>
       ) : null}
 
       {!booting && screen === 'declined' ? (
         <View style={styles.body}>
           <Text style={styles.title}>Generator przepisów</Text>
           <Text style={styles.hint}>
-            Aby korzystać z generatora, wybierz i pobierz model AI na urządzenie (od ok. 1 GB do ok. 3 GB).
+            Aby korzystać z generatora, wyraź zgodę na pobranie modelu AI i wybierz model dopasowany do telefonu.
           </Text>
           <View style={styles.ctaRow}>
             <Pressable
-              onPress={openPicker}
+              onPress={acceptConsent}
               style={({pressed}) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}>
-              <Text style={styles.primaryButtonText}>Wybierz model</Text>
+              <Text style={styles.primaryButtonText}>Wróć do zgody</Text>
             </Pressable>
             <Pressable
-              onPress={declineModel}
+              onPress={declineFlow}
               style={({pressed}) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
               <Text style={styles.secondaryButtonText}>Nie teraz</Text>
             </Pressable>
@@ -308,24 +321,115 @@ export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorVie
         </View>
       ) : null}
 
-      {!booting && screen === 'active' && selectedModelId ? (
-        <RecipeGeneratorLLM modelId={selectedModelId} onRequestClose={onRequestClose} onChangeModel={openPicker} />
+      {!booting && screen === 'modelPicker' ? (
+        <ScrollView style={styles.body} contentContainerStyle={styles.pickerContent}>
+          <Text style={styles.title}>Wybierz model AI</Text>
+          <Text style={styles.hint}>
+            Dotknij modelu, aby go pobrać (jeśli trzeba), załadować i przejść do ustawień diety. Pobrane modele możesz
+            usunąć, żeby zwolnić miejsce.
+          </Text>
+
+          {RECIPE_MODEL_OPTIONS.map(option => {
+            const downloaded = downloadState?.[option.id] ?? false;
+            return (
+              <Pressable
+                key={option.id}
+                onPress={() => startSession(option.id)}
+                disabled={storageBusy}
+                style={({pressed}) => [
+                  styles.modelOption,
+                  pressed && styles.modelOptionPressed,
+                  storageBusy && styles.modelOptionDisabled,
+                ]}>
+                <View style={styles.modelOptionHeader}>
+                  <Text style={styles.modelOptionTitle}>{option.title}</Text>
+                  <Text style={[styles.badge, downloaded ? styles.badgeOk : styles.badgeMuted]}>
+                    {downloaded ? 'Pobrany' : 'Nie pobrany'}
+                  </Text>
+                </View>
+                <Text style={styles.modelOptionSubtitle}>
+                  {option.subtitle} · {option.sizeHint}
+                </Text>
+              </Pressable>
+            );
+          })}
+
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Pobrane modele</Text>
+            {downloadState == null ? (
+              <View style={styles.row}>
+                <ActivityIndicator color={colors.success} />
+                <Text style={styles.cardLine}>Sprawdzam pamięć…</Text>
+              </View>
+            ) : RECIPE_MODEL_OPTIONS.every(o => !downloadState[o.id]) ? (
+              <Text style={styles.cardLine}>Brak pobranych modeli na urządzeniu.</Text>
+            ) : (
+              RECIPE_MODEL_OPTIONS.filter(o => downloadState[o.id]).map(option => (
+                <View key={option.id} style={styles.downloadedRow}>
+                  <Text style={styles.downloadedName}>{option.title}</Text>
+                  <Pressable
+                    onPress={() => handleDeleteModel(option.id).catch(() => {})}
+                    disabled={storageBusy}
+                    style={({pressed}) => [
+                      styles.dangerChip,
+                      pressed && styles.dangerChipPressed,
+                      storageBusy && styles.dangerChipDisabled,
+                    ]}>
+                    <Text style={styles.dangerChipText}>Usuń</Text>
+                  </Pressable>
+                </View>
+              ))
+            )}
+            <Pressable
+              style={styles.smallButton}
+              disabled={storageBusy}
+              onPress={() => refreshDownloadState().catch(() => {})}>
+              <Text style={styles.smallButtonText}>Odśwież listę</Text>
+            </Pressable>
+          </View>
+
+          {storageError ? (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorTitle}>Pamięć</Text>
+              <Text style={styles.errorText}>{storageError}</Text>
+            </View>
+          ) : null}
+
+          <View style={styles.ctaRow}>
+            <Pressable
+              onPress={declineFlow}
+              style={({pressed}) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
+              <Text style={styles.secondaryButtonText}>Wyjdź</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      ) : null}
+
+      {!booting && screen === 'session' && activeModelId ? (
+        <RecipeGeneratorSession
+          modelId={activeModelId}
+          onRequestClose={onRequestClose}
+          onBack={endSession}
+        />
       ) : null}
     </View>
   );
 }
 
-function RecipeGeneratorLLM({
+function RecipeGeneratorSession({
   modelId,
   onRequestClose,
-  onChangeModel,
+  onBack,
 }: {
   modelId: RecipeModelId;
   onRequestClose?: () => void;
-  onChangeModel?: () => void;
+  onBack: () => void;
 }) {
   const modelOption = RECIPE_MODEL_OPTIONS.find(o => o.id === modelId);
   const llm = useLLM({model: getRecipeModelConfig(modelId)});
+
+  const [diet, setDiet] = useState<DietPreference>('none');
+  const [mealType, setMealType] = useState<MealType>('lunch');
   const [dishNames, setDishNames] = useState<string[]>([]);
   const [rawLlmOutput, setRawLlmOutput] = useState<string | null>(null);
   const [inventory, setInventory] = useState<InventoryItem[] | null>(null);
@@ -336,7 +440,9 @@ function RecipeGeneratorLLM({
   const pendingCloseRef = useRef(false);
   const generationConfiguredRef = useRef(false);
 
+  const modelPhase = llm.isReady ? 'preferences' : 'loading';
   const canClose = !llm.isGenerating;
+
   const requestClose = useCallback(() => {
     if (!onRequestClose) {
       return;
@@ -379,9 +485,8 @@ function RecipeGeneratorLLM({
         topP: 0.9,
       },
     });
-  }, [llm.isReady, llm.error]); // eslint-disable-line react-hooks/exhaustive-deps -- llm.configure once per ready; llm identity churns during streaming
+  }, [llm.isReady, llm.error]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load inventory once model is ready (or earlier)
   const loadInventory = useCallback(async () => {
     setInventoryLoading(true);
     try {
@@ -393,8 +498,10 @@ function RecipeGeneratorLLM({
   }, []);
 
   useEffect(() => {
-    loadInventory().catch(() => {});
-  }, [loadInventory]);
+    if (modelPhase === 'preferences') {
+      loadInventory().catch(() => {});
+    }
+  }, [modelPhase, loadInventory]);
 
   const ingredients = useMemo(() => (inventory ? uniqByName(inventory, 60) : []), [inventory]);
 
@@ -417,7 +524,7 @@ function RecipeGeneratorLLM({
     }
 
     try {
-      const response = await llm.generate(buildRecipeMessages(modelId, ingredients));
+      const response = await llm.generate(buildRecipeMessages(modelId, ingredients, diet, mealType));
       const rawText = normalizeLlmOutput(response);
       setRawLlmOutput(rawText);
 
@@ -432,7 +539,7 @@ function RecipeGeneratorLLM({
     } catch {
       setGenerateError('Generowanie nie powiodło się.');
     }
-  }, [ingredients, inventory, llm, modelId]);
+  }, [diet, ingredients, inventory, llm, mealType, modelId]);
 
   const retryModel = useCallback(() => {
     setDishNames([]);
@@ -443,169 +550,147 @@ function RecipeGeneratorLLM({
 
   const progressPct = Math.round((llm.downloadProgress ?? 0) * 100);
 
-  return (
-    <View style={styles.body} key={remountKey}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.title}>Generator przepisów</Text>
-        {onRequestClose ? (
-          <Pressable
-            onPress={requestClose}
-            disabled={!canClose}
-            style={({pressed}) => [
-              styles.closeChip,
-              pressed && styles.closeChipPressed,
-              !canClose && styles.closeChipDisabled,
-            ]}>
-            <Text style={styles.closeChipText}>{canClose ? 'Zamknij' : 'Zatrzymuję…'}</Text>
+  if (modelPhase === 'loading') {
+    return (
+      <View style={styles.body} key={remountKey}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.title}>Ładowanie modelu</Text>
+          <Pressable onPress={onBack} style={({pressed}) => [styles.closeChip, pressed && styles.closeChipPressed]}>
+            <Text style={styles.closeChipText}>Anuluj</Text>
           </Pressable>
-        ) : null}
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Model AI</Text>
-        {modelOption ? (
-          <Text style={styles.cardLine}>
-            {modelOption.title} · {modelOption.sizeHint}
-          </Text>
-        ) : null}
-        {!llm.isReady ? (
+        </View>
+        <View style={styles.card}>
+          {modelOption ? (
+            <Text style={styles.cardLine}>
+              {modelOption.title} · {modelOption.sizeHint}
+            </Text>
+          ) : null}
           <View style={styles.row}>
             <ActivityIndicator color={colors.success} />
             <View style={styles.rowTextCol}>
-              <Text style={styles.cardLine}>Pobieranie/ładowanie…</Text>
+              <Text style={styles.cardLine}>
+                {progressPct > 0 && progressPct < 100 ? 'Pobieranie modelu…' : 'Ładowanie modelu…'}
+              </Text>
               <Text style={styles.cardHint}>{progressPct}%</Text>
             </View>
           </View>
-        ) : (
-          <Text style={styles.cardLine}>Gotowe do generowania.</Text>
-        )}
-        {onChangeModel && llm.isReady ? (
-          <Pressable style={styles.smallButton} onPress={onChangeModel}>
-            <Text style={styles.smallButtonText}>Zmień model</Text>
-          </Pressable>
-        ) : null}
+        </View>
         {llm.error ? (
           <View style={styles.errorBox}>
             <Text style={styles.errorTitle}>Błąd modelu</Text>
-            <Text style={styles.errorText}>{String((llm.error as any)?.message ?? llm.error)}</Text>
+            <Text style={styles.errorText}>{String((llm.error as {message?: string})?.message ?? llm.error)}</Text>
             <Pressable style={styles.smallButton} onPress={retryModel}>
               <Text style={styles.smallButtonText}>Spróbuj ponownie</Text>
             </Pressable>
           </View>
         ) : null}
       </View>
+    );
+  }
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Spiżarnia</Text>
-        {inventoryLoading ? (
-          <View style={styles.row}>
-            <ActivityIndicator color={colors.success} />
-            <Text style={styles.cardLine}>Wczytywanie zapasów…</Text>
+  return (
+    <View style={styles.body} key={remountKey}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.title}>Ustawienia przepisu</Text>
+        <View style={styles.headerActions}>
+          <Pressable onPress={onBack} style={({pressed}) => [styles.closeChip, pressed && styles.closeChipPressed]}>
+            <Text style={styles.closeChipText}>Modele</Text>
+          </Pressable>
+          {onRequestClose ? (
+            <Pressable
+              onPress={requestClose}
+              disabled={!canClose}
+              style={({pressed}) => [
+                styles.closeChip,
+                pressed && styles.closeChipPressed,
+                !canClose && styles.closeChipDisabled,
+              ]}>
+              <Text style={styles.closeChipText}>{canClose ? 'Zamknij' : '…'}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+
+      {modelOption ? (
+        <Text style={styles.hint}>
+          Model: {modelOption.title}. Spiżarnia: {inventoryLoading ? '…' : ingredients.length} składników.
+        </Text>
+      ) : null}
+
+      <ScrollView style={styles.preferencesScroll} contentContainerStyle={styles.preferencesContent}>
+        <SelectionGroup title="Dieta" options={DIET_OPTIONS} value={diet} onChange={setDiet} />
+        <SelectionGroup title="Typ dania" options={MEAL_OPTIONS} value={mealType} onChange={setMealType} />
+
+        <View style={styles.actionsRow}>
+          <Pressable
+            onPress={() => generate().catch(() => {})}
+            disabled={llm.isGenerating || inventoryLoading}
+            style={({pressed}) => [
+              styles.primaryButton,
+              pressed && !llm.isGenerating && styles.primaryButtonPressed,
+              (llm.isGenerating || inventoryLoading) && styles.primaryButtonDisabled,
+            ]}>
+            <Text style={styles.primaryButtonText}>{llm.isGenerating ? 'Generuję…' : 'Generuj propozycje'}</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => llm.interrupt()}
+            disabled={!llm.isGenerating}
+            style={({pressed}) => [
+              styles.secondaryButton,
+              pressed && styles.secondaryButtonPressed,
+              !llm.isGenerating && styles.secondaryButtonDisabled,
+            ]}>
+            <Text style={styles.secondaryButtonText}>Stop</Text>
+          </Pressable>
+        </View>
+
+        {generateError ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorTitle}>Nie udało się</Text>
+            <Text style={styles.errorText}>{generateError}</Text>
+          </View>
+        ) : null}
+
+        {llm.isGenerating ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Generowanie (na żywo)</Text>
+            <View style={styles.streamingStatusRow}>
+              <ActivityIndicator color={colors.success} />
+              <Text style={styles.streamingText}>Model pisze odpowiedź…</Text>
+            </View>
+            <ScrollView style={styles.rawScroll} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+              <Text selectable style={styles.rawText}>
+                {llm.response || '…'}
+              </Text>
+            </ScrollView>
+          </View>
+        ) : null}
+
+        {rawLlmOutput !== null ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Surowa odpowiedź modelu</Text>
+            <ScrollView style={styles.rawScroll} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+              <Text selectable style={styles.rawText}>
+                {rawLlmOutput}
+              </Text>
+            </ScrollView>
+          </View>
+        ) : null}
+
+        <Text style={styles.listTitle}>Propozycje dań</Text>
+        {dishNames.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Text style={styles.emptyHint}>Ustaw dietę i typ dania, potem kliknij „Generuj propozycje”.</Text>
           </View>
         ) : (
-          <Text style={styles.cardLine}>Składniki: {ingredients.length}</Text>
+          dishNames.map((item, idx) => (
+            <View key={`${idx}-${item}`} style={styles.dishRow}>
+              <Text style={styles.dishName}>{item}</Text>
+            </View>
+          ))
         )}
-        <Pressable style={styles.smallButton} onPress={loadInventory} disabled={inventoryLoading}>
-          <Text style={styles.smallButtonText}>Odśwież zapasy</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.actionsRow}>
-        <Pressable
-          onPress={() => {
-            generate().catch(() => {});
-          }}
-          disabled={!llm.isReady || llm.isGenerating || inventoryLoading}
-          style={({pressed}) => [
-            styles.primaryButton,
-            (pressed && !llm.isGenerating) && styles.primaryButtonPressed,
-            (!llm.isReady || llm.isGenerating || inventoryLoading) && styles.primaryButtonDisabled,
-          ]}>
-          <Text style={styles.primaryButtonText}>{llm.isGenerating ? 'Generuję…' : 'Generuj propozycje'}</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => llm.interrupt()}
-          disabled={!llm.isGenerating}
-          style={({pressed}) => [
-            styles.secondaryButton,
-            pressed && styles.secondaryButtonPressed,
-            !llm.isGenerating && styles.secondaryButtonDisabled,
-          ]}>
-          <Text style={styles.secondaryButtonText}>Stop</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => {
-            setDishNames([]);
-            setRawLlmOutput(null);
-            setGenerateError(null);
-          }}
-          style={({pressed}) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
-          <Text style={styles.secondaryButtonText}>Wyczyść</Text>
-        </Pressable>
-      </View>
-
-      {generateError ? (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorTitle}>Nie udało się</Text>
-          <Text style={styles.errorText}>{generateError}</Text>
-        </View>
-      ) : null}
-
-      {llm.isGenerating ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Generowanie (na żywo)</Text>
-          <View style={styles.streamingStatusRow}>
-            <ActivityIndicator color={colors.success} />
-            <Text style={styles.streamingText}>
-              Model pisze odpowiedź… Aktualizacje są ograniczone (batching), żeby nie obciążać UI.
-            </Text>
-          </View>
-          <ScrollView
-            style={styles.rawScroll}
-            nestedScrollEnabled
-            keyboardShouldPersistTaps="handled">
-            <Text selectable style={styles.rawText}>
-              {llm.response || '…'}
-            </Text>
-          </ScrollView>
-        </View>
-      ) : null}
-
-      {rawLlmOutput !== null ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Surowa odpowiedź modelu</Text>
-          <Text style={styles.rawHint}>Pełny tekst zwrócony przez model (przed parsowaniem listy dań).</Text>
-          <ScrollView
-            style={styles.rawScroll}
-            nestedScrollEnabled
-            keyboardShouldPersistTaps="handled">
-            <Text selectable style={styles.rawText}>
-              {rawLlmOutput}
-            </Text>
-          </ScrollView>
-        </View>
-      ) : null}
-
-      <Text style={styles.listTitle}>Propozycje dań (po parsowaniu)</Text>
-      <FlatList
-        style={styles.dishList}
-        data={dishNames}
-        keyExtractor={(x, idx) => `${idx}-${x}`}
-        contentContainerStyle={[styles.listContent, dishNames.length === 0 && styles.listEmpty]}
-        ListEmptyComponent={
-          <View style={styles.emptyBox}>
-            <Text style={styles.emptyTitle}>Brak propozycji</Text>
-            <Text style={styles.emptyHint}>Kliknij „Generuj propozycje”, aby zobaczyć listę dań.</Text>
-          </View>
-        }
-        renderItem={({item}) => (
-          <View style={styles.dishRow}>
-            <Text style={styles.dishName}>{item}</Text>
-          </View>
-        )}
-      />
+      </ScrollView>
     </View>
   );
 }
@@ -626,6 +711,10 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 12,
   },
+  headerActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
   title: {
     color: colors.textPrimary,
     fontSize: 22,
@@ -635,12 +724,19 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 15,
     lineHeight: 22,
+    marginBottom: 12,
   },
   ctaRow: {
     marginTop: 18,
     gap: 10,
   },
   pickerContent: {
+    paddingBottom: 32,
+  },
+  preferencesScroll: {
+    flex: 1,
+  },
+  preferencesContent: {
     paddingBottom: 32,
   },
   modelOption: {
@@ -651,11 +747,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  modelOptionSelected: {
-    borderColor: colors.success,
-  },
   modelOptionPressed: {
     opacity: 0.92,
+  },
+  modelOptionDisabled: {
+    opacity: 0.55,
   },
   modelOptionHeader: {
     flexDirection: 'row',
@@ -670,15 +766,84 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
-  modelOptionSize: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
-  },
   modelOptionSubtitle: {
     color: colors.textSecondary,
     fontSize: 13,
     lineHeight: 18,
+  },
+  badge: {
+    fontSize: 11,
+    fontWeight: '800',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  badgeOk: {
+    color: colors.successText,
+    backgroundColor: colors.success,
+  },
+  badgeMuted: {
+    color: colors.textMuted,
+    backgroundColor: colors.surfaceMuted,
+  },
+  downloadedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 8,
+  },
+  downloadedName: {
+    flex: 1,
+    color: colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  dangerChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: colors.danger,
+  },
+  dangerChipPressed: {
+    opacity: 0.9,
+  },
+  dangerChipDisabled: {
+    opacity: 0.5,
+  },
+  dangerChipText: {
+    color: '#ffffff',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSubtle,
+  },
+  chipSelected: {
+    borderColor: colors.success,
+    backgroundColor: colors.success,
+  },
+  chipPressed: {
+    opacity: 0.9,
+  },
+  chipText: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  chipTextSelected: {
+    color: colors.successText,
   },
   actionsRow: {
     marginTop: 6,
@@ -799,15 +964,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
-  dishList: {
-    flex: 1,
-  },
-  rawHint: {
-    color: colors.textMuted,
-    fontSize: 12,
-    lineHeight: 17,
-    marginBottom: 8,
-  },
   rawScroll: {
     maxHeight: 260,
     borderRadius: 10,
@@ -831,22 +987,9 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
-  listContent: {
-    paddingBottom: 24,
-  },
-  listEmpty: {
-    flexGrow: 1,
-  },
   emptyBox: {
     padding: 18,
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyTitle: {
-    color: colors.textPrimary,
-    fontSize: 16,
-    fontWeight: '800',
-    marginBottom: 6,
   },
   emptyHint: {
     color: colors.textMuted,

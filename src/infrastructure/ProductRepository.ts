@@ -91,6 +91,13 @@ export class ProductRepository {
     return row.value === '1';
   }
 
+  async setRecipeModelConsent(granted: boolean): Promise<void> {
+    db.execute(
+      'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
+      [ProductRepository.RECIPE_MODEL_CONSENT_KEY, granted ? '1' : '0'],
+    );
+  }
+
   async getRecipeModelChoice(): Promise<string | null> {
     const result = db.execute('SELECT value FROM app_settings WHERE key = ?', [
       ProductRepository.RECIPE_MODEL_CHOICE_KEY,
