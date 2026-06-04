@@ -3,7 +3,13 @@ import { open } from 'react-native-quick-sqlite';
 // Otwarcie bazy danych
 export const db = open({ name: 'shelfchef.db' });
 const SCHEMA_VERSION_KEY = 'schema_version';
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
+const DIETARY_COLUMNS = [
+  'is_vegetarian',
+  'is_vegan',
+  'is_gluten_free',
+  'is_lactose_free',
+] as const;
 const MOCK_DATA_SQL = [
   // 1. Product definitions (in English) - expanded base for the LLM
   `INSERT OR IGNORE INTO product_definitions (ean, name, brand, image_url, category) VALUES 
@@ -88,6 +94,19 @@ const runSchemaMigrations = () => {
     );
   }
 
+  if (currentVersion < 3) {
+    for (const column of DIETARY_COLUMNS) {
+      if (!hasProductDefinitionsColumn(column)) {
+        db.execute(
+          `ALTER TABLE product_definitions ADD COLUMN ${column} INTEGER`,
+        );
+      }
+      if (!hasInventoryColumn(column)) {
+        db.execute(`ALTER TABLE inventory ADD COLUMN ${column} INTEGER`);
+      }
+    }
+  }
+
   setStoredSchemaVersion(CURRENT_SCHEMA_VERSION);
 };
 
@@ -115,6 +134,23 @@ const setStoredSchemaVersion = (version: number) => {
 
 const hasProductDefinitionsColumn = (columnName: string): boolean => {
   const result = db.execute('PRAGMA table_info(product_definitions)');
+
+  if (!result.rows) {
+    return false;
+  }
+
+  for (let i = 0; i < result.rows.length; i++) {
+    const row = result.rows.item(i);
+    if (String(row.name) === columnName) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const hasInventoryColumn = (columnName: string): boolean => {
+  const result = db.execute('PRAGMA table_info(inventory)');
 
   if (!result.rows) {
     return false;

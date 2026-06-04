@@ -1,15 +1,11 @@
 import { db } from './db/init';
-import { ProductDefinition, InventoryItem } from '../domain/types';
-
-export interface PendingNormalizationRecord {
-  ean: string;
-  name: string;
-}
-
-export interface NormalizationUpdateRecord {
-  ean: string;
-  normalizedName: string;
-}
+import { DietaryFlags, ProductDefinition, InventoryItem } from '../domain/types';
+import { DietPreference } from '../features/recipe-generator/domain/recipeGenerationTypes';
+import {
+  DietaryCategorizationCandidate,
+  DietaryCategorizationUpdate,
+  matchesDietPreference,
+} from '../features/recipe-generator/domain/dietaryCategorizationTypes';
 
 export interface ProductRepositoryDebugSnapshot {
   productDefinitions: Record<string, unknown>[];
@@ -24,29 +20,47 @@ export class ProductRepository {
     const result = db.execute('SELECT * FROM product_definitions WHERE ean = ?', [ean]);
     if (result.rows && result.rows.length > 0) {
       const row = result.rows.item(0);
+      const dietary = this.readDietaryFlagsFromRow(row);
       return {
         ean: row.ean,
         name: row.name,
         brand: row.brand,
         imageUrl: row.image_url,
         category: row.category,
-        ...(row.normalized_name != null ? { normalizedName: row.normalized_name } : {}),
+        ...(dietary ? { dietary } : {}),
       };
     }
     return null;
   }
 
   async saveDefinition(def: ProductDefinition): Promise<void> {
+    const dietary = def.dietary;
     db.execute(
-      `INSERT INTO product_definitions (ean, name, brand, image_url, category, normalized_name)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO product_definitions (
+         ean, name, brand, image_url, category,
+         is_vegetarian, is_vegan, is_gluten_free, is_lactose_free
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(ean) DO UPDATE SET
          name = excluded.name,
          brand = excluded.brand,
          image_url = excluded.image_url,
          category = excluded.category,
-         normalized_name = COALESCE(excluded.normalized_name, product_definitions.normalized_name)`,
-      [def.ean, def.name, def.brand, def.imageUrl, def.category, def.normalizedName ?? null]
+         is_vegetarian = COALESCE(excluded.is_vegetarian, product_definitions.is_vegetarian),
+         is_vegan = COALESCE(excluded.is_vegan, product_definitions.is_vegan),
+         is_gluten_free = COALESCE(excluded.is_gluten_free, product_definitions.is_gluten_free),
+         is_lactose_free = COALESCE(excluded.is_lactose_free, product_definitions.is_lactose_free)`,
+      [
+        def.ean,
+        def.name,
+        def.brand,
+        def.imageUrl,
+        def.category,
+        dietary?.isVegetarian ?? null,
+        dietary?.isVegan ?? null,
+        dietary?.isGlutenFree ?? null,
+        dietary?.isLactoseFree ?? null,
+      ],
     );
   }
 
@@ -58,68 +72,108 @@ export class ProductRepository {
   ): Promise<void> {
     db.execute(
       'INSERT INTO inventory (id, product_ean, custom_name, expiry_date) VALUES (?, ?, ?, ?)',
-      [id, ean, customName, expiryDate]
+      [id, ean, customName, expiryDate],
     );
   }
 
-  async getDefinitionsPendingNormalization(limit = 50): Promise<PendingNormalizationRecord[]> {
+  async getItemsPendingDietaryCategorization(
+    limit = 50,
+  ): Promise<DietaryCategorizationCandidate[]> {
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 50;
     const result = db.execute(
-      `SELECT ean, name
-       FROM product_definitions
-       WHERE normalized_name IS NULL
-         AND TRIM(name) <> ''
-       ORDER BY ean
+      `SELECT i.id AS inventory_id, i.product_ean, i.custom_name, d.name AS definition_name
+       FROM inventory i
+       LEFT JOIN product_definitions d ON i.product_ean = d.ean
+       WHERE (
+         i.product_ean IS NOT NULL
+         AND TRIM(COALESCE(d.name, '')) <> ''
+         AND d.is_vegetarian IS NULL
+       ) OR (
+         i.product_ean IS NULL
+         AND TRIM(COALESCE(i.custom_name, '')) <> ''
+         AND i.is_vegetarian IS NULL
+       )
+       ORDER BY i.id
        LIMIT ?`,
       [safeLimit],
     );
 
-    const pending: PendingNormalizationRecord[] = [];
+    const pending: DietaryCategorizationCandidate[] = [];
     if (!result.rows) {
       return pending;
     }
 
     for (let i = 0; i < result.rows.length; i++) {
       const row = result.rows.item(i);
-      const ean = String(row.ean ?? '').trim();
-      const name = String(row.name ?? '').trim();
-      if (!ean || !name) {
+      const inventoryId = String(row.inventory_id ?? '').trim();
+      const productEan =
+        row.product_ean == null ? undefined : String(row.product_ean).trim() || undefined;
+      const name = productEan
+        ? String(row.definition_name ?? '').trim()
+        : String(row.custom_name ?? '').trim();
+
+      if (!inventoryId || !name) {
         continue;
       }
-      pending.push({ ean, name });
+
+      pending.push({
+        inventoryId,
+        productEan,
+        name,
+      });
     }
+
     return pending;
   }
 
-  async batchUpdateNormalizedNames(updates: NormalizationUpdateRecord[]): Promise<number> {
+  async batchUpdateDietaryCategorization(
+    updates: DietaryCategorizationUpdate[],
+  ): Promise<number> {
     let updatedCount = 0;
 
     for (const update of updates) {
-      const ean = update.ean.trim();
-      const normalizedName = update.normalizedName.trim();
-      if (!ean || !normalizedName) {
-        continue;
-      }
+      const flags = update.flags;
+      const values = [
+        flags.isVegetarian ? 1 : 0,
+        flags.isVegan ? 1 : 0,
+        flags.isGlutenFree ? 1 : 0,
+        flags.isLactoseFree ? 1 : 0,
+      ];
 
-      db.execute(
-        `UPDATE product_definitions
-         SET normalized_name = ?
-         WHERE ean = ?
-           AND (normalized_name IS NULL OR TRIM(normalized_name) = '')`,
-        [normalizedName, ean],
-      );
-      updatedCount += 1;
+      if (update.productEan) {
+        db.execute(
+          `UPDATE product_definitions
+           SET is_vegetarian = ?, is_vegan = ?, is_gluten_free = ?, is_lactose_free = ?
+           WHERE ean = ?
+             AND is_vegetarian IS NULL`,
+          [...values, update.productEan],
+        );
+        updatedCount += 1;
+      } else if (update.inventoryId) {
+        db.execute(
+          `UPDATE inventory
+           SET is_vegetarian = ?, is_vegan = ?, is_gluten_free = ?, is_lactose_free = ?
+           WHERE id = ?
+             AND is_vegetarian IS NULL`,
+          [...values, update.inventoryId],
+        );
+        updatedCount += 1;
+      }
     }
 
     return updatedCount;
   }
 
-  async resetAllNormalizedNames(): Promise<number> {
+  async resetAllDietaryCategorization(): Promise<number> {
     const before = db.execute(
       `SELECT COUNT(*) AS count
-       FROM product_definitions
-       WHERE normalized_name IS NOT NULL
-         AND TRIM(normalized_name) <> ''`,
+       FROM inventory i
+       LEFT JOIN product_definitions d ON i.product_ean = d.ean
+       WHERE (
+         i.product_ean IS NOT NULL AND d.is_vegetarian IS NOT NULL
+       ) OR (
+         i.product_ean IS NULL AND i.is_vegetarian IS NOT NULL
+       )`,
     );
     const resetCount =
       before.rows && before.rows.length > 0
@@ -128,17 +182,27 @@ export class ProductRepository {
 
     db.execute(
       `UPDATE product_definitions
-       SET normalized_name = NULL
-       WHERE normalized_name IS NOT NULL
-         AND TRIM(normalized_name) <> ''`,
+       SET is_vegetarian = NULL, is_vegan = NULL, is_gluten_free = NULL, is_lactose_free = NULL
+       WHERE is_vegetarian IS NOT NULL`,
+    );
+    db.execute(
+      `UPDATE inventory
+       SET is_vegetarian = NULL, is_vegan = NULL, is_gluten_free = NULL, is_lactose_free = NULL
+       WHERE is_vegetarian IS NOT NULL`,
     );
 
     return resetCount;
   }
 
-  async getRecipeIngredientNames(): Promise<string[]> {
+  async getRecipeIngredientNames(diet: DietPreference = 'none'): Promise<string[]> {
     const result = db.execute(
-      `SELECT i.custom_name, d.normalized_name, d.name
+      `SELECT
+         i.custom_name,
+         d.name AS definition_name,
+         COALESCE(i.is_vegetarian, d.is_vegetarian) AS is_vegetarian,
+         COALESCE(i.is_vegan, d.is_vegan) AS is_vegan,
+         COALESCE(i.is_gluten_free, d.is_gluten_free) AS is_gluten_free,
+         COALESCE(i.is_lactose_free, d.is_lactose_free) AS is_lactose_free
        FROM inventory i
        LEFT JOIN product_definitions d ON i.product_ean = d.ean
        ORDER BY i.expiry_date ASC`,
@@ -151,14 +215,21 @@ export class ProductRepository {
 
     for (let i = 0; i < result.rows.length; i++) {
       const row = result.rows.item(i);
-      const normalizedName = typeof row.normalized_name === 'string' ? row.normalized_name.trim() : '';
-      const definitionName = typeof row.name === 'string' ? row.name.trim() : '';
-      const customName = typeof row.custom_name === 'string' ? row.custom_name.trim() : '';
-
-      const selected = normalizedName || definitionName || customName;
-      if (selected) {
-        names.push(selected);
+      const definitionName =
+        typeof row.definition_name === 'string' ? row.definition_name.trim() : '';
+      const customName =
+        typeof row.custom_name === 'string' ? row.custom_name.trim() : '';
+      const displayName = definitionName || customName;
+      if (!displayName) {
+        continue;
       }
+
+      const dietary = this.readDietaryFlagsFromRow(row);
+      if (!matchesDietPreference(dietary, diet)) {
+        continue;
+      }
+
+      names.push(displayName);
     }
 
     return names;
@@ -169,7 +240,8 @@ export class ProductRepository {
 
     const productDefinitions = this.rowsToArray(
       db.execute(
-        `SELECT ean, name, normalized_name, brand, category
+        `SELECT ean, name, brand, category,
+                is_vegetarian, is_vegan, is_gluten_free, is_lactose_free
          FROM product_definitions
          ORDER BY ean
          LIMIT ?`,
@@ -178,7 +250,8 @@ export class ProductRepository {
     );
     const inventory = this.rowsToArray(
       db.execute(
-        `SELECT id, product_ean, custom_name, expiry_date, is_opened, opened_at
+        `SELECT id, product_ean, custom_name, expiry_date, is_opened, opened_at,
+                is_vegetarian, is_vegan, is_gluten_free, is_lactose_free
          FROM inventory
          ORDER BY expiry_date ASC
          LIMIT ?`,
@@ -221,13 +294,13 @@ export class ProductRepository {
         items.push({
           id: row.id,
           ean: row.ean || '',
-          name: row.name || row.custom_name, // Fallback do nazwy własnej
+          name: row.name || row.custom_name,
           brand: row.brand,
           imageUrl: row.image_url,
           category: row.category,
           expiryDate: row.expiry_date ?? null,
           openedAt: row.opened_at,
-          isOpened: row.is_opened === 1
+          isOpened: row.is_opened === 1,
         });
       }
     }
@@ -258,6 +331,21 @@ export class ProductRepository {
       'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
       [ProductRepository.RECIPE_MODEL_CONSENT_KEY, granted ? '1' : '0'],
     );
+  }
+
+  private readDietaryFlagsFromRow(
+    row: Record<string, unknown>,
+  ): DietaryFlags | null {
+    if (row.is_vegetarian == null) {
+      return null;
+    }
+
+    return {
+      isVegetarian: Number(row.is_vegetarian) === 1,
+      isVegan: Number(row.is_vegan) === 1,
+      isGlutenFree: Number(row.is_gluten_free) === 1,
+      isLactoseFree: Number(row.is_lactose_free) === 1,
+    };
   }
 
   private rowsToArray(result: {

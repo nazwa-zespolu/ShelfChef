@@ -5,6 +5,10 @@ type ProductDefinitionRow = {
   image_url: string | null;
   category: string | null;
   normalized_name: string | null;
+  is_vegetarian: number | null;
+  is_vegan: number | null;
+  is_gluten_free: number | null;
+  is_lactose_free: number | null;
 };
 
 type InventoryRow = {
@@ -14,6 +18,10 @@ type InventoryRow = {
   expiry_date: string | null;
   opened_at: string | null;
   is_opened: number;
+  is_vegetarian: number | null;
+  is_vegan: number | null;
+  is_gluten_free: number | null;
+  is_lactose_free: number | null;
 };
 
 type SQLiteResult = {
@@ -33,6 +41,20 @@ const productDefinitionColumns = new Set([
   'image_url',
   'category',
 ]);
+const inventoryColumns = new Set([
+  'id',
+  'product_ean',
+  'custom_name',
+  'expiry_date',
+  'opened_at',
+  'is_opened',
+]);
+const DIETARY_COLUMNS = [
+  'is_vegetarian',
+  'is_vegan',
+  'is_gluten_free',
+  'is_lactose_free',
+] as const;
 
 const toRows = (data: Record<string, unknown>[]): SQLiteResult => ({
   rows: {
@@ -85,6 +107,38 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     return toRows([]);
   }
 
+  for (const column of DIETARY_COLUMNS) {
+    if (
+      normalized.startsWith(
+        `ALTER TABLE PRODUCT_DEFINITIONS ADD COLUMN ${column.toUpperCase()} INTEGER`,
+      )
+    ) {
+      productDefinitionColumns.add(column);
+      return toRows([]);
+    }
+    if (
+      normalized.startsWith(
+        `ALTER TABLE INVENTORY ADD COLUMN ${column.toUpperCase()} INTEGER`,
+      )
+    ) {
+      inventoryColumns.add(column);
+      return toRows([]);
+    }
+  }
+
+  if (normalized.startsWith('PRAGMA TABLE_INFO(INVENTORY)')) {
+    return toRows(
+      Array.from(inventoryColumns).map((name, index) => ({
+        cid: index,
+        name,
+        type: 'INTEGER',
+        notnull: 0,
+        dflt_value: null,
+        pk: name === 'id' ? 1 : 0,
+      })),
+    );
+  }
+
   if (normalized.startsWith('SELECT * FROM PRODUCT_DEFINITIONS WHERE EAN = ?')) {
     const ean = params[0];
     const row = productDefinitions.get(ean);
@@ -117,10 +171,11 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
 
   if (
     normalized.startsWith(
-      'INSERT INTO PRODUCT_DEFINITIONS (EAN, NAME, BRAND, IMAGE_URL, CATEGORY, NORMALIZED_NAME) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(EAN) DO UPDATE SET NAME = EXCLUDED.NAME, BRAND = EXCLUDED.BRAND, IMAGE_URL = EXCLUDED.IMAGE_URL, CATEGORY = EXCLUDED.CATEGORY, NORMALIZED_NAME = COALESCE(EXCLUDED.NORMALIZED_NAME, PRODUCT_DEFINITIONS.NORMALIZED_NAME)',
+      'INSERT INTO PRODUCT_DEFINITIONS (EAN, NAME, BRAND, IMAGE_URL, CATEGORY, IS_VEGETARIAN, IS_VEGAN, IS_GLUTEN_FREE, IS_LACTOSE_FREE) VALUES',
     )
   ) {
-    const [ean, name, brand, imageUrl, category, normalizedName] = params;
+    const [ean, name, brand, imageUrl, category, isVegetarian, isVegan, isGlutenFree, isLactoseFree] =
+      params;
     const existing = productDefinitions.get(ean);
     productDefinitions.set(ean, {
       ean,
@@ -128,10 +183,14 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       brand: brand ?? null,
       image_url: imageUrl ?? null,
       category: category ?? null,
-      normalized_name:
-        normalizedName != null
-          ? String(normalizedName)
-          : existing?.normalized_name ?? null,
+      normalized_name: existing?.normalized_name ?? null,
+      is_vegetarian:
+        isVegetarian != null ? Number(isVegetarian) : existing?.is_vegetarian ?? null,
+      is_vegan: isVegan != null ? Number(isVegan) : existing?.is_vegan ?? null,
+      is_gluten_free:
+        isGlutenFree != null ? Number(isGlutenFree) : existing?.is_gluten_free ?? null,
+      is_lactose_free:
+        isLactoseFree != null ? Number(isLactoseFree) : existing?.is_lactose_free ?? null,
     });
     return toRows([]);
   }
@@ -183,6 +242,10 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       expiry_date: expiryDate,
       opened_at: null,
       is_opened: 0,
+      is_vegetarian: null,
+      is_vegan: null,
+      is_gluten_free: null,
+      is_lactose_free: null,
     });
     return toRows([]);
   }
@@ -234,16 +297,23 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
 
   if (
     normalized.startsWith(
-      'SELECT I.CUSTOM_NAME, D.NORMALIZED_NAME, D.NAME FROM INVENTORY I LEFT JOIN PRODUCT_DEFINITIONS D ON I.PRODUCT_EAN = D.EAN ORDER BY I.EXPIRY_DATE ASC',
+      'SELECT I.CUSTOM_NAME, D.NAME AS DEFINITION_NAME, COALESCE(I.IS_VEGETARIAN, D.IS_VEGETARIAN) AS IS_VEGETARIAN',
     )
   ) {
     const rows = Array.from(inventory.values())
       .map(row => {
         const def = row.product_ean ? productDefinitions.get(row.product_ean) : undefined;
+        const isVegetarian = row.is_vegetarian ?? def?.is_vegetarian ?? null;
+        const isVegan = row.is_vegan ?? def?.is_vegan ?? null;
+        const isGlutenFree = row.is_gluten_free ?? def?.is_gluten_free ?? null;
+        const isLactoseFree = row.is_lactose_free ?? def?.is_lactose_free ?? null;
         return {
           custom_name: row.custom_name,
-          normalized_name: def?.normalized_name ?? null,
-          name: def?.name ?? null,
+          definition_name: def?.name ?? null,
+          is_vegetarian: isVegetarian,
+          is_vegan: isVegan,
+          is_gluten_free: isGlutenFree,
+          is_lactose_free: isLactoseFree,
           expiry_date: row.expiry_date,
         };
       })
@@ -302,11 +372,15 @@ describe('ProductRepository + database integration', () => {
     db.execute('DELETE FROM product_definitions');
     db.execute('DELETE FROM app_settings');
     productDefinitionColumns.delete('normalized_name');
+    for (const column of DIETARY_COLUMNS) {
+      productDefinitionColumns.delete(column);
+      inventoryColumns.delete(column);
+    }
     setupDatabase();
     repository = new ProductRepository();
   });
 
-  it('wykonuje migracje schema_version i normalized_name', async () => {
+  it('wykonuje migracje schema_version i kolumny dietetyczne', async () => {
     const columnInfo = db.execute('PRAGMA table_info(product_definitions)');
     const columnNames: string[] = [];
     const rows = columnInfo.rows;
@@ -324,9 +398,9 @@ describe('ProductRepository + database integration', () => {
     );
     const schemaRows = schemaVersion.rows;
 
-    expect(columnNames).toContain('normalized_name');
+    expect(columnNames).toContain('is_vegetarian');
     expect(schemaRows?.length).toBe(1);
-    expect(schemaRows?.item(0).value).toBe('2');
+    expect(schemaRows?.item(0).value).toBe('3');
   });
 
   it('zapisuje i odczytuje definicje produktu po EAN', async () => {
@@ -345,14 +419,19 @@ describe('ProductRepository + database integration', () => {
     expect(found).toEqual(definition);
   });
 
-  it('nie nadpisuje normalized_name przy zwyklym update definicji', async () => {
+  it('nie nadpisuje flag dietetycznych przy zwyklym update definicji', async () => {
     await repository.saveDefinition({
       ean: '5901234123457',
       name: 'Mleko',
       brand: 'Lacpol',
       imageUrl: 'https://img/mleko.jpg',
       category: 'Nabial',
-      normalizedName: 'milk',
+      dietary: {
+        isVegetarian: true,
+        isVegan: false,
+        isGlutenFree: true,
+        isLactoseFree: false,
+      },
     });
 
     await repository.saveDefinition({
@@ -365,63 +444,42 @@ describe('ProductRepository + database integration', () => {
 
     const found = await repository.findDefinitionByEan('5901234123457');
 
-    expect(found).toMatchObject({
-      ean: '5901234123457',
-      name: 'Mleko 2%',
-      normalizedName: 'milk',
+    expect(found?.dietary).toEqual({
+      isVegetarian: true,
+      isVegan: false,
+      isGlutenFree: true,
+      isLactoseFree: false,
     });
   });
 
-  it('zwraca tylko rekordy wymagajace normalizacji i nie zwraca ich po batch update', async () => {
-    await repository.saveDefinition({
-      ean: '200',
-      name: 'Makaron spaghetti',
-    });
-    await repository.saveDefinition({
-      ean: '100',
-      name: 'Mleko UHT 3.2%',
-    });
-    await repository.saveDefinition({
-      ean: '300',
-      name: 'Cebula',
-      normalizedName: 'onion',
-    });
-
-    const pendingBefore = await repository.getDefinitionsPendingNormalization(10);
-    expect(pendingBefore).toEqual([
-      { ean: '100', name: 'Mleko UHT 3.2%' },
-      { ean: '200', name: 'Makaron spaghetti' },
-    ]);
-
-    const updated = await repository.batchUpdateNormalizedNames([
-      { ean: '200', normalizedName: 'spaghetti' },
-      { ean: '100', normalizedName: 'milk' },
-    ]);
-    expect(updated).toBe(2);
-
-    const pendingAfter = await repository.getDefinitionsPendingNormalization(10);
-    expect(pendingAfter).toEqual([]);
-  });
-
-  it('zwraca skladniki do recipe z fallbackiem normalized_name -> name -> custom_name', async () => {
+  it('filtruje skladniki po diecie wegetarianskiej', async () => {
     await repository.saveDefinition({
       ean: '111',
-      name: 'Mleko UHT 3.2%',
-      normalizedName: 'milk',
+      name: 'Jajka',
+      dietary: {
+        isVegetarian: true,
+        isVegan: false,
+        isGlutenFree: true,
+        isLactoseFree: true,
+      },
     });
     await repository.saveDefinition({
       ean: '222',
-      name: 'Cebula',
+      name: 'Kurczak',
+      dietary: {
+        isVegetarian: false,
+        isVegan: false,
+        isGlutenFree: true,
+        isLactoseFree: true,
+      },
     });
 
     await repository.addToInventory('inv-1', '111', null, '2026-01-01');
     await repository.addToInventory('inv-2', '222', null, '2026-01-02');
-    await repository.addToInventory('inv-3', null, 'Domowy sos', '2026-01-03');
-    await repository.addToInventory('inv-4', null, null, '2026-01-04');
 
-    const names = await repository.getRecipeIngredientNames();
+    const names = await repository.getRecipeIngredientNames('vegetarian');
 
-    expect(names).toEqual(['milk', 'Cebula', 'Domowy sos']);
+    expect(names).toEqual(['Jajka']);
   });
 
   it('zwraca null, gdy brak definicji dla EAN', async () => {

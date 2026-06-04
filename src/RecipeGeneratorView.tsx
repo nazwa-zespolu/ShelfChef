@@ -11,12 +11,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from './theme/colors';
 import { ProductRepository } from './infrastructure/ProductRepository';
 import {
-  QWEN2_5_1_5B_QUANTIZED,
+  QWEN2_5_3B_QUANTIZED,
   Message,
   useLLM,
 } from 'react-native-executorch';
 import { BareResourceFetcher } from 'react-native-executorch-bare-resource-fetcher';
-import { LazyNormalizationService } from './features/recipe-generator/application/lazyNormalizationService';
+import { LazyDietaryCategorizationService } from './features/recipe-generator/application/lazyDietaryCategorizationService';
 import { RecipeGenerationService } from './features/recipe-generator/application/recipeGenerationService';
 import { RecipeGenerationPipeline } from './features/recipe-generator/application/recipeGenerationPipeline';
 import {
@@ -54,8 +54,8 @@ function inferPromptKind(systemPrompt: string, userPrompt: string): string {
   const system = systemPrompt.toLowerCase();
   const user = userPrompt.toLowerCase();
 
-  if (system.includes('normalize ingredient names')) {
-    return 'normalization';
+  if (system.includes('data categorization ai')) {
+    return 'dietary-categorization';
   }
   if (system.includes('recipe ideation assistant')) {
     return 'recipe-generation';
@@ -76,7 +76,7 @@ export default function RecipeGeneratorView({ onRequestClose }: RecipeGeneratorV
   const checkModelDownloaded = useCallback(async () => {
     try {
       const downloaded = await BareResourceFetcher.listDownloadedModels();
-      const modelFileName = QWEN2_5_1_5B_QUANTIZED.modelSource.split('/').pop()?.toLowerCase();
+      const modelFileName = QWEN2_5_3B_QUANTIZED.modelSource.split('/').pop()?.toLowerCase();
       if (!modelFileName) {
         return false;
       }
@@ -181,13 +181,13 @@ export default function RecipeGeneratorView({ onRequestClose }: RecipeGeneratorV
 }
 
 function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }) {
-  const llm = useLLM({model: QWEN2_5_1_5B_QUANTIZED});
+  const llm = useLLM({model: QWEN2_5_3B_QUANTIZED});
   const [screen, setScreen] = useState<FlowScreen>('preferences');
   const [dishType, setDishType] = useState<DishType>('dinner');
   const [diet, setDiet] = useState<DietPreference>('none');
   const [dishes, setDishes] = useState<string[]>([]);
   const [progressStage, setProgressStage] =
-    useState<RecipeGenerationProgressStage>('normalizing');
+    useState<RecipeGenerationProgressStage>('categorizing');
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [isRunningPipeline, setIsRunningPipeline] = useState(false);
   const [remountKey, setRemountKey] = useState(0);
@@ -241,9 +241,9 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
     [llm, pushDebugEvent],
   );
 
-  const lazyNormalizationService = useMemo(
+  const lazyDietaryCategorizationService = useMemo(
     () =>
-      new LazyNormalizationService({
+      new LazyDietaryCategorizationService({
         modelClient,
         maxParseRetries: 2,
       }),
@@ -263,10 +263,11 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
     () =>
       new RecipeGenerationPipeline({
         repository: repo,
-        lazyNormalizationService,
+        lazyDietaryCategorizationService,
         recipeGenerationService,
+        
       }),
-    [lazyNormalizationService, recipeGenerationService],
+    [lazyDietaryCategorizationService, recipeGenerationService],
   );
 
   const canClose = !isRunningPipeline && !llm.isGenerating;
@@ -308,7 +309,7 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
       generationConfig: {
         outputTokenBatchSize: 32,
         batchTimeInterval: 500,
-        temperature: 0.35,
+        temperature: 0.1,
         topP: 0.9,
         //repetitionPenalty: 1.1,
       },
@@ -319,7 +320,7 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
     setGenerateError(null);
     setIsRunningPipeline(true);
     setScreen('progress');
-    setProgressStage('normalizing');
+    setProgressStage('categorizing');
 
     if (!llm.isReady) {
       setGenerateError('Model jeszcze się ładuje.');
@@ -334,7 +335,7 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
           dishType,
           diet,
           maxDishes: 5,
-          normalizationBatchSize: 10,
+          categorizationBatchSize: 5,
         },
         stage => {
           pushDebugEvent('pipeline stage', stage);
@@ -343,7 +344,7 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
       );
       pushDebugEvent('pipeline finished', {
         dishes: result.dishes,
-        normalization: result.normalization,
+        categorization: result.categorization,
         retriesUsed: result.retriesUsed,
       });
       setDishes(result.dishes);
@@ -380,13 +381,13 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
     }
   }, [pushDebugEvent]);
 
-  const resetNormalizedNames = useCallback(async () => {
+  const resetDietaryCategorization = useCallback(async () => {
     try {
-      const changed = await repo.resetAllNormalizedNames();
-      pushDebugEvent('normalized names reset', { changed });
+      const changed = await repo.resetAllDietaryCategorization();
+      pushDebugEvent('dietary categorization reset', { changed });
       await refreshDebugSnapshot();
     } catch (error) {
-      pushDebugEvent('normalized names reset error', String(error));
+      pushDebugEvent('dietary categorization reset error', String(error));
     }
   }, [pushDebugEvent, refreshDebugSnapshot]);
 
@@ -396,9 +397,9 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
     }
 
     (globalThis as any).__SHELFCHEF_DEBUG__ = {
-      resetNormalizedNames: async () => {
-        const changed = await repo.resetAllNormalizedNames();
-        console.log('[ShelfChefDebug] resetNormalizedNames changed:', changed);
+      resetDietaryCategorization: async () => {
+        const changed = await repo.resetAllDietaryCategorization();
+        console.log('[ShelfChefDebug] resetDietaryCategorization changed:', changed);
         return changed;
       },
       getDbSnapshot: async (limit = 200) => {
@@ -486,8 +487,8 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
               onRefreshDebugSnapshot={() => {
                 refreshDebugSnapshot().catch(() => {});
               }}
-              onResetNormalizedNames={() => {
-                resetNormalizedNames().catch(() => {});
+              onResetDietaryCategorization={() => {
+                resetDietaryCategorization().catch(() => {});
               }}
             />
           ) : null}

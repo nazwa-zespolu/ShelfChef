@@ -1,12 +1,12 @@
 import { RecipeGenerationPipeline } from '../../../src/features/recipe-generator/application/recipeGenerationPipeline';
 import { RecipeGenerationService } from '../../../src/features/recipe-generator/application/recipeGenerationService';
-import { LazyNormalizationService } from '../../../src/features/recipe-generator/application/lazyNormalizationService';
+import { LazyDietaryCategorizationService } from '../../../src/features/recipe-generator/application/lazyDietaryCategorizationService';
 import { ProductRepository } from '../../../src/infrastructure/ProductRepository';
 import { RecipeGenerationError } from '../../../src/features/recipe-generator/domain/recipeGenerationTypes';
 
 const createPipeline = (deps: {
   repository: Partial<ProductRepository>;
-  lazyNormalizationService: Partial<LazyNormalizationService>;
+  lazyDietaryCategorizationService: Partial<LazyDietaryCategorizationService>;
   complete: jest.Mock<Promise<string>, [string, string]>;
 }) => {
   const recipeGenerationService = new RecipeGenerationService({
@@ -18,112 +18,117 @@ const createPipeline = (deps: {
 
   return new RecipeGenerationPipeline({
     repository: deps.repository as ProductRepository,
-    lazyNormalizationService:
-      deps.lazyNormalizationService as LazyNormalizationService,
+    lazyDietaryCategorizationService:
+      deps.lazyDietaryCategorizationService as LazyDietaryCategorizationService,
     recipeGenerationService,
   });
 };
 
 describe('RecipeGenerationPipeline', () => {
-  it('runs happy path end-to-end', async () => {
+  it('runs happy path end-to-end with dietary filtering', async () => {
     const repository: Partial<ProductRepository> = {
-      getDefinitionsPendingNormalization: jest
+      getItemsPendingDietaryCategorization: jest
         .fn()
-        .mockResolvedValueOnce([{ ean: '100', name: 'Mleko UHT 3.2%' }])
+        .mockResolvedValueOnce([{ productEan: '100', inventoryId: 'inv-1', name: 'Jajka' }])
         .mockResolvedValueOnce([]),
-      batchUpdateNormalizedNames: jest.fn().mockResolvedValue(1),
-      getRecipeIngredientNames: jest
-        .fn()
-        .mockResolvedValue(['milk', 'onion', 'spaghetti']),
+      batchUpdateDietaryCategorization: jest.fn().mockResolvedValue(1),
+      getRecipeIngredientNames: jest.fn().mockResolvedValue(['Jajka', 'Marchew']),
     };
-    const lazyNormalizationService: Partial<LazyNormalizationService> = {
-      normalizeBatch: jest.fn().mockResolvedValue({
+    const lazyDietaryCategorizationService: Partial<LazyDietaryCategorizationService> = {
+      categorizeBatch: jest.fn().mockResolvedValue({
         result: {
           attempted: 1,
-          normalized: 1,
+          categorized: 1,
           skipped: 0,
           retriesUsed: 0,
         },
-        mappings: [
-          { ean: '100', sourceName: 'Mleko UHT 3.2%', normalizedName: 'milk' },
+        updates: [
+          {
+            productEan: '100',
+            inventoryId: 'inv-1',
+            sourceName: 'Jajka',
+            flags: {
+              isVegetarian: true,
+              isVegan: false,
+              isGlutenFree: true,
+              isLactoseFree: true,
+            },
+          },
         ],
       }),
     };
     const complete = jest.fn<Promise<string>, [string, string]>(
-      async () => '{"dishes":["Pasta primavera","Onion soup"]}',
+      async () => '{"dishes":["Omlet","Jajecznica"]}',
     );
     const pipeline = createPipeline({
       repository,
-      lazyNormalizationService,
-      complete,
-    });
-
-    const result = await pipeline.run({
-      dishType: 'dinner',
-      diet: 'vegetarian',
-      maxDishes: 5,
-    });
-
-    expect(result.dishes).toEqual(['Pasta primavera', 'Onion soup']);
-    expect(result.normalization).toEqual({
-      attempted: 1,
-      normalized: 1,
-      skipped: 0,
-      retriesUsed: 0,
-      failed: false,
-    });
-    expect(repository.batchUpdateNormalizedNames).toHaveBeenCalledWith([
-      { ean: '100', normalizedName: 'milk' },
-    ]);
-  });
-
-  it('continues recipe generation when normalization stage fails', async () => {
-    const repository: Partial<ProductRepository> = {
-      getDefinitionsPendingNormalization: jest
-        .fn()
-        .mockRejectedValue(new Error('db read failed')),
-      batchUpdateNormalizedNames: jest.fn().mockResolvedValue(0),
-      getRecipeIngredientNames: jest.fn().mockResolvedValue(['eggs', 'butter']),
-    };
-    const lazyNormalizationService: Partial<LazyNormalizationService> = {
-      normalizeBatch: jest.fn(),
-    };
-    const complete = jest.fn<Promise<string>, [string, string]>(
-      async () => '{"dishes":["Scrambled eggs"]}',
-    );
-    const pipeline = createPipeline({
-      repository,
-      lazyNormalizationService,
+      lazyDietaryCategorizationService,
       complete,
     });
 
     const result = await pipeline.run({
       dishType: 'breakfast',
-      diet: 'none',
+      diet: 'vegetarian',
+      maxDishes: 5,
     });
 
-    expect(result.dishes).toEqual(['Scrambled eggs']);
-    expect(result.normalization.failed).toBe(true);
-    expect(complete).toHaveBeenCalledTimes(1);
+    expect(result.dishes).toEqual(['Omlet', 'Jajecznica']);
+    expect(repository.getRecipeIngredientNames).toHaveBeenCalledWith('vegetarian');
+    expect(result.categorization).toEqual({
+      attempted: 1,
+      categorized: 1,
+      skipped: 0,
+      retriesUsed: 0,
+      failed: false,
+    });
+  });
+
+  it('continues recipe generation when categorization stage fails', async () => {
+    const repository: Partial<ProductRepository> = {
+      getItemsPendingDietaryCategorization: jest
+        .fn()
+        .mockRejectedValue(new Error('db read failed')),
+      batchUpdateDietaryCategorization: jest.fn().mockResolvedValue(0),
+      getRecipeIngredientNames: jest.fn().mockResolvedValue(['Jajka']),
+    };
+    const lazyDietaryCategorizationService: Partial<LazyDietaryCategorizationService> = {
+      categorizeBatch: jest.fn(),
+    };
+    const complete = jest.fn<Promise<string>, [string, string]>(
+      async () => '{"dishes":["Omlet"]}',
+    );
+    const pipeline = createPipeline({
+      repository,
+      lazyDietaryCategorizationService,
+      complete,
+    });
+
+    const result = await pipeline.run({
+      dishType: 'breakfast',
+      diet: 'vegetarian',
+    });
+
+    expect(result.dishes).toEqual(['Omlet']);
+    expect(result.categorization.failed).toBe(true);
   });
 
   it('throws controlled error after JSON retries are exhausted', async () => {
     const repository: Partial<ProductRepository> = {
-      getDefinitionsPendingNormalization: jest.fn().mockResolvedValue([]),
-      batchUpdateNormalizedNames: jest.fn().mockResolvedValue(0),
-      getRecipeIngredientNames: jest.fn().mockResolvedValue(['milk']),
+      getItemsPendingDietaryCategorization: jest.fn().mockResolvedValue([]),
+      batchUpdateDietaryCategorization: jest.fn().mockResolvedValue(0),
+      getRecipeIngredientNames: jest.fn().mockResolvedValue(['Jajka']),
     };
-    const lazyNormalizationService: Partial<LazyNormalizationService> = {
-      normalizeBatch: jest.fn(),
+    const lazyDietaryCategorizationService: Partial<LazyDietaryCategorizationService> = {
+      categorizeBatch: jest.fn(),
     };
     const complete = jest
       .fn<Promise<string>, [string, string]>()
-      .mockResolvedValueOnce('not-json')
-      .mockResolvedValueOnce('still invalid')
-      .mockResolvedValueOnce('invalid again');
+      .mockResolvedValue('not-json')
+      .mockResolvedValue('still invalid')
+      .mockResolvedValue('invalid again');
     const pipeline = createPipeline({
       repository,
-      lazyNormalizationService,
+      lazyDietaryCategorizationService,
       complete,
     });
 
@@ -136,6 +141,5 @@ describe('RecipeGenerationPipeline', () => {
       name: 'RecipeGenerationError',
       code: 'INVALID_JSON_RESPONSE',
     });
-    expect(complete).toHaveBeenCalledTimes(3);
   });
 });

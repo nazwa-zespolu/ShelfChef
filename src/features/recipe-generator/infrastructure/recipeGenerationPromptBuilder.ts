@@ -36,7 +36,7 @@ export const buildRecipeGenerationUserPrompt = (params: {
     `Dish type target: ${dishTypeLabel[params.dishType]}.`,
     `Dietary preference: ${dietLabel[params.diet]}.`,
     `Propose up to ${params.maxDishes} dishes.`,
-    'Use these ingredients as primary context (missing extras are allowed):',
+    'Use only these pantry ingredients (already filtered for dietary preference; missing extras are allowed):',
     ...params.ingredients.map(item => `- ${item}`),
   ].join('\n');
 

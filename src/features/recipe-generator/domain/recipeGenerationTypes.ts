@@ -15,7 +15,7 @@ export type DietPreference =
   | 'low-carb';
 
 export type RecipeGenerationProgressStage =
-  | 'normalizing'
+  | 'categorizing'
   | 'generating'
   | 'parsing'
   | 'done';
@@ -24,7 +24,7 @@ export interface RecipeGenerationRequest {
   dishType: DishType;
   diet: DietPreference;
   maxDishes?: number;
-  normalizationBatchSize?: number;
+  categorizationBatchSize?: number;
 }
 
 export interface RecipeGenerationResult {

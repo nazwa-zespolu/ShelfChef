@@ -18,7 +18,7 @@ type Props = {
   debugEvents: string[];
   onToggleDebug: () => void;
   onRefreshDebugSnapshot: () => void;
-  onResetNormalizedNames: () => void;
+  onResetDietaryCategorization: () => void;
 };
 
 const DISH_TYPES: { value: DishType; label: string }[] = [
@@ -54,7 +54,7 @@ export function RecipePreferencesScreen({
   debugEvents,
   onToggleDebug,
   onRefreshDebugSnapshot,
-  onResetNormalizedNames,
+  onResetDietaryCategorization,
 }: Props) {
   return (
     <View style={styles.body}>
@@ -137,8 +137,10 @@ export function RecipePreferencesScreen({
             <Pressable style={styles.secondaryButton} onPress={onRefreshDebugSnapshot}>
               <Text style={styles.secondaryButtonText}>Odswiez snapshot SQLite</Text>
             </Pressable>
-            <Pressable style={styles.secondaryButton} onPress={onResetNormalizedNames}>
-              <Text style={styles.secondaryButtonText}>Reset normalized_name</Text>
+            <Pressable
+              style={styles.secondaryButton}
+              onPress={onResetDietaryCategorization}>
+              <Text style={styles.secondaryButtonText}>Reset kategoryzacji diet</Text>
             </Pressable>
 
             <Text style={styles.debugLabel}>Ostatnie logi</Text>

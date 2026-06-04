@@ -13,7 +13,7 @@ type Props = {
 };
 
 const STAGE_LABELS: Record<RecipeGenerationProgressStage, string> = {
-  normalizing: 'Normalizowanie skladnikow',
+  categorizing: 'Kategoryzacja dietetyczna',
   generating: 'Generowanie propozycji',
   parsing: 'Parsowanie odpowiedzi JSON',
   done: 'Gotowe',
