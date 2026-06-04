@@ -22,9 +22,10 @@ const dietLabel: Record<DietPreference, string> = {
 };
 
 export const buildRecipeGenerationSystemPrompt = (): string =>
-  'You are a recipe ideation assistant. Return ONLY strict JSON in the format {"dishes":["..."]}. ' +
-  'No markdown fences, no explanations, and no extra keys. ' +
-  'Each array element must be one short dish name string.';
+  'You are a kitchen assistant. Respond ONLY with JSON in the format {"dishes":["..."]}.' +
+        ' No comments, no Markdown, no extra fields. Only dish names.' +
+        ' Each element of the dishes array MUST be a single string (the dish name), not an object.' +
+        ' Suggest only dishes that can be made using given ingredients.';
 
 export const buildRecipeGenerationUserPrompt = (params: {
   ingredients: string[];
@@ -36,7 +37,7 @@ export const buildRecipeGenerationUserPrompt = (params: {
     `Dish type target: ${dishTypeLabel[params.dishType]}.`,
     `Dietary preference: ${dietLabel[params.diet]}.`,
     `Propose up to ${params.maxDishes} dishes.`,
-    'Use only these pantry ingredients (already filtered for dietary preference; missing extras are allowed):',
+    'If some ingredients are missing its ok. Here are the ingredients:',
     ...params.ingredients.map(item => `- ${item}`),
   ].join('\n');
 
