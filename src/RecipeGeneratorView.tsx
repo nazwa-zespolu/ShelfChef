@@ -31,8 +31,10 @@ import { RecipePreferencesScreen } from './features/recipe-generator/ui/RecipePr
 import { RecipeGenerationProgressScreen } from './features/recipe-generator/ui/RecipeGenerationProgressScreen';
 import { RecipeResultsScreen } from './features/recipe-generator/ui/RecipeResultsScreen';
 
-export const categorizationBatchSize = 1;
-export const maxDishes = 5;
+import {
+  categorizationBatchSize,
+  maxDishes,
+} from './features/recipe-generator/recipeGeneratorConstants';
 
 type RecipeGeneratorViewProps = {
   onRequestClose?: () => void;
@@ -41,10 +43,8 @@ type RecipeGeneratorViewProps = {
 type ConsentState = 'unknown' | 'accepted' | 'declined';
 type FlowScreen = 'preferences' | 'progress' | 'results';
 
-import {
-  boundedLlmGenerate,
-  LlmCompletionKind,
-} from './features/recipe-generator/infrastructure/llmCompletionGuard';
+import { LlmCompletionKind } from './features/recipe-generator/recipeGeneratorConstants';
+import { boundedLlmGenerate } from './features/recipe-generator/infrastructure/llmCompletionGuard';
 
 function inferPromptKind(systemPrompt: string, userPrompt: string): LlmCompletionKind {
   const system = systemPrompt.toLowerCase();
@@ -196,7 +196,6 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
   const debugEnabledRef = useRef(false);
 
   const pendingCloseRef = useRef(false);
-  const generationConfiguredRef = useRef(false);
   const debugSeqRef = useRef(0);
 
   useEffect(() => {
@@ -297,28 +296,6 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
       onRequestClose();
     }
   }, [canClose, onRequestClose]);
-
-  useEffect(() => {
-    if (!llm.isReady) {
-      generationConfiguredRef.current = false;
-      return;
-    }
-    if (llm.error) {
-      return;
-    }
-    if (generationConfiguredRef.current) {
-      return;
-    }
-    generationConfiguredRef.current = true;
-    llm.configure({
-      generationConfig: {
-        outputTokenBatchSize: 32,
-        batchTimeInterval: 500,
-        temperature: 0.35,
-        topP: 0.5,
-      },
-    });
-  }, [llm.isReady, llm.error]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const generate = useCallback(async () => {
     setGenerateError(null);
