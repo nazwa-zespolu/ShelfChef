@@ -29,6 +29,9 @@ import { RecipePreferencesScreen } from './features/recipe-generator/ui/RecipePr
 import { RecipeGenerationProgressScreen } from './features/recipe-generator/ui/RecipeGenerationProgressScreen';
 import { RecipeResultsScreen } from './features/recipe-generator/ui/RecipeResultsScreen';
 
+export const categorizationBatchSize = 1;
+export const maxDishes = 5;
+
 type RecipeGeneratorViewProps = {
   onRequestClose?: () => void;
 };
@@ -36,21 +39,12 @@ type RecipeGeneratorViewProps = {
 type ConsentState = 'unknown' | 'accepted' | 'declined';
 type FlowScreen = 'preferences' | 'progress' | 'results';
 
-function normalizeLlmOutput(response: unknown): string {
-  if (typeof response === 'string') {
-    return response;
-  }
-  if (response == null) {
-    return '';
-  }
-  try {
-    return JSON.stringify(response, null, 2);
-  } catch {
-    return String(response);
-  }
-}
+import {
+  boundedLlmGenerate,
+  LlmCompletionKind,
+} from './features/recipe-generator/infrastructure/llmCompletionGuard';
 
-function inferPromptKind(systemPrompt: string, userPrompt: string): string {
+function inferPromptKind(systemPrompt: string, userPrompt: string): LlmCompletionKind {
   const system = systemPrompt.toLowerCase();
   const user = userPrompt.toLowerCase();
 
@@ -229,13 +223,19 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
           systemPrompt,
           userPrompt,
         });
-        const response = await llm.generate([
-          { role: 'system', content: systemPrompt } as Message,
-          { role: 'user', content: userPrompt } as Message,
-        ]);
-        const normalizedResponse = normalizeLlmOutput(response);
-        pushDebugEvent(`llm response (${kind})`, normalizedResponse);
-        return normalizedResponse;
+        const { text, interrupted, tokenCount } = await boundedLlmGenerate(
+          llm,
+          [
+            { role: 'system', content: systemPrompt } as Message,
+            { role: 'user', content: userPrompt } as Message,
+          ],
+          kind,
+        );
+        if (interrupted) {
+          pushDebugEvent(`llm interrupted (${kind})`, { tokenCount });
+        }
+        pushDebugEvent(`llm response (${kind})`, text);
+        return text;
       },
     }),
     [llm, pushDebugEvent],
@@ -309,9 +309,8 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
       generationConfig: {
         outputTokenBatchSize: 32,
         batchTimeInterval: 500,
-        temperature: 0.1,
+        temperature: 0.35,
         topP: 0.9,
-        //repetitionPenalty: 1.1,
       },
     });
   }, [llm.isReady, llm.error]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -328,14 +327,16 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
       return;
     }
 
+
+
     try {
       pushDebugEvent('pipeline started', { dishType, diet });
       const result = await pipeline.run(
         {
           dishType,
           diet,
-          maxDishes: 5,
-          categorizationBatchSize: 5,
+          maxDishes: maxDishes,
+          categorizationBatchSize: categorizationBatchSize,
         },
         stage => {
           pushDebugEvent('pipeline stage', stage);
