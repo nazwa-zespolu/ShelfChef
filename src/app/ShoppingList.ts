@@ -16,6 +16,7 @@ import type {
   AddShoppingItemInput,
   CompletePurchaseResult,
   ShoppingListRepository,
+  UpdateTextShoppingItemInput,
 } from '../infrastructure/ShoppingListRepository';
 
 declare const require: any;
@@ -100,6 +101,10 @@ export class ShoppingList {
 
   async addItem(listId: string, input: AddShoppingItemInput): Promise<ShoppingListItem> {
     return this.requireShoppingRepository().addItem(listId, input);
+  }
+
+  async updateTextItem(itemId: string, input: UpdateTextShoppingItemInput): Promise<void> {
+    return this.requireShoppingRepository().updateTextItem(itemId, input);
   }
 
   async getListWithEffectiveStatuses(listId: string): Promise<ShoppingListDetails> {

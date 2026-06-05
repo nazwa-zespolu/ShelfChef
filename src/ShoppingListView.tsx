@@ -20,7 +20,7 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Check, ClipboardList, Link, Lock, Plus, RefreshCcw, Search, Settings, ShoppingBag, Unlock, X} from 'lucide-react-native';
+import {Check, ClipboardList, Link, Lock, Pencil, Plus, RefreshCcw, Search, Settings, ShoppingBag, Unlock, X} from 'lucide-react-native';
 import {
   AutoShoppingListItemState,
   CatalogProduct,
@@ -163,6 +163,13 @@ export default function ShoppingListView({
   const [addIconColorKey, setAddIconColorKey] = useState<ShoppingListIconColorKey>(
     DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY,
   );
+  const [editingItem, setEditingItem] = useState<AutoShoppingListItemState | null>(null);
+  const [editItemName, setEditItemName] = useState('');
+  const [editItemIconKey, setEditItemIconKey] = useState<ShoppingListIconKey>('box');
+  const [editItemIconColorKey, setEditItemIconColorKey] = useState<ShoppingListIconColorKey>(
+    DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY,
+  );
+  const [editItemFeedback, setEditItemFeedback] = useState<FeedbackMessage | null>(null);
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogResults, setCatalogResults] = useState<CatalogProduct[]>([]);
   const [selectedCatalog, setSelectedCatalog] = useState<CatalogProduct | null>(null);
@@ -297,6 +304,11 @@ export default function ShoppingListView({
       setAddOpen(false);
       return true;
     }
+    if (editingItem) {
+      setEditingItem(null);
+      setEditItemFeedback(null);
+      return true;
+    }
     if (linkingItem) {
       setLinkingItem(null);
       return true;
@@ -316,7 +328,7 @@ export default function ShoppingListView({
 
     onRequestClose();
     return true;
-  }, [addOpen, createOpen, editOpen, linkingItem, mode, onRequestClose, pendingDeleteList]);
+  }, [addOpen, createOpen, editOpen, editingItem, linkingItem, mode, onRequestClose, pendingDeleteList]);
 
   React.useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', goBackOneLevel);
@@ -499,6 +511,46 @@ export default function ShoppingListView({
     setLinkCatalogResults([]);
     setCatalogLinksFeedback(null);
   }, []);
+
+  const openEditItem = useCallback((item: AutoShoppingListItemState) => {
+    if (item.catalogProductId) {
+      return;
+    }
+    setEditItemName(item.label);
+    setEditItemIconKey(item.iconKey);
+    setEditItemIconColorKey(item.iconColorKey);
+    setEditItemFeedback(null);
+    setEditingItem(item);
+  }, []);
+
+  const updateTextItem = useCallback(async () => {
+    if (!selectedList || !editingItem) {
+      return;
+    }
+    const label = editItemName.trim();
+    if (!label) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await shoppingList.updateTextItem(editingItem.id, {
+        label,
+        iconKey: editItemIconKey,
+        iconColorKey: editItemIconColorKey,
+      });
+      setEditItemFeedback(null);
+      setEditingItem(null);
+      await loadSelectedList(selectedList);
+      const nextSuggestions = await shoppingList.generateReplenishmentSuggestions();
+      setSuggestions(nextSuggestions);
+      showToast('Zapisano produkt');
+    } catch (e) {
+      console.error('[ShelfChef] updateTextItem failed', e);
+      setEditItemFeedback({message: 'Nie udało się zapisać produktu', tone: 'error'});
+    } finally {
+      setBusy(false);
+    }
+  }, [editItemIconColorKey, editItemIconKey, editItemName, editingItem, loadSelectedList, selectedList, showToast]);
 
   const searchCatalogLinks = useCallback(async (query: string) => {
     setLinkCatalogQuery(query);
@@ -832,6 +884,7 @@ export default function ShoppingListView({
       onUpdateQuantity={updateQuantity}
       onUpdateStatus={updateStatus}
       onOpenLinks={openCatalogLinks}
+      onEdit={openEditItem}
       onSwipeHintComplete={() => {
         setSwipeHintItemId(current => (current === item.id ? null : current));
       }}
@@ -845,6 +898,7 @@ export default function ShoppingListView({
       onDelete={deleteItem}
       onUpdateQuantity={updateQuantity}
       onOpenLinks={openCatalogLinks}
+      onEdit={openEditItem}
     />
   );
 
@@ -1296,6 +1350,22 @@ export default function ShoppingListView({
         }}
         onSubmit={addItem}
       />
+      <EditItemModal
+        item={editingItem}
+        name={editItemName}
+        iconKey={editItemIconKey}
+        iconColorKey={editItemIconColorKey}
+        feedback={editItemFeedback}
+        busy={busy}
+        onChangeName={setEditItemName}
+        onChangeIconKey={setEditItemIconKey}
+        onChangeIconColorKey={setEditItemIconColorKey}
+        onClose={() => {
+          setEditingItem(null);
+          setEditItemFeedback(null);
+        }}
+        onSubmit={updateTextItem}
+      />
       <CatalogLinksModal
         item={linkingItem}
         query={linkCatalogQuery}
@@ -1499,6 +1569,7 @@ function ManualShoppingItemRow({
   onUpdateQuantity,
   onUpdateStatus,
   onOpenLinks,
+  onEdit,
   playSwipeHint,
   onSwipeHintComplete,
 }: {
@@ -1510,6 +1581,7 @@ function ManualShoppingItemRow({
   onUpdateQuantity: (id: string, quantity: number) => Promise<void>;
   onUpdateStatus: (id: string, status: ShoppingItemStatus) => Promise<void>;
   onOpenLinks: (item: AutoShoppingListItemState) => void;
+  onEdit: (item: AutoShoppingListItemState) => void;
   playSwipeHint: boolean;
   onSwipeHintComplete: () => void;
 }) {
@@ -1652,29 +1724,43 @@ function ManualShoppingItemRow({
             />
           </View>
           <View style={styles.manualItemText}>
-            <Text
-              style={[
-                styles.manualItemTitle,
-                isPurchased && styles.manualItemTitlePurchased,
-              ]}
-              numberOfLines={1}>
-              {item.label}
-            </Text>
-            <Text style={styles.manualItemMeta} numberOfLines={1}>
-              Masz {item.currentQuantity}
-            </Text>
-            {!item.catalogProductId ? (
-              <Pressable
-                onPress={() => onOpenLinks(item)}
-                style={({pressed}) => [styles.itemCatalogLink, pressed && styles.pressed]}>
-                <Link color={colors.accent} size={13} strokeWidth={2.1} />
-                <Text style={styles.itemCatalogLinkText}>
-                  {item.linkedCatalogProducts.length > 0
-                    ? `Powiązania ${item.linkedCatalogProducts.length}`
-                    : 'Powiąż katalog'}
-                </Text>
-              </Pressable>
-            ) : null}
+            <View style={styles.itemTitleRow}>
+              <Text
+                style={[
+                  styles.manualItemTitle,
+                  styles.itemTitleText,
+                  isPurchased && styles.manualItemTitlePurchased,
+                ]}
+                numberOfLines={1}>
+                {item.label}
+              </Text>
+              {!item.catalogProductId ? (
+                <Pressable
+                  accessibilityLabel={`Edytuj produkt ${item.label}`}
+                  hitSlop={6}
+                  onPress={() => onEdit(item)}
+                  style={({pressed}) => [styles.itemEditButton, pressed && styles.pressed]}>
+                  <Pencil color={colors.textSecondary} size={15} strokeWidth={2.2} />
+                </Pressable>
+              ) : null}
+            </View>
+            <View style={styles.itemMetaRow}>
+              <Text style={styles.manualItemMeta} numberOfLines={1}>
+                Masz {item.currentQuantity}
+              </Text>
+              {!item.catalogProductId ? (
+                <Pressable
+                  onPress={() => onOpenLinks(item)}
+                  style={({pressed}) => [styles.itemCatalogLink, pressed && styles.pressed]}>
+                  <Link color={colors.accent} size={13} strokeWidth={2.1} />
+                  <Text style={styles.itemCatalogLinkText} numberOfLines={1}>
+                    {item.linkedCatalogProducts.length > 0
+                      ? `Powiązania ${item.linkedCatalogProducts.length}`
+                      : 'Powiąż katalog'}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
           <View style={styles.manualItemControls}>
             <View style={styles.manualQuantityStepper}>
@@ -1713,12 +1799,14 @@ function AutoShoppingItemRow({
   onDelete,
   onUpdateQuantity,
   onOpenLinks,
+  onEdit,
 }: {
   item: AutoShoppingListItemState;
   busy: boolean;
   onDelete: (id: string) => Promise<void>;
   onUpdateQuantity: (id: string, quantity: number) => Promise<void>;
   onOpenLinks: (item: AutoShoppingListItemState) => void;
+  onEdit: (item: AutoShoppingListItemState) => void;
 }) {
   const canDecrease = item.quantity > 1 && !busy;
   return (
@@ -1734,22 +1822,37 @@ function AutoShoppingItemRow({
           imageUrl={item.imageUrl}
         />
         <View style={styles.autoItemText}>
-          <Text style={styles.manualItemTitle} numberOfLines={1}>{item.label}</Text>
-          <Text style={styles.manualItemMeta} numberOfLines={1}>
-            Masz {item.currentQuantity} z {item.quantity}
-          </Text>
-          {!item.catalogProductId ? (
-            <Pressable
-              onPress={() => onOpenLinks(item)}
-              style={({pressed}) => [styles.itemCatalogLink, pressed && styles.pressed]}>
-              <Link color={colors.accent} size={13} strokeWidth={2.1} />
-              <Text style={styles.itemCatalogLinkText}>
-                {item.linkedCatalogProducts.length > 0
-                  ? `Powiązania ${item.linkedCatalogProducts.length}`
-                  : 'Powiąż katalog'}
-              </Text>
-            </Pressable>
-          ) : null}
+          <View style={styles.itemTitleRow}>
+            <Text style={[styles.manualItemTitle, styles.itemTitleText]} numberOfLines={1}>
+              {item.label}
+            </Text>
+            {!item.catalogProductId ? (
+              <Pressable
+                accessibilityLabel={`Edytuj produkt ${item.label}`}
+                hitSlop={6}
+                onPress={() => onEdit(item)}
+                style={({pressed}) => [styles.itemEditButton, pressed && styles.pressed]}>
+                <Pencil color={colors.textSecondary} size={15} strokeWidth={2.2} />
+              </Pressable>
+            ) : null}
+          </View>
+          <View style={styles.itemMetaRow}>
+            <Text style={styles.manualItemMeta} numberOfLines={1}>
+              Masz {item.currentQuantity} z {item.quantity}
+            </Text>
+            {!item.catalogProductId ? (
+              <Pressable
+                onPress={() => onOpenLinks(item)}
+                style={({pressed}) => [styles.itemCatalogLink, pressed && styles.pressed]}>
+                <Link color={colors.accent} size={13} strokeWidth={2.1} />
+                <Text style={styles.itemCatalogLinkText} numberOfLines={1}>
+                  {item.linkedCatalogProducts.length > 0
+                    ? `Powiązania ${item.linkedCatalogProducts.length}`
+                    : 'Powiąż katalog'}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
         <View style={styles.manualQuantityStepper}>
           <Pressable
@@ -1879,6 +1982,106 @@ function InlineFeedback({feedback}: {feedback: FeedbackMessage | null}) {
         {feedback.message}
       </Text>
     </View>
+  );
+}
+
+function ProductAppearancePicker({
+  iconKey,
+  iconColorKey,
+  onChangeIconKey,
+  onChangeIconColorKey,
+}: {
+  iconKey: ShoppingListIconKey;
+  iconColorKey: ShoppingListIconColorKey;
+  onChangeIconKey: (iconKey: ShoppingListIconKey) => void;
+  onChangeIconColorKey: (iconColorKey: ShoppingListIconColorKey) => void;
+}) {
+  const selectedColor = getShoppingListIconColorDefinition(iconColorKey);
+  return (
+    <>
+      <View style={styles.iconHeaderRow}>
+        <Text style={styles.iconHeaderLabel}>Ikona produktu</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.colorPickerRow}
+          style={styles.colorPicker}>
+          {SHOPPING_LIST_ICON_COLORS.map(colorOption => {
+            const active = colorOption.key === iconColorKey;
+            return (
+              <Pressable
+                key={colorOption.key}
+                onPress={() => onChangeIconColorKey(colorOption.key)}
+                accessibilityLabel={`Kolor ikony produktu: ${colorOption.label}`}
+                style={({pressed}) => [
+                  styles.colorSwatchShadow,
+                  active && styles.colorSwatchShadowActive,
+                  pressed && styles.pressed,
+                ]}>
+                <View
+                  style={[
+                    styles.colorSwatch,
+                    {
+                      borderColor: active ? colorOption.color : colors.border,
+                      backgroundColor: active ? colorOption.background : colors.surface,
+                    },
+                    active && styles.colorSwatchActive,
+                  ]}>
+                  <View style={[styles.colorSwatchInner, {backgroundColor: colorOption.color}]} />
+                </View>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.iconPickerRow}>
+        {SHOPPING_LIST_ICONS.map(icon => {
+          const active = icon.key === iconKey;
+          const Icon = icon.Icon;
+          return (
+            <Pressable
+              key={icon.key}
+              onPress={() => onChangeIconKey(icon.key)}
+              style={({pressed}) => [
+                styles.iconChoiceShadow,
+                styles.addItemIconChoiceShadow,
+                active && styles.iconChoiceShadowActive,
+                pressed && styles.pressed,
+              ]}>
+              <View
+                style={[
+                  styles.iconChoice,
+                  styles.addItemIconChoice,
+                  active && styles.iconChoiceActive,
+                  active && {
+                    borderColor: selectedColor.color,
+                    backgroundColor: selectedColor.background,
+                  },
+                ]}>
+                <Icon
+                  color={active ? selectedColor.color : colors.textSecondary}
+                  size={27}
+                  strokeWidth={2.1}
+                />
+                <Text
+                  style={[
+                    styles.iconChoiceLabel,
+                    styles.addItemIconChoiceLabel,
+                    active && styles.iconChoiceLabelActive,
+                    active && {color: selectedColor.color},
+                  ]}
+                  numberOfLines={1}>
+                  {icon.label}
+                </Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </>
   );
 }
 
@@ -2140,6 +2343,143 @@ function ListFormModal({
   );
 }
 
+function EditItemModal({
+  item,
+  name,
+  iconKey,
+  iconColorKey,
+  feedback,
+  busy,
+  onChangeName,
+  onChangeIconKey,
+  onChangeIconColorKey,
+  onClose,
+  onSubmit,
+}: {
+  item: AutoShoppingListItemState | null;
+  name: string;
+  iconKey: ShoppingListIconKey;
+  iconColorKey: ShoppingListIconColorKey;
+  feedback: FeedbackMessage | null;
+  busy: boolean;
+  onChangeName: (name: string) => void;
+  onChangeIconKey: (iconKey: ShoppingListIconKey) => void;
+  onChangeIconColorKey: (iconColorKey: ShoppingListIconColorKey) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  const sheetTranslateY = useRef(new Animated.Value(0)).current;
+  const closeWithDrag = useCallback(() => {
+    Animated.timing(sheetTranslateY, {
+      toValue: 420,
+      duration: 160,
+      useNativeDriver: true,
+    }).start(({finished}) => {
+      sheetTranslateY.setValue(0);
+      if (finished) {
+        onClose();
+      }
+    });
+  }, [onClose, sheetTranslateY]);
+  const resetSheetPosition = useCallback(() => {
+    Animated.spring(sheetTranslateY, {
+      toValue: 0,
+      useNativeDriver: true,
+      speed: 18,
+      bounciness: 5,
+    }).start();
+  }, [sheetTranslateY]);
+  const sheetDragResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_evt, gesture) =>
+          Math.abs(gesture.dy) > 2 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onPanResponderGrant: () => {
+          sheetTranslateY.stopAnimation();
+        },
+        onPanResponderMove: (_evt, gesture) => {
+          sheetTranslateY.setValue(Math.max(0, gesture.dy));
+        },
+        onPanResponderRelease: (_evt, gesture) => {
+          if (gesture.dy > 80 || gesture.vy > 0.9) {
+            closeWithDrag();
+            return;
+          }
+          resetSheetPosition();
+        },
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderTerminate: resetSheetPosition,
+      }),
+    [closeWithDrag, resetSheetPosition, sheetTranslateY],
+  );
+
+  return (
+    <Modal visible={item != null} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <Pressable
+          accessibilityLabel="Zamknij edycję produktu"
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
+        <Animated.View
+          style={[
+            styles.modalSheet,
+            styles.addItemSheet,
+            {transform: [{translateY: sheetTranslateY}]},
+          ]}>
+          <View style={[styles.sheetHandleTouch, styles.addItemHandleTouch]} {...sheetDragResponder.panHandlers}>
+            <View style={styles.sheetHandle} />
+          </View>
+          <Text style={styles.addItemTitle}>Edytuj produkt</Text>
+          <Text style={styles.addItemSubtitle}>Zmień nazwę, ikonę lub kolor produktu tekstowego</Text>
+          <InlineFeedback feedback={feedback} />
+
+          <View style={styles.addItemPreviewCard}>
+            <ShoppingItemIconBubble iconKey={iconKey} iconColorKey={iconColorKey} />
+            <View style={styles.addItemProductText}>
+              <Text style={styles.addItemProductName} numberOfLines={1}>
+                {name.trim() || 'Nazwa produktu'}
+              </Text>
+              <Text style={styles.addItemProductMeta}>Produkt tekstowy</Text>
+            </View>
+          </View>
+
+          <Text style={styles.addItemInputLabel}>Nazwa produktu</Text>
+          <View style={styles.addItemSearchBox}>
+            <Pencil color={colors.textMuted} size={20} strokeWidth={2.1} />
+            <TextInput
+              value={name}
+              onChangeText={onChangeName}
+              placeholder="Nazwa produktu"
+              placeholderTextColor={colors.textMuted}
+              style={styles.addItemSearchInput}
+            />
+          </View>
+
+          <ProductAppearancePicker
+            iconKey={iconKey}
+            iconColorKey={iconColorKey}
+            onChangeIconKey={onChangeIconKey}
+            onChangeIconColorKey={onChangeIconColorKey}
+          />
+
+          <Pressable
+            disabled={busy || name.trim().length === 0}
+            onPress={onSubmit}
+            style={({pressed}) => [
+              styles.addItemSubmitButton,
+              (busy || name.trim().length === 0) && styles.disabled,
+              pressed && styles.pressed,
+            ]}>
+            <Text style={styles.addItemSubmitButtonText}>Zapisz zmiany</Text>
+          </Pressable>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
 function AddItemModal({
   visible,
   quantity,
@@ -2180,7 +2520,6 @@ function AddItemModal({
   const productName = catalogQuery.trim();
   const canSubmit = quantityIsValid && (selectedCatalog != null || productName.length > 0);
   const canDecrease = parsedQuantity > 1 && !busy;
-  const selectedColor = getShoppingListIconColorDefinition(iconColorKey);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const sheetTranslateY = useRef(new Animated.Value(0)).current;
   const closeWithDrag = useCallback(() => {
@@ -2292,90 +2631,12 @@ function AddItemModal({
           </View>
 
           {!keyboardVisible ? (
-            <>
-              <View style={styles.iconHeaderRow}>
-                <Text style={styles.iconHeaderLabel}>Ikona produktu</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.colorPickerRow}
-                  style={styles.colorPicker}>
-                  {SHOPPING_LIST_ICON_COLORS.map(colorOption => {
-                    const active = colorOption.key === iconColorKey;
-                    return (
-                      <Pressable
-                        key={colorOption.key}
-                        onPress={() => onChangeIconColorKey(colorOption.key)}
-                        accessibilityLabel={`Kolor ikony produktu: ${colorOption.label}`}
-                        style={({pressed}) => [
-                          styles.colorSwatchShadow,
-                          active && styles.colorSwatchShadowActive,
-                          pressed && styles.pressed,
-                        ]}>
-                        <View
-                          style={[
-                            styles.colorSwatch,
-                            {
-                              borderColor: active ? colorOption.color : colors.border,
-                              backgroundColor: active ? colorOption.background : colors.surface,
-                            },
-                            active && styles.colorSwatchActive,
-                          ]}>
-                          <View style={[styles.colorSwatchInner, {backgroundColor: colorOption.color}]} />
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              </View>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.iconPickerRow}>
-                {SHOPPING_LIST_ICONS.map(icon => {
-                  const active = icon.key === iconKey;
-                  const Icon = icon.Icon;
-                  return (
-                    <Pressable
-                      key={icon.key}
-                      onPress={() => onChangeIconKey(icon.key)}
-                      style={({pressed}) => [
-                        styles.iconChoiceShadow,
-                        styles.addItemIconChoiceShadow,
-                        active && styles.iconChoiceShadowActive,
-                        pressed && styles.pressed,
-                      ]}>
-                      <View
-                        style={[
-                          styles.iconChoice,
-                          styles.addItemIconChoice,
-                          active && styles.iconChoiceActive,
-                          active && {
-                            borderColor: selectedColor.color,
-                            backgroundColor: selectedColor.background,
-                          },
-                        ]}>
-                        <Icon
-                          color={active ? selectedColor.color : colors.textSecondary}
-                          size={27}
-                          strokeWidth={2.1}
-                        />
-                        <Text
-                          style={[
-                            styles.iconChoiceLabel,
-                            styles.addItemIconChoiceLabel,
-                            active && styles.iconChoiceLabelActive,
-                            active && {color: selectedColor.color},
-                          ]}
-                          numberOfLines={1}>
-                          {icon.label}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            </>
+            <ProductAppearancePicker
+              iconKey={iconKey}
+              iconColorKey={iconColorKey}
+              onChangeIconKey={onChangeIconKey}
+              onChangeIconColorKey={onChangeIconColorKey}
+            />
           ) : null}
 
           <Text style={styles.addItemSectionTitle}>Wyniki z katalogu</Text>
@@ -3363,6 +3624,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '900',
   },
+  itemTitleRow: {
+    minHeight: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  itemTitleText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  itemEditButton: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
   manualItemTitlePurchased: {
     color: colors.textSecondary,
   },
@@ -3371,18 +3649,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 4,
   },
+  itemMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    columnGap: 9,
+  },
   itemCatalogLink: {
-    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginTop: 6,
+    marginTop: 4,
     paddingVertical: 2,
+    flexShrink: 1,
   },
   itemCatalogLinkText: {
     color: colors.accent,
     fontSize: 12,
     fontWeight: '800',
+    flexShrink: 1,
   },
   manualItemControls: {
     alignItems: 'flex-end',

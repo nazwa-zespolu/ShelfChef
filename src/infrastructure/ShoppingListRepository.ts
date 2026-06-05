@@ -29,6 +29,12 @@ export type UpdateShoppingListInput = {
   iconColorKey: ShoppingListIconColorKey;
 };
 
+export type UpdateTextShoppingItemInput = {
+  label: string;
+  iconKey: ShoppingListIconKey;
+  iconColorKey: ShoppingListIconColorKey;
+};
+
 export type AddAllSuggestionsSummary = {
   added: number;
   reactivated: number;
@@ -396,6 +402,35 @@ export class ShoppingListRepository {
         WHERE id = ?
       `,
       [Math.max(1, quantity), nowIso(), id],
+    );
+  }
+
+  async updateTextItem(id: string, input: UpdateTextShoppingItemInput): Promise<void> {
+    const label = input.label.trim();
+    if (!label) {
+      throw new Error('Shopping list item label cannot be empty');
+    }
+    const itemResult = db.execute(
+      'SELECT catalog_product_id FROM shopping_list_items WHERE id = ?',
+      [id],
+    );
+    if (!itemResult.rows || itemResult.rows.length === 0) {
+      throw new Error(`Shopping list item not found: ${id}`);
+    }
+    if (itemResult.rows.item(0).catalog_product_id != null) {
+      throw new Error('Only text shopping items can be edited');
+    }
+
+    db.execute(
+      `
+        UPDATE shopping_list_items
+        SET label = ?,
+            icon_key = ?,
+            icon_color_key = ?,
+            updated_at = ?
+        WHERE id = ?
+      `,
+      [label, input.iconKey, input.iconColorKey, nowIso(), id],
     );
   }
 

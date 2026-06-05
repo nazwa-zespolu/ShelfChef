@@ -33,4 +33,20 @@ describe("UC-06: ShoppingList - completePurchase", () => {
 
     expect(shoppingRepository.updateItemStatus).toHaveBeenCalledWith("item-1", "purchased");
   });
+
+  it("updates a text item through the shopping list repository", async () => {
+    const shoppingRepository = {
+      updateTextItem: jest.fn(async () => undefined),
+    };
+    const shoppingList = new ShoppingList(shoppingRepository as any);
+    const input = {
+      label: "Mleko do kawy",
+      iconKey: "bottle",
+      iconColorKey: "blue",
+    };
+
+    await shoppingList.updateTextItem("item-1", input);
+
+    expect(shoppingRepository.updateTextItem).toHaveBeenCalledWith("item-1", input);
+  });
 });

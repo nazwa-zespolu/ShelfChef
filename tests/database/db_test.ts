@@ -599,6 +599,19 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     return toRows([]);
   }
 
+  if (normalized.startsWith('UPDATE SHOPPING_LIST_ITEMS SET LABEL = ?')) {
+    const [label, iconKey, iconColorKey, updatedAt, id] = params;
+    const row = shoppingListItems.get(id);
+    if (row) {
+      row.label = label;
+      row.icon_key = iconKey;
+      row.icon_color_key = iconColorKey;
+      row.updated_at = updatedAt;
+      shoppingListItems.set(id, row);
+    }
+    return toRows([]);
+  }
+
   if (normalized.startsWith('UPDATE SHOPPING_LIST_ITEMS SET STATUS = ?')) {
     const [status, , storedAt, updatedAt, id] = params;
     const row = shoppingListItems.get(id);
@@ -1010,6 +1023,83 @@ describe('ProductRepository + database integration', () => {
       iconColorKey: 'amber',
     });
     expect(stored).toMatchObject(updated);
+  });
+
+  it('edytuje tekstową pozycję bez zmiany jej ilości, statusu i powiązań', async () => {
+    await repository.saveDefinition({
+      ean: '5901234123457',
+      name: 'Mleko 2%',
+      brand: 'Lacpol',
+      imageUrl: undefined,
+      category: 'Nabial',
+    });
+    const catalog = db.execute('SELECT * FROM product_catalog WHERE product_ean = ?', [
+      '5901234123457',
+    ]).rows!.item(0);
+    const list = await shoppingListRepository.createList('Cotygodniowe', 'manual');
+    const item = await shoppingListRepository.addItem(list.id, {
+      label: 'Mleko',
+      iconKey: 'box',
+      iconColorKey: 'green',
+      quantity: 2,
+      status: 'purchased',
+    });
+    await shoppingListRepository.linkCatalogProductToItem(item.id, catalog.id as string);
+
+    await shoppingListRepository.updateTextItem(item.id, {
+      label: '  Mleko do kawy  ',
+      iconKey: 'bottle',
+      iconColorKey: 'blue',
+    });
+
+    const updated = (await shoppingListRepository.getItems(list.id))[0];
+    expect(updated).toMatchObject({
+      id: item.id,
+      listId: list.id,
+      catalogProductId: null,
+      label: 'Mleko do kawy',
+      iconKey: 'bottle',
+      iconColorKey: 'blue',
+      quantity: 2,
+      status: 'purchased',
+      source: 'manual',
+      sortOrder: item.sortOrder,
+    });
+    expect(updated.linkedCatalogProducts.map(product => product.id)).toEqual([catalog.id]);
+  });
+
+  it('nie pozwala edytować pustej ani katalogowej pozycji jako tekstowej', async () => {
+    await repository.saveDefinition({
+      ean: '5901234123457',
+      name: 'Mleko 2%',
+      brand: 'Lacpol',
+      imageUrl: undefined,
+      category: 'Nabial',
+    });
+    const catalog = db.execute('SELECT * FROM product_catalog WHERE product_ean = ?', [
+      '5901234123457',
+    ]).rows!.item(0);
+    const list = await shoppingListRepository.createList('Cotygodniowe', 'manual');
+    const textItem = await shoppingListRepository.addItem(list.id, {label: 'Mleko'});
+    const catalogItem = await shoppingListRepository.addItem(list.id, {
+      catalogProductId: catalog.id as string,
+      label: 'Mleko 2%',
+    });
+
+    await expect(
+      shoppingListRepository.updateTextItem(textItem.id, {
+        label: ' ',
+        iconKey: 'box',
+        iconColorKey: 'green',
+      }),
+    ).rejects.toThrow('Shopping list item label cannot be empty');
+    await expect(
+      shoppingListRepository.updateTextItem(catalogItem.id, {
+        label: 'Inna nazwa',
+        iconKey: 'box',
+        iconColorKey: 'green',
+      }),
+    ).rejects.toThrow('Only text shopping items can be edited');
   });
 
   it('zapisuje powiązania pozycji listy z produktami katalogowymi', async () => {
