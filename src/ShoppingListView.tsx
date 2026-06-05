@@ -20,7 +20,7 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Check, ClipboardList, Link, Lock, Plus, RefreshCcw, Search, Settings, ShoppingBag, Unlock} from 'lucide-react-native';
+import {Check, ClipboardList, Link, Lock, Plus, RefreshCcw, Search, Settings, ShoppingBag, Unlock, X} from 'lucide-react-native';
 import {
   AutoShoppingListItemState,
   CatalogProduct,
@@ -52,6 +52,12 @@ type ShoppingListViewProps = {
 
 type ScreenMode = 'lists' | 'suggestions' | 'details';
 type ListFilter = 'all' | 'manual' | 'auto';
+type FeedbackTone = 'success' | 'error';
+
+type FeedbackMessage = {
+  message: string;
+  tone: FeedbackTone;
+};
 
 type ShoppingListCardStats = {
   itemCount: number;
@@ -149,7 +155,9 @@ export default function ShoppingListView({
   const [editIconColorKey, setEditIconColorKey] = useState<ShoppingListIconColorKey>(
     DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY,
   );
+  const [listFormFeedback, setListFormFeedback] = useState<FeedbackMessage | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [addItemFeedback, setAddItemFeedback] = useState<FeedbackMessage | null>(null);
   const [addQuantity, setAddQuantity] = useState('1');
   const [addIconKey, setAddIconKey] = useState<ShoppingListIconKey>('box');
   const [addIconColorKey, setAddIconColorKey] = useState<ShoppingListIconColorKey>(
@@ -163,14 +171,15 @@ export default function ShoppingListView({
   const [linkCatalogResults, setLinkCatalogResults] = useState<CatalogProduct[]>([]);
   const [targetListId, setTargetListId] = useState<string | null>(null);
   const [pendingDeleteList, setPendingDeleteList] = useState<ShoppingListSummary | null>(null);
+  const [deleteListFeedback, setDeleteListFeedback] = useState<FeedbackMessage | null>(null);
   const [listSearch, setListSearch] = useState('');
   const [itemSearch, setItemSearch] = useState('');
   const [listFilter, setListFilter] = useState<ListFilter>('all');
   const [listStats, setListStats] = useState<Record<string, ShoppingListCardStats>>({});
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<FeedbackMessage | null>(null);
   const toastAnim = useRef(new Animated.Value(0)).current;
   const toastRunId = useRef(0);
-  const [catalogLinksFeedback, setCatalogLinksFeedback] = useState<string | null>(null);
+  const [catalogLinksFeedback, setCatalogLinksFeedback] = useState<FeedbackMessage | null>(null);
   const catalogLinksFeedbackRunId = useRef(0);
   const hasPlayedSwipeHint = useRef(false);
   const [swipeHintItemId, setSwipeHintItemId] = useState<string | null>(null);
@@ -201,12 +210,12 @@ export default function ShoppingListView({
   }, [insets.top]);
 
   const showToast = useCallback(
-    (message: string) => {
+    (message: string, tone: FeedbackTone = 'success') => {
       const runId = toastRunId.current + 1;
       toastRunId.current = runId;
       toastAnim.stopAnimation();
       toastAnim.setValue(0);
-      setToastMessage(message);
+      setToast({message, tone});
       Animated.sequence([
         Animated.timing(toastAnim, {
           toValue: 1,
@@ -221,17 +230,17 @@ export default function ShoppingListView({
         }),
       ]).start(({finished}) => {
         if (finished && toastRunId.current === runId) {
-          setToastMessage(null);
+          setToast(null);
         }
       });
     },
     [toastAnim],
   );
 
-  const showCatalogLinksFeedback = useCallback((message: string) => {
+  const showCatalogLinksFeedback = useCallback((message: string, tone: FeedbackTone = 'success') => {
     const runId = catalogLinksFeedbackRunId.current + 1;
     catalogLinksFeedbackRunId.current = runId;
-    setCatalogLinksFeedback(message);
+    setCatalogLinksFeedback({message, tone});
     setTimeout(() => {
       if (catalogLinksFeedbackRunId.current === runId) {
         setCatalogLinksFeedback(null);
@@ -281,6 +290,7 @@ export default function ShoppingListView({
   const goBackOneLevel = useCallback(() => {
     if (pendingDeleteList) {
       setPendingDeleteList(null);
+      setDeleteListFeedback(null);
       return true;
     }
     if (addOpen) {
@@ -356,10 +366,14 @@ export default function ShoppingListView({
       setCreateType('manual');
       setCreateIconKey('basket');
       setCreateIconColorKey(DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY);
+      setListFormFeedback(null);
       setCreateOpen(false);
       await loadLists();
       openList(created);
       showToast(`Utworzono listę: ${created.name}`);
+    } catch (e) {
+      console.error('[ShelfChef] createList failed', e);
+      setListFormFeedback({message: 'Nie udało się utworzyć listy', tone: 'error'});
     } finally {
       setBusy(false);
     }
@@ -372,6 +386,7 @@ export default function ShoppingListView({
     setEditName(selectedList.name);
     setEditIconKey(selectedList.iconKey);
     setEditIconColorKey(selectedList.iconColorKey);
+    setListFormFeedback(null);
     setEditOpen(true);
   }, [selectedList]);
 
@@ -391,12 +406,16 @@ export default function ShoppingListView({
         editIconKey,
         editIconColorKey,
       );
+      setListFormFeedback(null);
       setEditOpen(false);
       setSelectedList(updated);
       setLists(current => current.map(list => (list.id === updated.id ? updated : list)));
       await loadSelectedList(updated);
       await loadLists();
       showToast('Zapisano ustawienia listy');
+    } catch (e) {
+      console.error('[ShelfChef] updateListSettings failed', e);
+      setListFormFeedback({message: 'Nie udało się zapisać ustawień', tone: 'error'});
     } finally {
       setBusy(false);
     }
@@ -415,10 +434,12 @@ export default function ShoppingListView({
     setLists(ordered);
     try {
       await shoppingRepository.updateListOrder(ordered.map(list => list.id));
-    } catch {
+    } catch (e) {
+      console.error('[ShelfChef] updateListOrder failed', e);
+      showToast('Nie udało się zmienić kolejności list', 'error');
       loadLists().catch(() => {});
     }
-  }, [lists, loadLists]);
+  }, [lists, loadLists, showToast]);
 
   const deleteList = useCallback(async () => {
     if (!pendingDeleteList) {
@@ -429,8 +450,12 @@ export default function ShoppingListView({
     try {
       await shoppingRepository.deleteList(pendingDeleteList.id);
       setPendingDeleteList(null);
+      setDeleteListFeedback(null);
       await loadLists();
       showToast(`Usunięto listę: ${deletedListName}`);
+    } catch (e) {
+      console.error('[ShelfChef] deleteList failed', e);
+      setDeleteListFeedback({message: 'Nie udało się usunąć listy', tone: 'error'});
     } finally {
       setBusy(false);
     }
@@ -443,18 +468,26 @@ export default function ShoppingListView({
     setCatalogQuery('');
     setCatalogResults([]);
     setSelectedCatalog(null);
+    setAddItemFeedback(null);
     setAddOpen(true);
   }, []);
 
   const searchCatalog = useCallback(async (query: string) => {
     setCatalogQuery(query);
     setSelectedCatalog(null);
+    setAddItemFeedback(null);
     if (!query.trim()) {
       setCatalogResults([]);
       return;
     }
-    const results = await shoppingRepository.searchCatalogProducts(query);
-    setCatalogResults(results);
+    try {
+      const results = await shoppingRepository.searchCatalogProducts(query);
+      setCatalogResults(results);
+    } catch (e) {
+      console.error('[ShelfChef] searchCatalog failed', e);
+      setCatalogResults([]);
+      setAddItemFeedback({message: 'Nie udało się wyszukać katalogu', tone: 'error'});
+    }
   }, []);
 
   const openCatalogLinks = useCallback((item: AutoShoppingListItemState) => {
@@ -469,13 +502,20 @@ export default function ShoppingListView({
 
   const searchCatalogLinks = useCallback(async (query: string) => {
     setLinkCatalogQuery(query);
+    setCatalogLinksFeedback(null);
     if (!query.trim()) {
       setLinkCatalogResults([]);
       return;
     }
-    const results = await shoppingRepository.searchCatalogProducts(query);
-    setLinkCatalogResults(results);
-  }, []);
+    try {
+      const results = await shoppingRepository.searchCatalogProducts(query);
+      setLinkCatalogResults(results);
+    } catch (e) {
+      console.error('[ShelfChef] searchCatalogLinks failed', e);
+      setLinkCatalogResults([]);
+      showCatalogLinksFeedback('Nie udało się wyszukać katalogu', 'error');
+    }
+  }, [showCatalogLinksFeedback]);
 
   const linkCatalogProduct = useCallback(
     async (product: CatalogProduct) => {
@@ -492,6 +532,9 @@ export default function ShoppingListView({
         const nextSuggestions = await shoppingList.generateReplenishmentSuggestions();
         setSuggestions(nextSuggestions);
         showCatalogLinksFeedback(`Powiązano z katalogiem: ${product.name}`);
+      } catch (e) {
+        console.error('[ShelfChef] linkCatalogProduct failed', e);
+        showCatalogLinksFeedback('Nie udało się dodać powiązania', 'error');
       } finally {
         setBusy(false);
       }
@@ -512,6 +555,9 @@ export default function ShoppingListView({
         const nextSuggestions = await shoppingList.generateReplenishmentSuggestions();
         setSuggestions(nextSuggestions);
         showCatalogLinksFeedback('Usunięto powiązanie z katalogiem');
+      } catch (e) {
+        console.error('[ShelfChef] unlinkCatalogProduct failed', e);
+        showCatalogLinksFeedback('Nie udało się usunąć powiązania', 'error');
       } finally {
         setBusy(false);
       }
@@ -558,6 +604,7 @@ export default function ShoppingListView({
         });
         addedItemId = addedItem.id;
       }
+      setAddItemFeedback(null);
       setAddOpen(false);
       await loadSelectedList(selectedList);
       if (shouldPlaySwipeHint && addedItemId) {
@@ -571,6 +618,9 @@ export default function ShoppingListView({
           ? `Dodano z katalogu: ${selectedCatalog.name}`
           : `Dodano produkt tekstowy: ${productLabel}`,
       );
+    } catch (e) {
+      console.error('[ShelfChef] addItem failed', e);
+      setAddItemFeedback({message: 'Nie udało się dodać produktu', tone: 'error'});
     } finally {
       setBusy(false);
     }
@@ -585,11 +635,14 @@ export default function ShoppingListView({
       try {
         await shoppingList.updateItemStatus(itemId, status);
         await loadSelectedList(selectedList);
+      } catch (e) {
+        console.error('[ShelfChef] updateItemStatus failed', e);
+        showToast('Nie udało się zaktualizować produktu', 'error');
       } finally {
         setBusy(false);
       }
     },
-    [loadSelectedList, selectedList],
+    [loadSelectedList, selectedList, showToast],
   );
 
   const updateQuantity = useCallback(
@@ -601,11 +654,14 @@ export default function ShoppingListView({
       try {
         await shoppingRepository.updateItemQuantity(itemId, quantity);
         await loadSelectedList(selectedList);
+      } catch (e) {
+        console.error('[ShelfChef] updateItemQuantity failed', e);
+        showToast('Nie udało się zaktualizować produktu', 'error');
       } finally {
         setBusy(false);
       }
     },
-    [loadSelectedList, selectedList],
+    [loadSelectedList, selectedList, showToast],
   );
 
   const moveItem = useCallback(async (itemId: string, direction: -1 | 1) => {
@@ -624,10 +680,12 @@ export default function ShoppingListView({
     setItems(ordered);
     try {
       await shoppingRepository.updateItemOrder(selectedList.id, ordered.map(item => item.id));
-    } catch {
+    } catch (e) {
+      console.error('[ShelfChef] updateItemOrder failed', e);
+      showToast('Nie udało się zmienić kolejności produktów', 'error');
       loadSelectedList(selectedList).catch(() => {});
     }
-  }, [itemSearch, items, loadSelectedList, selectedList]);
+  }, [itemSearch, items, loadSelectedList, selectedList, showToast]);
 
   const deleteItem = useCallback(
     async (itemId: string) => {
@@ -640,6 +698,9 @@ export default function ShoppingListView({
         await shoppingRepository.deleteItem(itemId);
         await loadSelectedList(selectedList);
         showToast(`Usunięto produkt: ${deletedItemLabel}`);
+      } catch (e) {
+        console.error('[ShelfChef] deleteItem failed', e);
+        showToast('Nie udało się usunąć produktu', 'error');
       } finally {
         setBusy(false);
       }
@@ -659,10 +720,13 @@ export default function ShoppingListView({
         await loadSelectedList(updated);
       }
       await loadLists();
+    } catch (e) {
+      console.error('[ShelfChef] toggleLock failed', e);
+      showToast('Nie udało się zmienić blokady listy', 'error');
     } finally {
       setBusy(false);
     }
-  }, [loadLists, loadSelectedList, selectedList]);
+  }, [loadLists, loadSelectedList, selectedList, showToast]);
 
   const openSuggestions = useCallback(async () => {
     setMode('suggestions');
@@ -673,10 +737,13 @@ export default function ShoppingListView({
       const nextLists = await shoppingRepository.getLists();
       setLists(nextLists);
       setTargetListId(nextLists.find(list => list.type === 'manual')?.id ?? null);
+    } catch (e) {
+      console.error('[ShelfChef] openSuggestions failed', e);
+      showToast('Nie udało się odświeżyć sugestii', 'error');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showToast]);
 
   const mergeSuggestions = useCallback(async () => {
     if (!targetListId) {
@@ -696,6 +763,9 @@ export default function ShoppingListView({
           ? 'Dodano sugestie do listy'
           : 'Lista jest już aktualna',
       );
+    } catch (e) {
+      console.error('[ShelfChef] mergeSuggestions failed', e);
+      showToast('Nie udało się dodać sugestii', 'error');
     } finally {
       setBusy(false);
     }
@@ -744,7 +814,10 @@ export default function ShoppingListView({
       stats={listStats[item.id] ?? EMPTY_LIST_STATS}
       onOpen={openList}
       onMove={moveList}
-      onRequestDelete={setPendingDeleteList}
+      onRequestDelete={list => {
+        setDeleteListFeedback(null);
+        setPendingDeleteList(list);
+      }}
     />
   );
 
@@ -1099,7 +1172,10 @@ export default function ShoppingListView({
             />
           </View>
           <Pressable
-            onPress={() => setCreateOpen(true)}
+            onPress={() => {
+              setListFormFeedback(null);
+              setCreateOpen(true);
+            }}
             style={({pressed}) => [styles.newListButton, pressed && styles.pressed]}>
             <Text style={styles.newListButtonText}>Nowa</Text>
           </Pressable>
@@ -1165,12 +1241,16 @@ export default function ShoppingListView({
         type={createType}
         iconKey={createIconKey}
         iconColorKey={createIconColorKey}
+        feedback={listFormFeedback}
         busy={busy}
         onChangeName={setCreateName}
         onChangeType={setCreateType}
         onChangeIconKey={setCreateIconKey}
         onChangeIconColorKey={setCreateIconColorKey}
-        onClose={() => setCreateOpen(false)}
+        onClose={() => {
+          setCreateOpen(false);
+          setListFormFeedback(null);
+        }}
         onSubmit={createList}
       />
       <ListFormModal
@@ -1180,12 +1260,16 @@ export default function ShoppingListView({
         type={selectedList?.type ?? 'manual'}
         iconKey={editIconKey}
         iconColorKey={editIconColorKey}
+        feedback={listFormFeedback}
         busy={busy}
         onChangeName={setEditName}
         onChangeType={() => {}}
         onChangeIconKey={setEditIconKey}
         onChangeIconColorKey={setEditIconColorKey}
-        onClose={() => setEditOpen(false)}
+        onClose={() => {
+          setEditOpen(false);
+          setListFormFeedback(null);
+        }}
         onSubmit={updateListSettings}
       />
       <AddItemModal
@@ -1196,6 +1280,7 @@ export default function ShoppingListView({
         catalogQuery={catalogQuery}
         catalogResults={catalogResults}
         selectedCatalog={selectedCatalog}
+        feedback={addItemFeedback}
         busy={busy}
         onChangeQuantity={setAddQuantity}
         onChangeIconKey={setAddIconKey}
@@ -1205,7 +1290,10 @@ export default function ShoppingListView({
           setSelectedCatalog(product);
           setCatalogQuery(product.name);
         }}
-        onClose={() => setAddOpen(false)}
+        onClose={() => {
+          setAddOpen(false);
+          setAddItemFeedback(null);
+        }}
         onSubmit={addItem}
       />
       <CatalogLinksModal
@@ -1224,11 +1312,15 @@ export default function ShoppingListView({
       />
       <DeleteListModal
         list={pendingDeleteList}
+        feedback={deleteListFeedback}
         busy={busy}
-        onClose={() => setPendingDeleteList(null)}
+        onClose={() => {
+          setPendingDeleteList(null);
+          setDeleteListFeedback(null);
+        }}
         onSubmit={deleteList}
       />
-      {toastMessage ? (
+      {toast ? (
         <Animated.View
           pointerEvents="none"
           style={[
@@ -1249,12 +1341,16 @@ export default function ShoppingListView({
               ],
             },
           ]}>
-          <View style={styles.toastBubble}>
-            <View style={styles.toastIcon}>
-              <Check color={colors.successText} size={15} strokeWidth={3} />
+          <View style={[styles.toastBubble, toast.tone === 'error' && styles.toastBubbleError]}>
+            <View style={[styles.toastIcon, toast.tone === 'error' && styles.toastIconError]}>
+              {toast.tone === 'error' ? (
+                <X color={colors.successText} size={15} strokeWidth={3} />
+              ) : (
+                <Check color={colors.successText} size={15} strokeWidth={3} />
+              )}
             </View>
             <Text style={styles.toastText} numberOfLines={1}>
-              {toastMessage}
+              {toast.message}
             </Text>
           </View>
         </Animated.View>
@@ -1522,6 +1618,7 @@ function ManualShoppingItemRow({
 
   return (
     <SwipeToDeleteCard
+      resetAfterDelete
       borderRadius={8}
       allowRightDelete={false}
       onDelete={() => { onDelete(item.id).catch(() => {}); }}
@@ -1626,6 +1723,7 @@ function AutoShoppingItemRow({
   const canDecrease = item.quantity > 1 && !busy;
   return (
     <SwipeToDeleteCard
+      resetAfterDelete
       borderRadius={8}
       allowRightDelete={false}
       onDelete={() => { onDelete(item.id).catch(() => {}); }}>
@@ -1762,6 +1860,28 @@ function ShoppingItemIconBubble({
   );
 }
 
+function InlineFeedback({feedback}: {feedback: FeedbackMessage | null}) {
+  if (!feedback) {
+    return null;
+  }
+  return (
+    <View
+      style={[
+        styles.inlineFeedback,
+        feedback.tone === 'error' && styles.inlineFeedbackError,
+      ]}>
+      {feedback.tone === 'error' ? (
+        <X color={colors.danger} size={16} strokeWidth={3} />
+      ) : (
+        <Check color={colors.success} size={16} strokeWidth={3} />
+      )}
+      <Text style={styles.inlineFeedbackText} numberOfLines={1}>
+        {feedback.message}
+      </Text>
+    </View>
+  );
+}
+
 function ListFormModal({
   visible,
   mode,
@@ -1769,6 +1889,7 @@ function ListFormModal({
   type,
   iconKey,
   iconColorKey,
+  feedback,
   busy,
   onChangeName,
   onChangeType,
@@ -1783,6 +1904,7 @@ function ListFormModal({
   type: ShoppingListType;
   iconKey: ShoppingListIconKey;
   iconColorKey: ShoppingListIconColorKey;
+  feedback: FeedbackMessage | null;
   busy: boolean;
   onChangeName: (name: string) => void;
   onChangeType: (type: ShoppingListType) => void;
@@ -1859,6 +1981,7 @@ function ListFormModal({
           <Text style={styles.createSubtitle}>
             {isEditing ? 'Zmień nazwę, ikonę i kolor listy.' : 'Nadaj nazwę i wybierz typ listy.'}
           </Text>
+          <InlineFeedback feedback={feedback} />
           <View style={styles.createPreview}>
             <View style={[styles.createPreviewIcon, {backgroundColor: selectedColor.background}]}>
               <SelectedIcon color={selectedColor.color} size={30} strokeWidth={2.2} />
@@ -2025,6 +2148,7 @@ function AddItemModal({
   catalogQuery,
   catalogResults,
   selectedCatalog,
+  feedback,
   busy,
   onChangeQuantity,
   onChangeIconKey,
@@ -2041,6 +2165,7 @@ function AddItemModal({
   catalogQuery: string;
   catalogResults: CatalogProduct[];
   selectedCatalog: CatalogProduct | null;
+  feedback: FeedbackMessage | null;
   busy: boolean;
   onChangeQuantity: (quantity: string) => void;
   onChangeIconKey: (iconKey: ShoppingListIconKey) => void;
@@ -2143,6 +2268,7 @@ function AddItemModal({
           </View>
           <Text style={styles.addItemTitle}>Dodaj produkt</Text>
           <Text style={styles.addItemSubtitle}>Wpisz nazwę albo wybierz produkt z katalogu</Text>
+          <InlineFeedback feedback={feedback} />
 
           <Text style={styles.addItemInputLabel}>Nazwa produktu</Text>
           <View style={styles.addItemSearchQuantityRow}>
@@ -2368,7 +2494,7 @@ function CatalogLinksModal({
   item: AutoShoppingListItemState | null;
   query: string;
   results: CatalogProduct[];
-  feedback: string | null;
+  feedback: FeedbackMessage | null;
   busy: boolean;
   onChangeQuery: (query: string) => void;
   onLink: (product: CatalogProduct) => void;
@@ -2471,14 +2597,7 @@ function CatalogLinksModal({
           <Text style={styles.catalogLinksSubtitle}>
             Te produkty będą liczone jako ta pozycja
           </Text>
-          {feedback ? (
-            <View style={styles.catalogLinksFeedback}>
-              <Check color={colors.success} size={16} strokeWidth={3} />
-              <Text style={styles.catalogLinksFeedbackText} numberOfLines={1}>
-                {feedback}
-              </Text>
-            </View>
-          ) : null}
+          <InlineFeedback feedback={feedback} />
 
           <View style={styles.catalogLinksSearchBox}>
             <Search color={colors.textMuted} size={22} strokeWidth={2.1} />
@@ -2580,11 +2699,13 @@ function CatalogLinksModal({
 
 function DeleteListModal({
   list,
+  feedback,
   busy,
   onClose,
   onSubmit,
 }: {
   list: ShoppingListSummary | null;
+  feedback: FeedbackMessage | null;
   busy: boolean;
   onClose: () => void;
   onSubmit: () => void;
@@ -2597,6 +2718,7 @@ function DeleteListModal({
           <Text style={styles.confirmText} numberOfLines={3}>
             {list?.name}
           </Text>
+          <InlineFeedback feedback={feedback} />
           <View style={styles.modalActions}>
             <Pressable onPress={onClose} style={({pressed}) => [styles.secondaryButton, pressed && styles.pressed]}>
               <Text style={styles.secondaryButtonText}>Anuluj</Text>
@@ -3497,6 +3619,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+  toastBubbleError: {
+    borderColor: colors.danger,
+  },
   toastIcon: {
     width: 24,
     height: 24,
@@ -3504,6 +3629,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.success,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  toastIconError: {
+    backgroundColor: colors.danger,
   },
   toastText: {
     flexShrink: 1,
@@ -4141,7 +4269,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 12,
   },
-  catalogLinksFeedback: {
+  inlineFeedback: {
     minHeight: 36,
     borderRadius: 8,
     borderWidth: 1,
@@ -4154,7 +4282,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
-  catalogLinksFeedbackText: {
+  inlineFeedbackError: {
+    borderColor: colors.danger,
+  },
+  inlineFeedbackText: {
     flexShrink: 1,
     color: colors.textPrimary,
     fontSize: 13,
