@@ -1,6 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../../../theme/colors';
+import { getDishImageSearchService } from '../application/dishImageSearchService';
+import { DishImageResult } from '../domain/dishImageSearchTypes';
+import { getPixabayApiKey } from '../recipeGeneratorConstants';
+import { DishImageGallery } from './DishImageGallery';
 
 type Props = {
   dishes: string[];
@@ -8,16 +12,82 @@ type Props = {
   onBackToPreferences: () => void;
 };
 
+type DishImagesState = {
+  loading: boolean;
+  images: DishImageResult[];
+};
+
+function buildImagesByDish(
+  dishList: string[],
+  state: DishImagesState,
+): Record<string, DishImagesState> {
+  const out: Record<string, DishImagesState> = {};
+  for (const dish of dishList) {
+    out[dish] = state;
+  }
+  return out;
+}
+
 export function RecipeResultsScreen({
   dishes,
   onGenerateAgain,
   onBackToPreferences,
 }: Props) {
+  const [imagesByDish, setImagesByDish] = useState<Record<string, DishImagesState>>({});
+  const imageSearchConfigured = getPixabayApiKey().length > 0;
+
+  useEffect(() => {
+    const dishList = Array.isArray(dishes) ? dishes : [];
+
+    if (dishList.length === 0) {
+      setImagesByDish({});
+      return;
+    }
+
+    if (!imageSearchConfigured) {
+      setImagesByDish(buildImagesByDish(dishList, { loading: false, images: [] }));
+      return;
+    }
+
+    let cancelled = false;
+    const imageSearchService = getDishImageSearchService();
+    setImagesByDish(buildImagesByDish(dishList, { loading: true, images: [] }));
+
+    dishList.forEach(dish => {
+      imageSearchService
+        .searchImagesForDish(dish)
+        .then(images => {
+          if (cancelled) {
+            return;
+          }
+          setImagesByDish(prev => ({
+            ...prev,
+            [dish]: { loading: false, images },
+          }));
+        })
+        .catch(() => {
+          if (cancelled) {
+            return;
+          }
+          setImagesByDish(prev => ({
+            ...prev,
+            [dish]: { loading: false, images: [] },
+          }));
+        });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dishes, imageSearchConfigured]);
+
+  const dishList = Array.isArray(dishes) ? dishes : [];
+
   return (
     <View style={styles.body}>
       <Text style={styles.title}>Propozycje dan</Text>
       <FlatList
-        data={dishes}
+        data={dishList}
         keyExtractor={(item, index) => `${index}-${item}`}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
@@ -25,11 +95,20 @@ export function RecipeResultsScreen({
             <Text style={styles.emptyText}>Brak wynikow do wyswietlenia.</Text>
           </View>
         }
-        renderItem={({ item }) => (
-          <View style={styles.row}>
-            <Text style={styles.rowText}>{item}</Text>
-          </View>
-        )}
+        renderItem={({ item }) => {
+          const imageState = imagesByDish[item] ?? { loading: true, images: [] };
+
+          return (
+            <View style={styles.row}>
+              <Text style={styles.rowText}>{item}</Text>
+              <DishImageGallery
+                images={imageState.images}
+                loading={imageState.loading}
+                missingApiKey={!imageSearchConfigured}
+              />
+            </View>
+          );
+        }}
       />
       <View style={styles.actions}>
         <Pressable style={styles.primaryButton} onPress={onGenerateAgain}>

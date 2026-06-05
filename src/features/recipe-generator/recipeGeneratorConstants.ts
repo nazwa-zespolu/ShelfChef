@@ -1,8 +1,14 @@
 import { GenerationConfig } from 'react-native-executorch';
+import { PIXABAY_API_KEY } from '@env';
 
 export const categorizationBatchSize = 1;
 export const maxDishes = 5;
+export const dishImagesPerResult = 5;
 
+/** Klucz z pliku src/.env (PIXABAY_API_KEY). Szablon: .env.example */
+export function getPixabayApiKey(): string {
+  return (PIXABAY_API_KEY ?? '').trim();
+}
 export type LlmCompletionKind =
   | 'dietary-categorization'
   | 'recipe-generation'
