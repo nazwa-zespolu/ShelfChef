@@ -5,9 +5,7 @@ import {
   Alert,
   BackHandler,
   type DimensionValue,
-  Easing,
   FlatList,
-  Image,
   Keyboard,
   Modal,
   PanResponder,
@@ -20,7 +18,7 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Check, ClipboardList, Link, Lock, Pencil, Plus, RefreshCcw, Search, Settings, ShoppingBag, Unlock, X} from 'lucide-react-native';
+import {Check, ClipboardList, Lock, Pencil, Plus, RefreshCcw, Search, Settings, ShoppingBag, Unlock, X} from 'lucide-react-native';
 import {
   AutoShoppingListItemState,
   CatalogProduct,
@@ -35,12 +33,16 @@ import {ShoppingList} from './app/ShoppingList';
 import {ProductRepository} from './infrastructure/ProductRepository';
 import {ShoppingListRepository} from './infrastructure/ShoppingListRepository';
 import {SwipeToDeleteCard} from './components/SwipeToDeleteCard';
+import {ShoppingIconAppearancePicker} from './shopping-lists/components/ShoppingIconAppearancePicker';
+import {ShoppingItemIconBubble} from './shopping-lists/components/ShoppingItemIconBubble';
+import {
+  AutoShoppingItemRow,
+  ManualShoppingItemRow,
+} from './shopping-lists/components/ShoppingItemRows';
 import {
   DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY,
   getShoppingListIconColorDefinition,
   getShoppingListIconDefinition,
-  SHOPPING_LIST_ICON_COLORS,
-  SHOPPING_LIST_ICONS,
 } from './shoppingListIcons';
 import {colors} from './theme/colors';
 
@@ -1560,339 +1562,6 @@ function SortableListRow({
   );
 }
 
-function ManualShoppingItemRow({
-  item,
-  busy,
-  reorderEnabled,
-  onDelete,
-  onMove,
-  onUpdateQuantity,
-  onUpdateStatus,
-  onOpenLinks,
-  onEdit,
-  playSwipeHint,
-  onSwipeHintComplete,
-}: {
-  item: AutoShoppingListItemState;
-  busy: boolean;
-  reorderEnabled: boolean;
-  onDelete: (id: string) => Promise<void>;
-  onMove: (id: string, direction: -1 | 1) => void;
-  onUpdateQuantity: (id: string, quantity: number) => Promise<void>;
-  onUpdateStatus: (id: string, status: ShoppingItemStatus) => Promise<void>;
-  onOpenLinks: (item: AutoShoppingListItemState) => void;
-  onEdit: (item: AutoShoppingListItemState) => void;
-  playSwipeHint: boolean;
-  onSwipeHintComplete: () => void;
-}) {
-  const translateY = useRef(new Animated.Value(0)).current;
-  const hintTranslateX = useRef(new Animated.Value(0)).current;
-  const hasPlayedThisHint = useRef(false);
-  const dragActive = useRef(false);
-  const dragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const movedAt = useRef(0);
-  const [dragging, setDragging] = useState(false);
-  const isPurchased = item.effectiveStatus === 'purchased';
-  const nextToggleStatus: ShoppingItemStatus = isPurchased ? 'planned' : 'purchased';
-  const canDecrease = item.quantity > 1 && !busy;
-
-  const resetPosition = useCallback(() => {
-    if (dragTimer.current) {
-      clearTimeout(dragTimer.current);
-      dragTimer.current = null;
-    }
-    Animated.spring(translateY, {
-      toValue: 0,
-      useNativeDriver: true,
-      speed: 20,
-      bounciness: 4,
-    }).start();
-    dragActive.current = false;
-    setDragging(false);
-  }, [translateY]);
-
-  const dragResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => reorderEnabled,
-        onMoveShouldSetPanResponder: (_evt, gesture) =>
-          reorderEnabled && Math.abs(gesture.dy) > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
-        onPanResponderGrant: () => {
-          movedAt.current = 0;
-          dragTimer.current = setTimeout(() => {
-            dragActive.current = true;
-            setDragging(true);
-          }, 180);
-        },
-        onPanResponderMove: (_evt, gesture) => {
-          if (!dragActive.current) {
-            return;
-          }
-          translateY.setValue(gesture.dy);
-          const now = Date.now();
-          if (now - movedAt.current < 220) {
-            return;
-          }
-          if (gesture.dy > 46) {
-            movedAt.current = now;
-            translateY.setValue(0);
-            onMove(item.id, 1);
-          } else if (gesture.dy < -46) {
-            movedAt.current = now;
-            translateY.setValue(0);
-            onMove(item.id, -1);
-          }
-        },
-        onPanResponderRelease: resetPosition,
-        onPanResponderTerminate: resetPosition,
-      }),
-    [item.id, onMove, reorderEnabled, resetPosition, translateY],
-  );
-
-  React.useEffect(() => {
-    if (!playSwipeHint || hasPlayedThisHint.current) {
-      return;
-    }
-    hasPlayedThisHint.current = true;
-    hintTranslateX.setValue(0);
-    Animated.sequence([
-      Animated.delay(520),
-      Animated.timing(hintTranslateX, {
-        toValue: 86,
-        duration: 460,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.delay(170),
-      Animated.timing(hintTranslateX, {
-        toValue: 0,
-        useNativeDriver: true,
-        duration: 280,
-        easing: Easing.inOut(Easing.cubic),
-      }),
-      Animated.timing(hintTranslateX, {
-        toValue: -86,
-        duration: 460,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.delay(170),
-      Animated.timing(hintTranslateX, {
-        toValue: 0,
-        useNativeDriver: true,
-        duration: 300,
-        easing: Easing.out(Easing.cubic),
-      }),
-    ]).start(() => {
-      onSwipeHintComplete();
-    });
-  }, [hintTranslateX, onSwipeHintComplete, playSwipeHint]);
-
-  return (
-    <SwipeToDeleteCard
-      resetAfterDelete
-      borderRadius={8}
-      allowRightDelete={false}
-      onDelete={() => { onDelete(item.id).catch(() => {}); }}
-      onSwipeRight={() => { onUpdateStatus(item.id, nextToggleStatus).catch(() => {}); }}
-      rightLabel={isPurchased ? 'Cofnij' : 'Kupione'}
-      rightActionTone={isPurchased ? 'warning' : 'success'}>
-      {playSwipeHint ? (
-        <View pointerEvents="none" style={styles.swipeHintBackground}>
-          <View style={[styles.swipeHintAction, styles.swipeHintActionDone]}>
-            <Text style={styles.swipeHintActionText}>Kupione</Text>
-          </View>
-          <View style={[styles.swipeHintAction, styles.swipeHintActionDelete]}>
-            <Text style={styles.swipeHintActionText}>Usuń</Text>
-          </View>
-        </View>
-      ) : null}
-      <Animated.View style={{transform: [{translateY}, {translateX: hintTranslateX}]}}>
-        <View
-          style={[
-            styles.manualItemCard,
-            isPurchased && styles.manualItemCardPurchased,
-            dragging && styles.manualItemCardDragging,
-          ]}>
-          {isPurchased ? <View style={styles.manualItemStatusBar} /> : null}
-          <View {...dragResponder.panHandlers}>
-            <ShoppingItemIconBubble
-              iconKey={item.iconKey}
-              iconColorKey={item.iconColorKey}
-              imageUrl={item.imageUrl}
-              purchased={isPurchased}
-            />
-          </View>
-          <View style={styles.manualItemText}>
-            <View style={styles.itemTitleRow}>
-              <Text
-                style={[
-                  styles.manualItemTitle,
-                  styles.itemTitleText,
-                  isPurchased && styles.manualItemTitlePurchased,
-                ]}
-                numberOfLines={1}>
-                {item.label}
-              </Text>
-              {!item.catalogProductId ? (
-                <Pressable
-                  accessibilityLabel={`Edytuj produkt ${item.label}`}
-                  hitSlop={6}
-                  onPress={() => onEdit(item)}
-                  style={({pressed}) => [styles.itemEditButton, pressed && styles.pressed]}>
-                  <Pencil color={colors.textSecondary} size={15} strokeWidth={2.2} />
-                </Pressable>
-              ) : null}
-            </View>
-            <View style={styles.itemMetaRow}>
-              <Text style={styles.manualItemMeta} numberOfLines={1}>
-                Masz {item.currentQuantity}
-              </Text>
-              {!item.catalogProductId ? (
-                <Pressable
-                  onPress={() => onOpenLinks(item)}
-                  style={({pressed}) => [styles.itemCatalogLink, pressed && styles.pressed]}>
-                  <Link color={colors.accent} size={13} strokeWidth={2.1} />
-                  <Text style={styles.itemCatalogLinkText} numberOfLines={1}>
-                    {item.linkedCatalogProducts.length > 0
-                      ? `Powiązania ${item.linkedCatalogProducts.length}`
-                      : 'Powiąż katalog'}
-                  </Text>
-                </Pressable>
-              ) : null}
-            </View>
-          </View>
-          <View style={styles.manualItemControls}>
-            <View style={styles.manualQuantityStepper}>
-              <Pressable
-                disabled={!canDecrease}
-                style={({pressed}) => [
-                  styles.manualStepButton,
-                  !canDecrease && styles.disabled,
-                  pressed && styles.pressed,
-                ]}
-                onPress={() => onUpdateQuantity(item.id, item.quantity - 1)}>
-                <Text style={styles.manualStepText}>−</Text>
-              </Pressable>
-              <Text style={styles.manualQuantityText}>{item.quantity}</Text>
-              <Pressable
-                disabled={busy}
-                style={({pressed}) => [
-                  styles.manualStepButton,
-                  busy && styles.disabled,
-                  pressed && styles.pressed,
-                ]}
-                onPress={() => onUpdateQuantity(item.id, item.quantity + 1)}>
-                <Text style={styles.manualStepText}>+</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Animated.View>
-    </SwipeToDeleteCard>
-  );
-}
-
-function AutoShoppingItemRow({
-  item,
-  busy,
-  onDelete,
-  onUpdateQuantity,
-  onOpenLinks,
-  onEdit,
-}: {
-  item: AutoShoppingListItemState;
-  busy: boolean;
-  onDelete: (id: string) => Promise<void>;
-  onUpdateQuantity: (id: string, quantity: number) => Promise<void>;
-  onOpenLinks: (item: AutoShoppingListItemState) => void;
-  onEdit: (item: AutoShoppingListItemState) => void;
-}) {
-  const canDecrease = item.quantity > 1 && !busy;
-  return (
-    <SwipeToDeleteCard
-      resetAfterDelete
-      borderRadius={8}
-      allowRightDelete={false}
-      onDelete={() => { onDelete(item.id).catch(() => {}); }}>
-      <View style={styles.autoItemCard}>
-        <ShoppingItemIconBubble
-          iconKey={item.iconKey}
-          iconColorKey={item.iconColorKey}
-          imageUrl={item.imageUrl}
-        />
-        <View style={styles.autoItemText}>
-          <View style={styles.itemTitleRow}>
-            <Text style={[styles.manualItemTitle, styles.itemTitleText]} numberOfLines={1}>
-              {item.label}
-            </Text>
-            {!item.catalogProductId ? (
-              <Pressable
-                accessibilityLabel={`Edytuj produkt ${item.label}`}
-                hitSlop={6}
-                onPress={() => onEdit(item)}
-                style={({pressed}) => [styles.itemEditButton, pressed && styles.pressed]}>
-                <Pencil color={colors.textSecondary} size={15} strokeWidth={2.2} />
-              </Pressable>
-            ) : null}
-          </View>
-          <View style={styles.itemMetaRow}>
-            <Text style={styles.manualItemMeta} numberOfLines={1}>
-              Masz {item.currentQuantity} z {item.quantity}
-            </Text>
-            {!item.catalogProductId ? (
-              <Pressable
-                onPress={() => onOpenLinks(item)}
-                style={({pressed}) => [styles.itemCatalogLink, pressed && styles.pressed]}>
-                <Link color={colors.accent} size={13} strokeWidth={2.1} />
-                <Text style={styles.itemCatalogLinkText} numberOfLines={1}>
-                  {item.linkedCatalogProducts.length > 0
-                    ? `Powiązania ${item.linkedCatalogProducts.length}`
-                    : 'Powiąż katalog'}
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
-        <View style={styles.manualQuantityStepper}>
-          <Pressable
-            disabled={!canDecrease}
-            style={({pressed}) => [
-              styles.manualStepButton,
-              !canDecrease && styles.disabled,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => onUpdateQuantity(item.id, item.quantity - 1)}>
-            <Text style={styles.manualStepText}>−</Text>
-          </Pressable>
-          <Text style={styles.manualQuantityText}>{item.quantity}</Text>
-          <Pressable
-            disabled={busy}
-            style={({pressed}) => [
-              styles.manualStepButton,
-              busy && styles.disabled,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => onUpdateQuantity(item.id, item.quantity + 1)}>
-            <Text style={styles.manualStepText}>+</Text>
-          </Pressable>
-        </View>
-      </View>
-    </SwipeToDeleteCard>
-  );
-}
-
-function Header({title, onBack}: {title: string; onBack: () => void}) {
-  return (
-    <View style={styles.topBar}>
-      <Pressable onPress={onBack} style={({pressed}) => [styles.back, pressed && styles.pressed]} hitSlop={10}>
-        <Text style={styles.backText}>← Wróć</Text>
-      </Pressable>
-      <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-    </View>
-  );
-}
-
 function EmptyState({
   title,
   description,
@@ -1921,48 +1590,6 @@ function EmptyState({
   );
 }
 
-function ShoppingItemIconBubble({
-  iconKey,
-  iconColorKey,
-  imageUrl,
-  purchased = false,
-}: {
-  iconKey: ShoppingListIconKey;
-  iconColorKey: ShoppingListIconColorKey;
-  imageUrl?: string | null;
-  purchased?: boolean;
-}) {
-  const [imageFailed, setImageFailed] = useState(false);
-  const icon = getShoppingListIconDefinition(iconKey);
-  const iconColor = getShoppingListIconColorDefinition(iconColorKey);
-  const Icon = icon.Icon;
-  const shouldShowImage = imageUrl != null && imageUrl.trim().length > 0 && !imageFailed;
-  return (
-    <View
-      style={[
-        styles.manualItemIcon,
-        {backgroundColor: iconColor.background},
-        shouldShowImage && styles.manualItemImageBubble,
-        purchased && styles.manualItemIconPurchased,
-      ]}>
-      {shouldShowImage ? (
-        <Image
-          source={{uri: imageUrl}}
-          style={styles.manualItemImage}
-          resizeMode="cover"
-          onError={() => setImageFailed(true)}
-        />
-      ) : (
-        <Icon
-          color={purchased ? colors.success : iconColor.color}
-          size={24}
-          strokeWidth={2.1}
-        />
-      )}
-    </View>
-  );
-}
-
 function InlineFeedback({feedback}: {feedback: FeedbackMessage | null}) {
   if (!feedback) {
     return null;
@@ -1982,106 +1609,6 @@ function InlineFeedback({feedback}: {feedback: FeedbackMessage | null}) {
         {feedback.message}
       </Text>
     </View>
-  );
-}
-
-function ProductAppearancePicker({
-  iconKey,
-  iconColorKey,
-  onChangeIconKey,
-  onChangeIconColorKey,
-}: {
-  iconKey: ShoppingListIconKey;
-  iconColorKey: ShoppingListIconColorKey;
-  onChangeIconKey: (iconKey: ShoppingListIconKey) => void;
-  onChangeIconColorKey: (iconColorKey: ShoppingListIconColorKey) => void;
-}) {
-  const selectedColor = getShoppingListIconColorDefinition(iconColorKey);
-  return (
-    <>
-      <View style={styles.iconHeaderRow}>
-        <Text style={styles.iconHeaderLabel}>Ikona produktu</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.colorPickerRow}
-          style={styles.colorPicker}>
-          {SHOPPING_LIST_ICON_COLORS.map(colorOption => {
-            const active = colorOption.key === iconColorKey;
-            return (
-              <Pressable
-                key={colorOption.key}
-                onPress={() => onChangeIconColorKey(colorOption.key)}
-                accessibilityLabel={`Kolor ikony produktu: ${colorOption.label}`}
-                style={({pressed}) => [
-                  styles.colorSwatchShadow,
-                  active && styles.colorSwatchShadowActive,
-                  pressed && styles.pressed,
-                ]}>
-                <View
-                  style={[
-                    styles.colorSwatch,
-                    {
-                      borderColor: active ? colorOption.color : colors.border,
-                      backgroundColor: active ? colorOption.background : colors.surface,
-                    },
-                    active && styles.colorSwatchActive,
-                  ]}>
-                  <View style={[styles.colorSwatchInner, {backgroundColor: colorOption.color}]} />
-                </View>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.iconPickerRow}>
-        {SHOPPING_LIST_ICONS.map(icon => {
-          const active = icon.key === iconKey;
-          const Icon = icon.Icon;
-          return (
-            <Pressable
-              key={icon.key}
-              onPress={() => onChangeIconKey(icon.key)}
-              style={({pressed}) => [
-                styles.iconChoiceShadow,
-                styles.addItemIconChoiceShadow,
-                active && styles.iconChoiceShadowActive,
-                pressed && styles.pressed,
-              ]}>
-              <View
-                style={[
-                  styles.iconChoice,
-                  styles.addItemIconChoice,
-                  active && styles.iconChoiceActive,
-                  active && {
-                    borderColor: selectedColor.color,
-                    backgroundColor: selectedColor.background,
-                  },
-                ]}>
-                <Icon
-                  color={active ? selectedColor.color : colors.textSecondary}
-                  size={27}
-                  strokeWidth={2.1}
-                />
-                <Text
-                  style={[
-                    styles.iconChoiceLabel,
-                    styles.addItemIconChoiceLabel,
-                    active && styles.iconChoiceLabelActive,
-                    active && {color: selectedColor.color},
-                  ]}
-                  numberOfLines={1}>
-                  {icon.label}
-                </Text>
-              </View>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-    </>
   );
 }
 
@@ -2243,88 +1770,14 @@ function ListFormModal({
               </View>
             </>
           ) : null}
-          <View style={styles.iconHeaderRow}>
-            <Text style={styles.iconHeaderLabel}>Ikona listy</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.colorPickerRow}
-              style={styles.colorPicker}>
-              {SHOPPING_LIST_ICON_COLORS.map(colorOption => {
-                const active = colorOption.key === iconColorKey;
-                return (
-                  <Pressable
-                    key={colorOption.key}
-                    onPress={() => onChangeIconColorKey(colorOption.key)}
-                    accessibilityLabel={`Kolor ikony: ${colorOption.label}`}
-                    style={({pressed}) => [
-                      styles.colorSwatchShadow,
-                      active && styles.colorSwatchShadowActive,
-                      pressed && styles.pressed,
-                    ]}>
-                    <View
-                      style={[
-                        styles.colorSwatch,
-                      {
-                        borderColor: active ? colorOption.color : colors.border,
-                        backgroundColor: active ? colorOption.background : colors.surface,
-                      },
-                      active && styles.colorSwatchActive,
-                    ]}>
-                      <View style={[styles.colorSwatchInner, {backgroundColor: colorOption.color}]} />
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={[styles.iconPickerRow, styles.addItemIconPickerRow]}>
-            {SHOPPING_LIST_ICONS.map(icon => {
-              const active = icon.key === iconKey;
-              const Icon = icon.Icon;
-              return (
-                <Pressable
-                  key={icon.key}
-                  onPress={() => onChangeIconKey(icon.key)}
-                  style={({pressed}) => [
-                    styles.iconChoiceShadow,
-                    styles.addItemIconChoiceShadow,
-                    active && styles.iconChoiceShadowActive,
-                    pressed && styles.pressed,
-                  ]}>
-                  <View
-                    style={[
-                      styles.iconChoice,
-                      styles.addItemIconChoice,
-                      active && styles.iconChoiceActive,
-                      active && {
-                        borderColor: selectedColor.color,
-                        backgroundColor: selectedColor.background,
-                      },
-                    ]}>
-                    <Icon
-                      color={active ? selectedColor.color : colors.textSecondary}
-                      size={27}
-                      strokeWidth={2.1}
-                    />
-                    <Text
-                      style={[
-                        styles.iconChoiceLabel,
-                        styles.addItemIconChoiceLabel,
-                        active && styles.iconChoiceLabelActive,
-                        active && {color: selectedColor.color},
-                      ]}
-                      numberOfLines={1}>
-                      {icon.label}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+          <ShoppingIconAppearancePicker
+            label="Ikona listy"
+            colorAccessibilityLabel="Kolor ikony"
+            iconKey={iconKey}
+            iconColorKey={iconColorKey}
+            onChangeIconKey={onChangeIconKey}
+            onChangeIconColorKey={onChangeIconColorKey}
+          />
           <Pressable
             disabled={busy || name.trim().length === 0}
             onPress={onSubmit}
@@ -2457,7 +1910,9 @@ function EditItemModal({
             />
           </View>
 
-          <ProductAppearancePicker
+          <ShoppingIconAppearancePicker
+            label="Ikona produktu"
+            colorAccessibilityLabel="Kolor ikony produktu"
             iconKey={iconKey}
             iconColorKey={iconColorKey}
             onChangeIconKey={onChangeIconKey}
@@ -2631,7 +2086,9 @@ function AddItemModal({
           </View>
 
           {!keyboardVisible ? (
-            <ProductAppearancePicker
+            <ShoppingIconAppearancePicker
+              label="Ikona produktu"
+              colorAccessibilityLabel="Kolor ikony produktu"
               iconKey={iconKey}
               iconColorKey={iconColorKey}
               onChangeIconKey={onChangeIconKey}
@@ -3004,30 +2461,6 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-  },
-  topBar: {
-    minHeight: 44,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  back: {
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-  },
-  backText: {
-    color: colors.accent,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  headerTitle: {
-    flex: 1,
-    color: colors.textPrimary,
-    fontSize: 17,
-    fontWeight: '800',
-    textAlign: 'right',
-    marginLeft: 12,
   },
   listsHero: {
     paddingHorizontal: 16,
@@ -3472,78 +2905,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 24,
   },
-  manualItemCard: {
-    minHeight: 78,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: {width: 0, height: 6},
-    elevation: 3,
-  },
-  manualItemCardPurchased: {
-    borderColor: colors.accentSoft,
-    backgroundColor: colors.surface,
-  },
-  manualItemCardDragging: {
-    borderColor: colors.success,
-    shadowOpacity: 0.14,
-    elevation: 5,
-  },
-  swipeHintBackground: {
-    ...StyleSheet.absoluteFill,
-    borderRadius: 8,
-    overflow: 'hidden',
-    flexDirection: 'row',
-  },
-  swipeHintAction: {
-    flex: 1,
-    minHeight: 78,
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  swipeHintActionDone: {
-    alignItems: 'flex-start',
-    backgroundColor: colors.success,
-  },
-  swipeHintActionDelete: {
-    alignItems: 'flex-end',
-    backgroundColor: colors.danger,
-  },
-  swipeHintActionText: {
-    color: colors.successText,
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  autoItemCard: {
-    minHeight: 78,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: {width: 0, height: 6},
-    elevation: 3,
-  },
-  autoItemText: {
-    flex: 1,
-    minWidth: 0,
-  },
   suggestionItemCard: {
     minHeight: 92,
     borderRadius: 8,
@@ -3584,128 +2945,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '900',
   },
-  manualItemStatusBar: {
-    position: 'absolute',
-    left: 0,
-    top: 10,
-    bottom: 10,
-    width: 4,
-    borderTopRightRadius: 8,
-    borderBottomRightRadius: 8,
-    backgroundColor: colors.success,
-  },
-  manualItemIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: 999,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  manualItemImageBubble: {
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  manualItemImage: {
-    width: '100%',
-    height: '100%',
-  },
-  manualItemIconPurchased: {
-    backgroundColor: colors.accentSoft,
-  },
-  manualItemText: {
-    flex: 1,
-    minWidth: 0,
-  },
   manualItemTitle: {
     color: colors.textPrimary,
     fontSize: 16,
     fontWeight: '900',
   },
-  itemTitleRow: {
-    minHeight: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  itemTitleText: {
-    flex: 1,
-    minWidth: 0,
-  },
-  itemEditButton: {
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  manualItemTitlePurchased: {
-    color: colors.textSecondary,
-  },
   manualItemMeta: {
     color: colors.textSecondary,
     fontSize: 13,
     marginTop: 4,
-  },
-  itemMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    columnGap: 9,
-  },
-  itemCatalogLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 4,
-    paddingVertical: 2,
-    flexShrink: 1,
-  },
-  itemCatalogLinkText: {
-    color: colors.accent,
-    fontSize: 12,
-    fontWeight: '800',
-    flexShrink: 1,
-  },
-  manualItemControls: {
-    alignItems: 'flex-end',
-  },
-  manualQuantityStepper: {
-    height: 38,
-    minWidth: 98,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSubtle,
-    flexDirection: 'row',
-    alignItems: 'center',
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: {width: 0, height: 3},
-    elevation: 1,
-  },
-  manualStepButton: {
-    width: 32,
-    height: 36,
-    borderRadius: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surfaceSubtle,
-  },
-  manualStepText: {
-    color: colors.textPrimary,
-    fontSize: 20,
-    fontWeight: '900',
-  },
-  manualQuantityText: {
-    minWidth: 34,
-    textAlign: 'center',
-    color: colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '900',
   },
   bottomBar: {
     position: 'absolute',
@@ -4052,60 +3300,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginBottom: 8,
   },
-  iconHeaderRow: {
-    minHeight: 36,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 8,
-  },
-  iconHeaderLabel: {
-    color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  colorPicker: {
-    flexShrink: 1,
-    maxWidth: 210,
-  },
-  colorPickerRow: {
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 4,
-    paddingRight: 2,
-  },
-  colorSwatchShadow: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.surface,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    shadowOffset: {width: 0, height: 3},
-    elevation: 2,
-  },
-  colorSwatchShadowActive: {
-    shadowOpacity: 0.08,
-    elevation: 3,
-  },
-  colorSwatch: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  colorSwatchActive: {
-    borderWidth: 2,
-  },
-  colorSwatchInner: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-  },
   createTypeRow: {
     minHeight: 50,
     flexDirection: 'row',
@@ -4165,52 +3359,6 @@ const styles = StyleSheet.create({
   createTypeTitleAutoActive: {
     color: colors.warning,
   },
-  iconPickerRow: {
-    gap: 10,
-    paddingTop: 4,
-    paddingBottom: 8,
-    paddingRight: 16,
-  },
-  iconChoiceShadow: {
-    width: 82,
-    minHeight: 88,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: {width: 0, height: 5},
-    elevation: 2,
-  },
-  iconChoiceShadowActive: {
-    shadowOpacity: 0.09,
-    elevation: 3,
-  },
-  iconChoice: {
-    width: 82,
-    minHeight: 88,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-    gap: 8,
-  },
-  iconChoiceActive: {
-    borderColor: colors.success,
-    backgroundColor: colors.accentSoft,
-  },
-  iconChoiceLabel: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '800',
-    maxWidth: '100%',
-  },
-  iconChoiceLabelActive: {
-    color: colors.accent,
-  },
   createSubmitButton: {
     borderRadius: 8,
     backgroundColor: colors.success,
@@ -4267,23 +3415,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 10,
-  },
-  addItemIconPickerRow: {
-    paddingTop: 2,
-    paddingBottom: 6,
-  },
-  addItemIconChoiceShadow: {
-    width: 68,
-    minHeight: 72,
-  },
-  addItemIconChoice: {
-    width: 68,
-    minHeight: 72,
-    gap: 5,
-    paddingHorizontal: 6,
-  },
-  addItemIconChoiceLabel: {
-    fontSize: 10,
   },
   addItemSearchBox: {
     minHeight: 52,
