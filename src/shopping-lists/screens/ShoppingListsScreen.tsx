@@ -17,13 +17,7 @@ import {
 } from '../../shoppingListIcons';
 import {colors} from '../../theme/colors';
 import {EmptyState} from '../components/EmptyState';
-
-export type ShoppingListFilter = 'all' | 'manual' | 'auto';
-
-export type ShoppingListCardStats = {
-  itemCount: number;
-  purchasedCount: number;
-};
+import type {ShoppingListCardStats, ShoppingListFilter} from '../types';
 
 type ShoppingListsScreenProps = {
   lists: ShoppingListSummary[];

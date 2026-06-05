@@ -18,7 +18,6 @@ import {
   ShoppingListIconKey,
   ShoppingListSummary,
   ShoppingListType,
-  ShoppingSuggestion,
 } from './domain/types';
 import {ShoppingList} from './app/ShoppingList';
 import {ProductRepository} from './infrastructure/ProductRepository';
@@ -28,19 +27,17 @@ import {
   ManualShoppingItemRow,
 } from './shopping-lists/components/ShoppingItemRows';
 import type {FeedbackMessage, FeedbackTone} from './shopping-lists/components/InlineFeedback';
+import {useShoppingListData} from './shopping-lists/hooks/useShoppingListData';
 import {AddItemModal} from './shopping-lists/modals/AddItemModal';
 import {CatalogLinksModal} from './shopping-lists/modals/CatalogLinksModal';
 import {DeleteListModal} from './shopping-lists/modals/DeleteListModal';
 import {EditItemModal} from './shopping-lists/modals/EditItemModal';
 import {ListFormModal} from './shopping-lists/modals/ListFormModal';
 import {parseQuantityInput} from './shopping-lists/quantity';
-import {
-  ShoppingListsScreen,
-  type ShoppingListCardStats,
-  type ShoppingListFilter,
-} from './shopping-lists/screens/ShoppingListsScreen';
+import {ShoppingListsScreen} from './shopping-lists/screens/ShoppingListsScreen';
 import {ReplenishmentSuggestionsScreen} from './shopping-lists/screens/ReplenishmentSuggestionsScreen';
 import {ShoppingListDetailsScreen} from './shopping-lists/screens/ShoppingListDetailsScreen';
+import type {ShoppingListFilter} from './shopping-lists/types';
 import {DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY} from './shoppingListIcons';
 import {colors} from './theme/colors';
 
@@ -73,11 +70,6 @@ export default function ShoppingListView({
 }: ShoppingListViewProps) {
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<ScreenMode>('lists');
-  const [lists, setLists] = useState<ShoppingListSummary[]>([]);
-  const [suggestions, setSuggestions] = useState<ShoppingSuggestion[]>([]);
-  const [selectedList, setSelectedList] = useState<ShoppingListSummary | null>(null);
-  const [items, setItems] = useState<AutoShoppingListItemState[]>([]);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState('');
@@ -119,7 +111,30 @@ export default function ShoppingListView({
   const [listSearch, setListSearch] = useState('');
   const [itemSearch, setItemSearch] = useState('');
   const [listFilter, setListFilter] = useState<ShoppingListFilter>('all');
-  const [listStats, setListStats] = useState<Record<string, ShoppingListCardStats>>({});
+  const {
+    lists,
+    setLists,
+    suggestions,
+    setSuggestions,
+    selectedList,
+    setSelectedList,
+    items,
+    setItems,
+    loading,
+    setLoading,
+    listStats,
+    manualLists,
+    filteredLists,
+    filteredItems,
+    loadLists,
+    loadSelectedList,
+  } = useShoppingListData({
+    shoppingList,
+    shoppingRepository,
+    listSearch,
+    listFilter,
+    itemSearch,
+  });
   const [toast, setToast] = useState<FeedbackMessage | null>(null);
   const toastAnim = useRef(new Animated.Value(0)).current;
   const toastRunId = useRef(0);
@@ -127,27 +142,6 @@ export default function ShoppingListView({
   const catalogLinksFeedbackRunId = useRef(0);
   const hasPlayedSwipeHint = useRef(false);
   const [swipeHintItemId, setSwipeHintItemId] = useState<string | null>(null);
-
-  const manualLists = useMemo(() => lists.filter(list => list.type === 'manual'), [lists]);
-  const filteredLists = useMemo(() => {
-    const query = listSearch.trim().toLowerCase();
-    return lists.filter(list => {
-      if (listFilter !== 'all' && list.type !== listFilter) {
-        return false;
-      }
-      if (!query) {
-        return true;
-      }
-      return list.name.toLowerCase().includes(query);
-    });
-  }, [listFilter, listSearch, lists]);
-  const filteredItems = useMemo(() => {
-    const query = itemSearch.trim().toLowerCase();
-    if (!query) {
-      return items;
-    }
-    return items.filter(item => item.label.toLowerCase().includes(query));
-  }, [itemSearch, items]);
 
   const toastTop = useMemo(() => {
     return insets.top + 12;
@@ -190,45 +184,6 @@ export default function ShoppingListView({
         setCatalogLinksFeedback(null);
       }
     }, 1800);
-  }, []);
-
-  const loadLists = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [nextLists, nextSuggestions] = await Promise.all([
-        shoppingRepository.getLists(),
-        shoppingList.generateReplenishmentSuggestions(),
-      ]);
-      const statsEntries = await Promise.all(
-        nextLists.map(async list => {
-          const listItems = await shoppingRepository.getItems(list.id);
-          return [
-            list.id,
-            {
-              itemCount: listItems.length,
-              purchasedCount: listItems.filter(item => item.status === 'purchased').length,
-            },
-          ] as const;
-        }),
-      );
-      setLists(nextLists);
-      setSuggestions(nextSuggestions);
-      setListStats(Object.fromEntries(statsEntries));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const loadSelectedList = useCallback(async (list: ShoppingListSummary) => {
-    setLoading(true);
-    try {
-      const details = await shoppingList.getListWithEffectiveStatuses(list.id);
-      setSelectedList(details.list);
-      setItems(details.items);
-      return details;
-    } finally {
-      setLoading(false);
-    }
   }, []);
 
   const goBackOneLevel = useCallback(() => {
@@ -276,7 +231,7 @@ export default function ShoppingListView({
     if (mode === 'lists') {
       loadLists().catch(() => setLoading(false));
     }
-  }, [loadLists, mode]);
+  }, [loadLists, mode, setLoading]);
 
   React.useEffect(() => {
     setBottomNavVisible?.(mode !== 'details');
@@ -292,7 +247,7 @@ export default function ShoppingListView({
       setMode('details');
       loadSelectedList(list).catch(() => setLoading(false));
     },
-    [loadSelectedList],
+    [loadSelectedList, setLoading],
   );
 
   const refreshCurrent = useCallback(async () => {
@@ -368,7 +323,7 @@ export default function ShoppingListView({
     } finally {
       setBusy(false);
     }
-  }, [editIconColorKey, editIconKey, editName, loadLists, loadSelectedList, selectedList, showToast]);
+  }, [editIconColorKey, editIconKey, editName, loadLists, loadSelectedList, selectedList, setLists, setSelectedList, showToast]);
 
   const moveList = useCallback(async (listId: string, direction: -1 | 1) => {
     const currentIndex = lists.findIndex(list => list.id === listId);
@@ -388,7 +343,7 @@ export default function ShoppingListView({
       showToast('Nie udało się zmienić kolejności list', 'error');
       loadLists().catch(() => {});
     }
-  }, [lists, loadLists, showToast]);
+  }, [lists, loadLists, setLists, showToast]);
 
   const deleteList = useCallback(async () => {
     if (!pendingDeleteList) {
@@ -487,7 +442,7 @@ export default function ShoppingListView({
     } finally {
       setBusy(false);
     }
-  }, [editItemIconColorKey, editItemIconKey, editItemName, editingItem, loadSelectedList, selectedList, showToast]);
+  }, [editItemIconColorKey, editItemIconKey, editItemName, editingItem, loadSelectedList, selectedList, setSuggestions, showToast]);
 
   const searchCatalogLinks = useCallback(async (query: string) => {
     setLinkCatalogQuery(query);
@@ -528,7 +483,7 @@ export default function ShoppingListView({
         setBusy(false);
       }
     },
-    [linkingItem, loadSelectedList, selectedList, showCatalogLinksFeedback],
+    [linkingItem, loadSelectedList, selectedList, setSuggestions, showCatalogLinksFeedback],
   );
 
   const unlinkCatalogProduct = useCallback(
@@ -551,7 +506,7 @@ export default function ShoppingListView({
         setBusy(false);
       }
     },
-    [linkingItem, loadSelectedList, selectedList, showCatalogLinksFeedback],
+    [linkingItem, loadSelectedList, selectedList, setSuggestions, showCatalogLinksFeedback],
   );
 
   const addItem = useCallback(async () => {
@@ -613,7 +568,7 @@ export default function ShoppingListView({
     } finally {
       setBusy(false);
     }
-  }, [addIconColorKey, addIconKey, addQuantity, catalogQuery, items.length, lists.length, loadSelectedList, selectedCatalog, selectedList, showToast]);
+  }, [addIconColorKey, addIconKey, addQuantity, catalogQuery, items.length, lists.length, loadSelectedList, selectedCatalog, selectedList, setSuggestions, showToast]);
 
   const updateStatus = useCallback(
     async (itemId: string, status: ShoppingItemStatus) => {
@@ -674,7 +629,7 @@ export default function ShoppingListView({
       showToast('Nie udało się zmienić kolejności produktów', 'error');
       loadSelectedList(selectedList).catch(() => {});
     }
-  }, [itemSearch, items, loadSelectedList, selectedList, showToast]);
+  }, [itemSearch, items, loadSelectedList, selectedList, setItems, showToast]);
 
   const deleteItem = useCallback(
     async (itemId: string) => {
@@ -732,7 +687,7 @@ export default function ShoppingListView({
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [setLists, setLoading, setSuggestions, showToast]);
 
   const mergeSuggestions = useCallback(async () => {
     if (!targetListId) {
@@ -758,7 +713,7 @@ export default function ShoppingListView({
     } finally {
       setBusy(false);
     }
-  }, [showToast, targetListId]);
+  }, [setLists, setSuggestions, showToast, targetListId]);
 
   const completePurchase = useCallback(async () => {
     if (!selectedList) {
