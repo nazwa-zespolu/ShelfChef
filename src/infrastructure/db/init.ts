@@ -153,33 +153,6 @@ function setupShoppingListsSchema() {
         datetime('now')
       FROM product_definitions;
     `);
-
-  db.execute(`
-      INSERT OR IGNORE INTO shopping_lists (
-        id,
-        name,
-        type,
-        icon_key,
-        icon_color_key,
-        is_locked,
-        sort_order,
-        locked_at,
-        created_at,
-        updated_at
-      )
-      VALUES (
-        'default-auto-minimum',
-        'Moje minimum',
-        'auto',
-        'refresh',
-        'green',
-        0,
-        0,
-        NULL,
-        datetime('now'),
-        datetime('now')
-      );
-    `);
 }
 
 function createShoppingListItemCatalogProductsTable() {

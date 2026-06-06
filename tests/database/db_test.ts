@@ -621,24 +621,6 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     return toRows([]);
   }
 
-  if (normalized.startsWith('INSERT OR IGNORE INTO SHOPPING_LISTS')) {
-    if (!shoppingLists.has('default-auto-minimum')) {
-      shoppingLists.set('default-auto-minimum', {
-        id: 'default-auto-minimum',
-        name: 'Moje minimum',
-        type: 'auto',
-        icon_key: 'refresh',
-        icon_color_key: 'green',
-        is_locked: 0,
-        sort_order: 0,
-        locked_at: null,
-        created_at: '2026-05-27T00:00:00.000Z',
-        updated_at: '2026-05-27T00:00:00.000Z',
-      });
-    }
-    return toRows([]);
-  }
-
   if (
     normalized.startsWith(
       'INSERT INTO INVENTORY (ID, PRODUCT_EAN, CUSTOM_NAME, EXPIRY_DATE) VALUES (?, ?, ?, ?)',
@@ -854,18 +836,10 @@ describe('ProductRepository + database integration', () => {
     });
   });
 
-  it('inicjalizuje schemat list zakupów i tworzy domyślną listę automatyczną', () => {
+  it('inicjalizuje schemat list zakupów bez wymuszania domyślnej listy', () => {
     const lists = db.execute('SELECT * FROM shopping_lists').rows!;
 
-    expect(lists.length).toBe(1);
-    expect(lists.item(0)).toMatchObject({
-      id: 'default-auto-minimum',
-      name: 'Moje minimum',
-      type: 'auto',
-      icon_key: 'refresh',
-      icon_color_key: 'green',
-      is_locked: 0,
-    });
+    expect(lists.length).toBe(0);
   });
 
   it('backfilluje katalog produktów z istniejących definicji bez parenta', () => {
@@ -1081,12 +1055,13 @@ describe('ProductRepository + database integration', () => {
   it('zapisuje kolejność list i usuwa listę razem z jej pozycjami', async () => {
     const first = await shoppingListRepository.createList('Pierwsza', 'manual');
     const second = await shoppingListRepository.createList('Druga', 'manual');
+    const third = await shoppingListRepository.createList('Trzecia', 'auto');
     await shoppingListRepository.addItem(second.id, {
       label: 'Mleko',
       quantity: 1,
     });
 
-    await shoppingListRepository.updateListOrder([second.id, first.id, 'default-auto-minimum']);
+    await shoppingListRepository.updateListOrder([second.id, first.id, third.id]);
     let lists = await shoppingListRepository.getLists();
     expect(lists.map(list => list.id).slice(0, 2)).toEqual([second.id, first.id]);
 
