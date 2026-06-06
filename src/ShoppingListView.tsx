@@ -286,14 +286,6 @@ export default function ShoppingListView({
     [loadSelectedList, setLoading],
   );
 
-  const refreshCurrent = useCallback(async () => {
-    if (mode === 'details' && selectedList) {
-      await loadSelectedList(selectedList);
-      return;
-    }
-    await loadLists();
-  }, [loadLists, loadSelectedList, mode, selectedList]);
-
   const createList = useCallback(async () => {
     const name = createName.trim();
     if (!name) {
@@ -577,14 +569,12 @@ export default function ShoppingListView({
           filteredItems={filteredItems}
           itemSearch={itemSearch}
           busy={busy}
-          loading={loading}
           bottomInset={insets.bottom}
           renderManualItem={renderManualItem}
           renderAutoItem={renderAutoItem}
           onBack={goBackOneLevel}
           onEditList={openEditList}
           onChangeItemSearch={setItemSearch}
-          onRefresh={refreshCurrent}
           onAddItem={openAddItem}
           onCompletePurchase={() => { completePurchase().catch(() => {}); }}
           onToggleLock={() => { toggleLock().catch(() => {}); }}

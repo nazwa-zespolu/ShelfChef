@@ -4,7 +4,6 @@ import {
   FlatList,
   type ListRenderItem,
   Pressable,
-  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -21,14 +20,12 @@ type ShoppingListDetailsScreenProps = {
   filteredItems: AutoShoppingListItemState[];
   itemSearch: string;
   busy: boolean;
-  loading: boolean;
   bottomInset: number;
   renderManualItem: ListRenderItem<AutoShoppingListItemState>;
   renderAutoItem: ListRenderItem<AutoShoppingListItemState>;
   onBack: () => void;
   onEditList: () => void;
   onChangeItemSearch: (value: string) => void;
-  onRefresh: () => void;
   onAddItem: () => void;
   onCompletePurchase: () => void;
   onToggleLock: () => void;
@@ -57,14 +54,12 @@ export function ShoppingListDetailsScreen({
   filteredItems,
   itemSearch,
   busy,
-  loading,
   bottomInset,
   renderManualItem,
   renderAutoItem,
   onBack,
   onEditList,
   onChangeItemSearch,
-  onRefresh,
   onAddItem,
   onCompletePurchase,
   onToggleLock,
@@ -95,9 +90,6 @@ export function ShoppingListDetailsScreen({
         <FlatList
           data={filteredItems}
           keyExtractor={item => item.id}
-          refreshControl={
-            <RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={colors.success} />
-          }
           contentContainerStyle={[
             styles.itemsContent,
             filteredItems.length === 0 && styles.emptyContent,
@@ -170,9 +162,6 @@ export function ShoppingListDetailsScreen({
       <FlatList
         data={filteredItems}
         keyExtractor={item => item.id}
-        refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={colors.success} />
-        }
         contentContainerStyle={[
           styles.itemsContent,
           filteredItems.length === 0 && styles.emptyContent,
