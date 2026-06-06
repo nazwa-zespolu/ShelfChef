@@ -377,7 +377,7 @@ export function useShoppingItemActions({
   );
 
   const moveItem = useCallback(async (itemId: string, direction: -1 | 1) => {
-    if (!selectedList || selectedList.type !== 'manual' || itemSearch.trim()) {
+    if (!selectedList || itemSearch.trim()) {
       return;
     }
     const currentIndex = items.findIndex(item => item.id === itemId);

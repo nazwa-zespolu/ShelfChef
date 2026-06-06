@@ -34,69 +34,16 @@ export function ManualShoppingItemRow({
   playSwipeHint: boolean;
   onSwipeHintComplete: () => void;
 }) {
-  const translateY = useRef(new Animated.Value(0)).current;
   const hintTranslateX = useRef(new Animated.Value(0)).current;
   const hasPlayedThisHint = useRef(false);
-  const dragActive = useRef(false);
-  const dragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const movedAt = useRef(0);
-  const [dragging, setDragging] = useState(false);
+  const {translateY, dragging, panHandlers} = useShoppingItemDrag({
+    enabled: reorderEnabled,
+    itemId: item.id,
+    onMove,
+  });
   const isPurchased = item.effectiveStatus === 'purchased';
   const nextToggleStatus: ShoppingItemStatus = isPurchased ? 'planned' : 'purchased';
   const canDecrease = item.quantity > 1 && !busy;
-
-  const resetPosition = useCallback(() => {
-    if (dragTimer.current) {
-      clearTimeout(dragTimer.current);
-      dragTimer.current = null;
-    }
-    Animated.spring(translateY, {
-      toValue: 0,
-      useNativeDriver: true,
-      speed: 20,
-      bounciness: 4,
-    }).start();
-    dragActive.current = false;
-    setDragging(false);
-  }, [translateY]);
-
-  const dragResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => reorderEnabled,
-        onMoveShouldSetPanResponder: (_evt, gesture) =>
-          reorderEnabled && Math.abs(gesture.dy) > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
-        onPanResponderGrant: () => {
-          movedAt.current = 0;
-          dragTimer.current = setTimeout(() => {
-            dragActive.current = true;
-            setDragging(true);
-          }, 180);
-        },
-        onPanResponderMove: (_evt, gesture) => {
-          if (!dragActive.current) {
-            return;
-          }
-          translateY.setValue(gesture.dy);
-          const now = Date.now();
-          if (now - movedAt.current < 220) {
-            return;
-          }
-          if (gesture.dy > 46) {
-            movedAt.current = now;
-            translateY.setValue(0);
-            onMove(item.id, 1);
-          } else if (gesture.dy < -46) {
-            movedAt.current = now;
-            translateY.setValue(0);
-            onMove(item.id, -1);
-          }
-        },
-        onPanResponderRelease: resetPosition,
-        onPanResponderTerminate: resetPosition,
-      }),
-    [item.id, onMove, reorderEnabled, resetPosition, translateY],
-  );
 
   React.useEffect(() => {
     if (!playSwipeHint || hasPlayedThisHint.current) {
@@ -164,7 +111,7 @@ export function ManualShoppingItemRow({
             dragging && styles.itemCardDragging,
           ]}>
           {isPurchased ? <View style={styles.itemStatusBar} /> : null}
-          <View {...dragResponder.panHandlers}>
+          <View {...panHandlers}>
             <ShoppingItemIconBubble
               iconKey={item.iconKey}
               iconColorKey={item.iconColorKey}
@@ -185,11 +132,21 @@ export function ManualShoppingItemRow({
 export function AutoShoppingItemRow({
   item,
   busy,
+  reorderEnabled,
   onDelete,
+  onMove,
   onUpdateQuantity,
   onOpenLinks,
   onEdit,
-}: SharedShoppingItemRowProps) {
+}: SharedShoppingItemRowProps & {
+  reorderEnabled: boolean;
+  onMove: (id: string, direction: -1 | 1) => void;
+}) {
+  const {translateY, dragging, panHandlers} = useShoppingItemDrag({
+    enabled: reorderEnabled,
+    itemId: item.id,
+    onMove,
+  });
   const canDecrease = item.quantity > 1 && !busy;
 
   return (
@@ -198,17 +155,96 @@ export function AutoShoppingItemRow({
       borderRadius={8}
       allowRightDelete={false}
       onDelete={() => { onDelete(item.id).catch(() => {}); }}>
-      <View style={styles.itemCard}>
-        <ShoppingItemIconBubble
-          iconKey={item.iconKey}
-          iconColorKey={item.iconColorKey}
-          imageUrl={item.imageUrl}
-        />
-        <ShoppingItemText item={item} onOpenLinks={onOpenLinks} onEdit={onEdit} showTargetQuantity />
-        <QuantityStepper item={item} busy={busy} canDecrease={canDecrease} onUpdateQuantity={onUpdateQuantity} />
-      </View>
+      <Animated.View style={{transform: [{translateY}]}}>
+        <View style={[styles.itemCard, dragging && styles.itemCardDragging]}>
+          <View {...panHandlers}>
+            <ShoppingItemIconBubble
+              iconKey={item.iconKey}
+              iconColorKey={item.iconColorKey}
+              imageUrl={item.imageUrl}
+            />
+          </View>
+          <ShoppingItemText item={item} onOpenLinks={onOpenLinks} onEdit={onEdit} showTargetQuantity />
+          <QuantityStepper item={item} busy={busy} canDecrease={canDecrease} onUpdateQuantity={onUpdateQuantity} />
+        </View>
+      </Animated.View>
     </SwipeToDeleteCard>
   );
+}
+
+function useShoppingItemDrag({
+  enabled,
+  itemId,
+  onMove,
+}: {
+  enabled: boolean;
+  itemId: string;
+  onMove: (id: string, direction: -1 | 1) => void;
+}) {
+  const translateY = useRef(new Animated.Value(0)).current;
+  const dragActive = useRef(false);
+  const dragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const movedAt = useRef(0);
+  const [dragging, setDragging] = useState(false);
+
+  const resetPosition = useCallback(() => {
+    if (dragTimer.current) {
+      clearTimeout(dragTimer.current);
+      dragTimer.current = null;
+    }
+    Animated.spring(translateY, {
+      toValue: 0,
+      useNativeDriver: true,
+      speed: 20,
+      bounciness: 4,
+    }).start();
+    dragActive.current = false;
+    setDragging(false);
+  }, [translateY]);
+
+  const dragResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => enabled,
+        onMoveShouldSetPanResponder: (_evt, gesture) =>
+          enabled && Math.abs(gesture.dy) > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onPanResponderGrant: () => {
+          movedAt.current = 0;
+          dragTimer.current = setTimeout(() => {
+            dragActive.current = true;
+            setDragging(true);
+          }, 180);
+        },
+        onPanResponderMove: (_evt, gesture) => {
+          if (!dragActive.current) {
+            return;
+          }
+          translateY.setValue(gesture.dy);
+          const now = Date.now();
+          if (now - movedAt.current < 220) {
+            return;
+          }
+          if (gesture.dy > 46) {
+            movedAt.current = now;
+            translateY.setValue(0);
+            onMove(itemId, 1);
+          } else if (gesture.dy < -46) {
+            movedAt.current = now;
+            translateY.setValue(0);
+            onMove(itemId, -1);
+          }
+        },
+        onPanResponderRelease: resetPosition,
+        onPanResponderTerminate: resetPosition,
+      }),
+    [enabled, itemId, onMove, resetPosition, translateY],
+  );
+
+  return {
+    translateY,
+    dragging,
+    panHandlers: dragResponder.panHandlers,
+  };
 }
 
 function ShoppingItemText({

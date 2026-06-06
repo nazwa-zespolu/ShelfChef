@@ -523,7 +523,9 @@ export default function ShoppingListView({
     <AutoShoppingItemRow
       item={item}
       busy={busy}
+      reorderEnabled={itemSearch.trim().length === 0}
       onDelete={deleteItem}
+      onMove={moveItem}
       onUpdateQuantity={updateQuantity}
       onOpenLinks={openCatalogLinks}
       onEdit={openEditItem}
