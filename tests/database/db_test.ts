@@ -71,12 +71,10 @@ type SQLiteResult = {
 
 const productDefinitions = new Map<string, ProductDefinitionRow>();
 const inventory = new Map<string, InventoryRow>();
-let inventoryV4: Map<string, InventoryRow> | null = null;
 const productCatalog = new Map<string, ProductCatalogRow>();
 const shoppingLists = new Map<string, ShoppingListRow>();
 const shoppingListItems = new Map<string, ShoppingListItemRow>();
 const shoppingListItemCatalogProducts = new Map<string, ShoppingListItemCatalogProductRow>();
-let userVersion = 0;
 
 const withCatalogImage = (row: ProductCatalogRow): Record<string, unknown> => ({
   ...row,
@@ -101,27 +99,6 @@ const toRows = (data: Record<string, unknown>[]): SQLiteResult => ({
 const execute = (sql: string, params: any[] = []): SQLiteResult => {
   const normalized = sql.replace(/\s+/g, ' ').trim().toUpperCase();
 
-  if (normalized.startsWith('INSERT INTO INVENTORY_V4')) {
-    inventoryV4 = new Map(inventory);
-    return toRows([]);
-  }
-
-  if (normalized === 'DROP TABLE INVENTORY') {
-    inventory.clear();
-    return toRows([]);
-  }
-
-  if (normalized === 'ALTER TABLE INVENTORY_V4 RENAME TO INVENTORY') {
-    inventory.clear();
-    if (inventoryV4) {
-      for (const [id, row] of inventoryV4.entries()) {
-        inventory.set(id, row);
-      }
-    }
-    inventoryV4 = null;
-    return toRows([]);
-  }
-
   if (
     normalized.startsWith('CREATE TABLE') ||
     normalized.startsWith('CREATE UNIQUE INDEX') ||
@@ -133,54 +110,6 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     return toRows([]);
   }
 
-  if (normalized.startsWith('ALTER TABLE SHOPPING_LISTS ADD COLUMN ICON_KEY')) {
-    for (const row of shoppingLists.values()) {
-      row.icon_key = row.icon_key ?? 'basket';
-    }
-    return toRows([]);
-  }
-
-  if (normalized.startsWith('ALTER TABLE SHOPPING_LISTS ADD COLUMN ICON_COLOR_KEY')) {
-    for (const row of shoppingLists.values()) {
-      row.icon_color_key = row.icon_color_key ?? 'green';
-    }
-    return toRows([]);
-  }
-
-  if (normalized.startsWith('ALTER TABLE SHOPPING_LIST_ITEMS ADD COLUMN SORT_ORDER')) {
-    for (const row of shoppingListItems.values()) {
-      row.sort_order = row.sort_order ?? 0;
-    }
-    return toRows([]);
-  }
-
-  if (normalized.startsWith('ALTER TABLE SHOPPING_LIST_ITEMS ADD COLUMN ICON_KEY')) {
-    for (const row of shoppingListItems.values()) {
-      row.icon_key = row.icon_key ?? 'box';
-    }
-    return toRows([]);
-  }
-
-  if (normalized.startsWith('ALTER TABLE SHOPPING_LIST_ITEMS ADD COLUMN ICON_COLOR_KEY')) {
-    for (const row of shoppingListItems.values()) {
-      row.icon_color_key = row.icon_color_key ?? 'green';
-    }
-    return toRows([]);
-  }
-
-  if (normalized.startsWith('ALTER TABLE')) {
-    return toRows([]);
-  }
-
-  if (normalized === 'PRAGMA USER_VERSION') {
-    return toRows([{user_version: userVersion}]);
-  }
-
-  if (normalized.startsWith('PRAGMA USER_VERSION =')) {
-    userVersion = Number(normalized.split('=')[1]?.trim() ?? 0);
-    return toRows([]);
-  }
-
   if (normalized.startsWith('DELETE FROM PRODUCT_DEFINITIONS')) {
     productDefinitions.clear();
     return toRows([]);
@@ -188,7 +117,6 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
 
   if (normalized.startsWith('DELETE FROM INVENTORY')) {
     inventory.clear();
-    inventoryV4 = null;
     return toRows([]);
   }
 
@@ -811,7 +739,6 @@ describe('ProductRepository + database integration', () => {
     db.execute('DELETE FROM shopping_lists');
     db.execute('DELETE FROM shopping_list_item_catalog_products');
     db.execute('DELETE FROM shopping_list_items');
-    db.execute('PRAGMA user_version = 0');
     setupDatabase();
     repository = new ProductRepository();
     shoppingListRepository = new ShoppingListRepository();
@@ -932,11 +859,9 @@ describe('ProductRepository + database integration', () => {
     });
   });
 
-  it('migruje schemat list zakupów i tworzy domyślną listę automatyczną', () => {
-    const version = db.execute('PRAGMA user_version').rows!.item(0);
+  it('inicjalizuje schemat list zakupów i tworzy domyślną listę automatyczną', () => {
     const lists = db.execute('SELECT * FROM shopping_lists').rows!;
 
-    expect(version.user_version).toBe(9);
     expect(lists.length).toBe(1);
     expect(lists.item(0)).toMatchObject({
       id: 'default-auto-minimum',
@@ -955,7 +880,6 @@ describe('ProductRepository + database integration', () => {
     db.execute('DELETE FROM product_catalog');
     db.execute('DELETE FROM shopping_lists');
     db.execute('DELETE FROM shopping_list_item_catalog_products');
-    db.execute('PRAGMA user_version = 0');
     db.execute(
       'INSERT OR REPLACE INTO product_definitions (ean, name, brand, image_url, category) VALUES (?, ?, ?, ?, ?)',
       ['5901234123457', 'Mleko 2%', 'Lacpol', null, 'Nabial'],

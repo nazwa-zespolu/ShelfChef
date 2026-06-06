@@ -2,7 +2,6 @@ import { open } from 'react-native-quick-sqlite';
 
 // Otwarcie bazy danych
 export const db = open({ name: 'shelfchef.db' });
-const SHOPPING_LISTS_SCHEMA_VERSION = 9;
 
 const MOCK_DATA_SQL = [
   // 1. Product definitions (in English) - expanded base for the LLM
@@ -40,15 +39,6 @@ const MOCK_DATA_SQL = [
     ('mock-14', NULL, 'Grandma''s homemade jam', '2026-12-31', 1);`
 ];
 
-function getUserVersion(): number {
-  const result = db.execute('PRAGMA user_version');
-  if (!result.rows || result.rows.length === 0) {
-    return 0;
-  }
-  const row = result.rows.item(0);
-  return Number(row.user_version ?? 0);
-}
-
 export function runInTransaction<T>(work: () => T): T {
   db.execute('BEGIN TRANSACTION');
   try {
@@ -61,7 +51,7 @@ export function runInTransaction<T>(work: () => T): T {
   }
 }
 
-function migrateToShoppingListsSchema() {
+function setupShoppingListsSchema() {
   db.execute(`
       CREATE TABLE IF NOT EXISTS product_catalog (
         id TEXT PRIMARY KEY,
@@ -208,171 +198,6 @@ function createShoppingListItemCatalogProductsTable() {
     `);
 }
 
-function migrateShoppingListSortOrder() {
-  db.execute('ALTER TABLE shopping_lists ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
-}
-
-function migrateInventoryExpiryNullable() {
-  db.execute(`
-      CREATE TABLE inventory_v4 (
-        id TEXT PRIMARY KEY,
-        product_ean TEXT,
-        custom_name TEXT,
-        expiry_date TEXT,
-        opened_at TEXT,
-        is_opened INTEGER DEFAULT 0,
-        FOREIGN KEY(product_ean) REFERENCES product_definitions(ean)
-      );
-    `);
-
-  db.execute(`
-      INSERT INTO inventory_v4 (
-        id,
-        product_ean,
-        custom_name,
-        expiry_date,
-        opened_at,
-        is_opened
-      )
-      SELECT
-        id,
-        product_ean,
-        custom_name,
-        expiry_date,
-        opened_at,
-        COALESCE(is_opened, 0)
-      FROM inventory;
-    `);
-
-  db.execute('DROP TABLE inventory');
-  db.execute('ALTER TABLE inventory_v4 RENAME TO inventory');
-}
-
-function migrateShoppingListIcons() {
-  db.execute("ALTER TABLE shopping_lists ADD COLUMN icon_key TEXT NOT NULL DEFAULT 'basket'");
-  db.execute("UPDATE shopping_lists SET icon_key = 'refresh' WHERE type = 'auto'");
-}
-
-function migrateShoppingListIconColors() {
-  db.execute("ALTER TABLE shopping_lists ADD COLUMN icon_color_key TEXT NOT NULL DEFAULT 'green'");
-}
-
-function migrateShoppingListItemSortOrder() {
-  db.execute('ALTER TABLE shopping_list_items ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
-}
-
-function migrateShoppingListItemIcons() {
-  db.execute("ALTER TABLE shopping_list_items ADD COLUMN icon_key TEXT NOT NULL DEFAULT 'box'");
-  db.execute("ALTER TABLE shopping_list_items ADD COLUMN icon_color_key TEXT NOT NULL DEFAULT 'green'");
-}
-
-function migrateCatalogConcreteToSpecific() {
-  db.execute(`
-      CREATE TABLE product_catalog_v2 (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        normalized_name TEXT NOT NULL,
-        kind TEXT NOT NULL CHECK(kind IN ('generic', 'specific')),
-        product_ean TEXT,
-        parent_catalog_product_id TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY(product_ean) REFERENCES product_definitions(ean),
-        FOREIGN KEY(parent_catalog_product_id) REFERENCES product_catalog_v2(id)
-      );
-    `);
-
-  db.execute(`
-      INSERT INTO product_catalog_v2 (
-        id,
-        name,
-        normalized_name,
-        kind,
-        product_ean,
-        parent_catalog_product_id,
-        created_at,
-        updated_at
-      )
-      SELECT
-        CASE
-          WHEN id LIKE 'catalog-concrete-%'
-            THEN 'catalog-specific-' || substr(id, length('catalog-concrete-') + 1)
-          ELSE id
-        END,
-        name,
-        normalized_name,
-        CASE WHEN kind = 'concrete' THEN 'specific' ELSE kind END,
-        product_ean,
-        CASE
-          WHEN parent_catalog_product_id LIKE 'catalog-concrete-%'
-            THEN 'catalog-specific-' || substr(parent_catalog_product_id, length('catalog-concrete-') + 1)
-          ELSE parent_catalog_product_id
-        END,
-        created_at,
-        updated_at
-      FROM product_catalog;
-    `);
-
-  db.execute(`
-      UPDATE shopping_list_items
-      SET catalog_product_id = 'catalog-specific-' || substr(catalog_product_id, length('catalog-concrete-') + 1)
-      WHERE catalog_product_id LIKE 'catalog-concrete-%';
-    `);
-
-  db.execute('DROP TABLE product_catalog');
-  db.execute('ALTER TABLE product_catalog_v2 RENAME TO product_catalog');
-
-  db.execute(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_product_catalog_ean
-      ON product_catalog(product_ean)
-      WHERE product_ean IS NOT NULL;
-    `);
-
-  db.execute(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_product_catalog_generic_name
-      ON product_catalog(kind, normalized_name)
-      WHERE kind = 'generic';
-    `);
-}
-
-function runMigrations() {
-  const currentVersion = getUserVersion();
-  if (currentVersion >= SHOPPING_LISTS_SCHEMA_VERSION) {
-    return;
-  }
-
-  runInTransaction(() => {
-    if (currentVersion < 1) {
-      migrateToShoppingListsSchema();
-    }
-    if (currentVersion >= 1 && currentVersion < 2) {
-      migrateCatalogConcreteToSpecific();
-    }
-    if (currentVersion >= 1 && currentVersion < 3) {
-      migrateShoppingListSortOrder();
-    }
-    if (currentVersion < 4) {
-      migrateInventoryExpiryNullable();
-    }
-    if (currentVersion >= 1 && currentVersion < 5) {
-      migrateShoppingListIcons();
-    }
-    if (currentVersion >= 1 && currentVersion < 6) {
-      migrateShoppingListIconColors();
-    }
-    if (currentVersion >= 1 && currentVersion < 7) {
-      migrateShoppingListItemSortOrder();
-    }
-    if (currentVersion >= 1 && currentVersion < 8) {
-      createShoppingListItemCatalogProductsTable();
-    }
-    if (currentVersion >= 1 && currentVersion < 9) {
-      migrateShoppingListItemIcons();
-    }
-    db.execute(`PRAGMA user_version = ${SHOPPING_LISTS_SCHEMA_VERSION}`);
-  });
-}
-
 export const setupDatabase = () => {
   // 1. Tabela cache
   db.execute(`
@@ -406,5 +231,5 @@ export const setupDatabase = () => {
   MOCK_DATA_SQL.forEach(sql => {
     db.execute(sql);
   });
-  runMigrations();
+  runInTransaction(setupShoppingListsSchema);
 };
