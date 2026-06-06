@@ -32,6 +32,7 @@ import {CatalogLinksModal} from './shopping-lists/modals/CatalogLinksModal';
 import {DeleteListModal} from './shopping-lists/modals/DeleteListModal';
 import {EditItemModal} from './shopping-lists/modals/EditItemModal';
 import {ListFormModal} from './shopping-lists/modals/ListFormModal';
+import {animateDragReorder} from './shopping-lists/dragAnimation';
 import {ShoppingListsScreen} from './shopping-lists/screens/ShoppingListsScreen';
 import {ReplenishmentSuggestionsScreen} from './shopping-lists/screens/ReplenishmentSuggestionsScreen';
 import {ShoppingListDetailsScreen} from './shopping-lists/screens/ShoppingListDetailsScreen';
@@ -353,24 +354,24 @@ export default function ShoppingListView({
     }
   }, [editIconColorKey, editIconKey, editName, loadLists, loadSelectedList, selectedList, setLists, setSelectedList, showToast]);
 
-  const moveList = useCallback(async (listId: string, direction: -1 | 1) => {
+  const moveList = useCallback((listId: string, direction: -1 | 1) => {
     const currentIndex = lists.findIndex(list => list.id === listId);
     const nextIndex = currentIndex + direction;
     if (currentIndex < 0 || nextIndex < 0 || nextIndex >= lists.length) {
-      return;
+      return false;
     }
     const nextLists = [...lists];
     const [moved] = nextLists.splice(currentIndex, 1);
     nextLists.splice(nextIndex, 0, moved);
     const ordered = nextLists.map((list, index) => ({...list, sortOrder: index}));
+    animateDragReorder();
     setLists(ordered);
-    try {
-      await shoppingRepository.updateListOrder(ordered.map(list => list.id));
-    } catch (e) {
+    shoppingRepository.updateListOrder(ordered.map(list => list.id)).catch(e => {
       console.error('[ShelfChef] updateListOrder failed', e);
       showToast('Nie udało się zmienić kolejności list', 'error');
       loadLists().catch(() => {});
-    }
+    });
+    return true;
   }, [lists, loadLists, setLists, showToast]);
 
   const deleteList = useCallback(async () => {

@@ -6,6 +6,11 @@ import type {AutoShoppingListItemState, ShoppingItemStatus} from '../../domain/t
 import {colors} from '../../theme/colors';
 import {ShoppingItemIconBubble} from './ShoppingItemIconBubble';
 
+const DRAG_START_DELAY_MS = 135;
+const DRAG_REORDER_COOLDOWN_MS = 190;
+const DRAG_REORDER_THRESHOLD = 44;
+const DRAG_SETTLE_OFFSET = 14;
+
 type SharedShoppingItemRowProps = {
   item: AutoShoppingListItemState;
   busy: boolean;
@@ -29,7 +34,7 @@ export function ManualShoppingItemRow({
   onSwipeHintComplete,
 }: SharedShoppingItemRowProps & {
   reorderEnabled: boolean;
-  onMove: (id: string, direction: -1 | 1) => void;
+  onMove: (id: string, direction: -1 | 1) => boolean;
   onUpdateStatus: (id: string, status: ShoppingItemStatus) => Promise<void>;
   playSwipeHint: boolean;
   onSwipeHintComplete: () => void;
@@ -140,7 +145,7 @@ export function AutoShoppingItemRow({
   onEdit,
 }: SharedShoppingItemRowProps & {
   reorderEnabled: boolean;
-  onMove: (id: string, direction: -1 | 1) => void;
+  onMove: (id: string, direction: -1 | 1) => boolean;
 }) {
   const {translateY, dragging, panHandlers} = useShoppingItemDrag({
     enabled: reorderEnabled,
@@ -179,7 +184,7 @@ function useShoppingItemDrag({
 }: {
   enabled: boolean;
   itemId: string;
-  onMove: (id: string, direction: -1 | 1) => void;
+  onMove: (id: string, direction: -1 | 1) => boolean;
 }) {
   const translateY = useRef(new Animated.Value(0)).current;
   const dragActive = useRef(false);
@@ -195,8 +200,8 @@ function useShoppingItemDrag({
     Animated.spring(translateY, {
       toValue: 0,
       useNativeDriver: true,
-      speed: 20,
-      bounciness: 4,
+      speed: 24,
+      bounciness: 3,
     }).start();
     dragActive.current = false;
     setDragging(false);
@@ -213,7 +218,7 @@ function useShoppingItemDrag({
           dragTimer.current = setTimeout(() => {
             dragActive.current = true;
             setDragging(true);
-          }, 180);
+          }, DRAG_START_DELAY_MS);
         },
         onPanResponderMove: (_evt, gesture) => {
           if (!dragActive.current) {
@@ -221,17 +226,33 @@ function useShoppingItemDrag({
           }
           translateY.setValue(gesture.dy);
           const now = Date.now();
-          if (now - movedAt.current < 220) {
+          if (now - movedAt.current < DRAG_REORDER_COOLDOWN_MS) {
             return;
           }
-          if (gesture.dy > 46) {
+          if (gesture.dy > DRAG_REORDER_THRESHOLD) {
             movedAt.current = now;
-            translateY.setValue(0);
-            onMove(itemId, 1);
-          } else if (gesture.dy < -46) {
+            if (!onMove(itemId, 1)) {
+              return;
+            }
+            translateY.setValue(-DRAG_SETTLE_OFFSET);
+            Animated.spring(translateY, {
+              toValue: 0,
+              useNativeDriver: true,
+              speed: 28,
+              bounciness: 2,
+            }).start();
+          } else if (gesture.dy < -DRAG_REORDER_THRESHOLD) {
             movedAt.current = now;
-            translateY.setValue(0);
-            onMove(itemId, -1);
+            if (!onMove(itemId, -1)) {
+              return;
+            }
+            translateY.setValue(DRAG_SETTLE_OFFSET);
+            Animated.spring(translateY, {
+              toValue: 0,
+              useNativeDriver: true,
+              speed: 28,
+              bounciness: 2,
+            }).start();
           }
         },
         onPanResponderRelease: resetPosition,

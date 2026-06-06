@@ -12,6 +12,7 @@ import type {
 import type {ShoppingListRepository} from '../../infrastructure/ShoppingListRepository';
 import {DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY} from '../../shoppingListIcons';
 import type {FeedbackMessage, FeedbackTone} from '../components/InlineFeedback';
+import {animateDragReorder} from '../dragAnimation';
 import {parseQuantityInput} from '../quantity';
 
 type ShoppingListDetails = {
@@ -376,27 +377,27 @@ export function useShoppingItemActions({
     [loadSelectedList, selectedList, setBusy, shoppingRepository, showToast],
   );
 
-  const moveItem = useCallback(async (itemId: string, direction: -1 | 1) => {
+  const moveItem = useCallback((itemId: string, direction: -1 | 1) => {
     if (!selectedList || itemSearch.trim()) {
-      return;
+      return false;
     }
     const currentIndex = items.findIndex(item => item.id === itemId);
     const nextIndex = currentIndex + direction;
     if (currentIndex < 0 || nextIndex < 0 || nextIndex >= items.length) {
-      return;
+      return false;
     }
     const nextItems = [...items];
     const [moved] = nextItems.splice(currentIndex, 1);
     nextItems.splice(nextIndex, 0, moved);
     const ordered = nextItems.map((item, index) => ({...item, sortOrder: index}));
+    animateDragReorder();
     setItems(ordered);
-    try {
-      await shoppingRepository.updateItemOrder(selectedList.id, ordered.map(item => item.id));
-    } catch (e) {
+    shoppingRepository.updateItemOrder(selectedList.id, ordered.map(item => item.id)).catch(e => {
       console.error('[ShelfChef] updateItemOrder failed', e);
       showToast('Nie udało się zmienić kolejności produktów', 'error');
       loadSelectedList(selectedList).catch(() => {});
-    }
+    });
+    return true;
   }, [
     itemSearch,
     items,

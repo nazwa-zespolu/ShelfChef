@@ -19,6 +19,11 @@ import {colors} from '../../theme/colors';
 import {EmptyState} from '../components/EmptyState';
 import type {ShoppingListCardStats, ShoppingListFilter} from '../types';
 
+const DRAG_START_DELAY_MS = 135;
+const DRAG_REORDER_COOLDOWN_MS = 190;
+const DRAG_REORDER_THRESHOLD = 44;
+const DRAG_SETTLE_OFFSET = 14;
+
 type ShoppingListsScreenProps = {
   lists: ShoppingListSummary[];
   filteredLists: ShoppingListSummary[];
@@ -31,7 +36,7 @@ type ShoppingListsScreenProps = {
   onCreateList: () => void;
   onOpenSuggestions: () => void;
   onOpenList: (list: ShoppingListSummary) => void;
-  onMoveList: (id: string, direction: -1 | 1) => void;
+  onMoveList: (id: string, direction: -1 | 1) => boolean;
   onRequestDeleteList: (list: ShoppingListSummary) => void;
 };
 
@@ -204,7 +209,7 @@ function SortableListRow({
   item: ShoppingListSummary;
   stats: ShoppingListCardStats;
   onOpen: (item: ShoppingListSummary) => void;
-  onMove: (id: string, direction: -1 | 1) => void;
+  onMove: (id: string, direction: -1 | 1) => boolean;
   onRequestDelete: (item: ShoppingListSummary) => void;
 }) {
   const translateY = useRef(new Animated.Value(0)).current;
@@ -223,8 +228,8 @@ function SortableListRow({
     Animated.spring(translateY, {
       toValue: 0,
       useNativeDriver: true,
-      speed: 20,
-      bounciness: 4,
+      speed: 24,
+      bounciness: 3,
     }).start();
     dragActive.current = false;
     setDragging(false);
@@ -240,7 +245,7 @@ function SortableListRow({
           dragTimer.current = setTimeout(() => {
             dragActive.current = true;
             setDragging(true);
-          }, 180);
+          }, DRAG_START_DELAY_MS);
         },
         onPanResponderMove: (_evt, gesture) => {
           if (!dragActive.current) {
@@ -248,17 +253,33 @@ function SortableListRow({
           }
           translateY.setValue(gesture.dy);
           const now = Date.now();
-          if (now - movedAt.current < 220) {
+          if (now - movedAt.current < DRAG_REORDER_COOLDOWN_MS) {
             return;
           }
-          if (gesture.dy > 46) {
+          if (gesture.dy > DRAG_REORDER_THRESHOLD) {
             movedAt.current = now;
-            translateY.setValue(0);
-            onMove(item.id, 1);
-          } else if (gesture.dy < -46) {
+            if (!onMove(item.id, 1)) {
+              return;
+            }
+            translateY.setValue(-DRAG_SETTLE_OFFSET);
+            Animated.spring(translateY, {
+              toValue: 0,
+              useNativeDriver: true,
+              speed: 28,
+              bounciness: 2,
+            }).start();
+          } else if (gesture.dy < -DRAG_REORDER_THRESHOLD) {
             movedAt.current = now;
-            translateY.setValue(0);
-            onMove(item.id, -1);
+            if (!onMove(item.id, -1)) {
+              return;
+            }
+            translateY.setValue(DRAG_SETTLE_OFFSET);
+            Animated.spring(translateY, {
+              toValue: 0,
+              useNativeDriver: true,
+              speed: 28,
+              bounciness: 2,
+            }).start();
           }
         },
         onPanResponderRelease: resetPosition,
