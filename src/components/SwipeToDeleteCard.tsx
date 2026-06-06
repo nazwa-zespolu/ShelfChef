@@ -109,9 +109,16 @@ export function SwipeToDeleteCard({
   });
   const showsRightAction = direction === 1 && onSwipeRight != null;
   const rightActionBgColor = rightActionTone === 'warning' ? colors.warning : colors.success;
-  const rightActionTextColor = rightActionTone === 'warning' ? colors.warningText : colors.successText;
   const bgColor = showsRightAction ? rightActionBgColor : colors.danger;
   const bgText = showsRightAction ? rightLabel : 'Usuń';
+  const deleteBackgroundStyle = useMemo(
+    () => ({
+      backgroundColor: bgColor,
+      borderRadius,
+      opacity: active ? 0.92 : bgOpacity,
+    }),
+    [active, bgColor, bgOpacity, borderRadius],
+  );
 
   return (
     <View style={styles.swipeWrap}>
@@ -120,16 +127,12 @@ export function SwipeToDeleteCard({
         style={[
           styles.deleteBg,
           direction === 1 ? styles.deleteBgRight : styles.deleteBgLeft,
-          {
-            backgroundColor: bgColor,
-            borderRadius,
-            opacity: active ? 0.92 : bgOpacity,
-          },
+          deleteBackgroundStyle,
         ]}>
         <Text
           style={[
             styles.deleteBgText,
-            showsRightAction && {color: rightActionTextColor},
+            showsRightAction && rightActionTone === 'warning' && styles.deleteBgTextWarning,
           ]}>
           {bgText}
         </Text>
@@ -163,5 +166,8 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     fontSize: 16,
     letterSpacing: 0.2,
+  },
+  deleteBgTextWarning: {
+    color: colors.warningText,
   },
 });
