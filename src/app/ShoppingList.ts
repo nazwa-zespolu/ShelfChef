@@ -362,13 +362,12 @@ export class ShoppingList {
   }
 
   private toStaticItemState(item: ShoppingListItem): AutoShoppingListItemState {
-    const normalizedStatus = item.status === 'unavailable' ? 'planned' : item.status;
-    const currentQuantity = normalizedStatus === 'stored' ? item.quantity : 0;
+    const currentQuantity = item.status === 'stored' ? item.quantity : 0;
     return {
       ...item,
-      effectiveStatus: normalizedStatus,
+      effectiveStatus: item.status,
       currentQuantity,
-      missingQuantity: normalizedStatus === 'planned' ? item.quantity : 0,
+      missingQuantity: item.status === 'planned' ? item.quantity : 0,
     };
   }
 

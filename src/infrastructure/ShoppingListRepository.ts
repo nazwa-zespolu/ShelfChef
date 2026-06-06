@@ -80,7 +80,6 @@ function mapShoppingList(row: Record<string, any>): ShoppingListSummary {
     iconKey: row.icon_key ?? getDefaultShoppingListIconKey(row.type),
     iconColorKey: row.icon_color_key ?? 'green',
     isLocked: row.is_locked === 1,
-    isArchived: row.is_archived === 1,
     sortOrder: Number(row.sort_order ?? 0),
     lockedAt: row.locked_at ?? null,
     createdAt: row.created_at,
@@ -130,13 +129,12 @@ export class ShoppingListRepository {
           icon_key,
           icon_color_key,
           is_locked,
-          is_archived,
           sort_order,
           locked_at,
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, 0, 0, ?, NULL, ?, ?)
+        VALUES (?, ?, ?, ?, ?, 0, ?, NULL, ?, ?)
       `,
       [id, name.trim(), type, iconKey, iconColorKey, sortOrder, timestamp, timestamp],
     );
@@ -147,7 +145,6 @@ export class ShoppingListRepository {
       iconKey,
       iconColorKey,
       isLocked: false,
-      isArchived: false,
       sortOrder,
       lockedAt: null,
       createdAt: timestamp,
@@ -155,15 +152,13 @@ export class ShoppingListRepository {
     };
   }
 
-  async getLists(includeArchived = false): Promise<ShoppingListSummary[]> {
+  async getLists(): Promise<ShoppingListSummary[]> {
     const result = db.execute(
       `
         SELECT *
         FROM shopping_lists
-        WHERE (? = 1 OR is_archived = 0)
         ORDER BY sort_order ASC, created_at ASC
       `,
-      [includeArchived ? 1 : 0],
     );
     const lists: ShoppingListSummary[] = [];
     if (result.rows) {

@@ -75,7 +75,6 @@ function setupShoppingListsSchema() {
         icon_key TEXT NOT NULL DEFAULT 'basket',
         icon_color_key TEXT NOT NULL DEFAULT 'green',
         is_locked INTEGER NOT NULL DEFAULT 0,
-        is_archived INTEGER NOT NULL DEFAULT 0,
         sort_order INTEGER NOT NULL DEFAULT 0,
         locked_at TEXT,
         created_at TEXT NOT NULL,
@@ -93,7 +92,7 @@ function setupShoppingListsSchema() {
         icon_color_key TEXT NOT NULL DEFAULT 'green',
         quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity > 0),
         sort_order INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL CHECK(status IN ('planned', 'purchased', 'unavailable', 'stored')),
+        status TEXT NOT NULL CHECK(status IN ('planned', 'purchased', 'stored')),
         source TEXT NOT NULL CHECK(source IN ('manual', 'suggestion', 'reactivated')),
         stored_at TEXT,
         created_at TEXT NOT NULL,
@@ -118,6 +117,11 @@ function setupShoppingListsSchema() {
   db.execute(`
       CREATE INDEX IF NOT EXISTS idx_shopping_list_items_list_status
       ON shopping_list_items(list_id, status);
+    `);
+
+  db.execute(`
+      CREATE INDEX IF NOT EXISTS idx_shopping_list_items_list_order
+      ON shopping_list_items(list_id, sort_order, created_at);
     `);
 
   db.execute(`
@@ -158,7 +162,6 @@ function setupShoppingListsSchema() {
         icon_key,
         icon_color_key,
         is_locked,
-        is_archived,
         sort_order,
         locked_at,
         created_at,
@@ -170,7 +173,6 @@ function setupShoppingListsSchema() {
         'auto',
         'refresh',
         'green',
-        0,
         0,
         0,
         NULL,

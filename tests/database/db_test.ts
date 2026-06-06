@@ -33,7 +33,6 @@ type ShoppingListRow = {
   icon_key: string;
   icon_color_key: string;
   is_locked: number;
-  is_archived: number;
   sort_order: number;
   locked_at: string | null;
   created_at: string;
@@ -49,7 +48,7 @@ type ShoppingListItemRow = {
   icon_color_key: string;
   quantity: number;
   sort_order: number;
-  status: 'planned' | 'purchased' | 'unavailable' | 'stored';
+  status: 'planned' | 'purchased' | 'stored';
   source: 'manual' | 'suggestion' | 'reactivated';
   stored_at: string | null;
   created_at: string;
@@ -236,10 +235,8 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       const row = shoppingLists.get(params[0]);
       return toRows(row ? [row] : []);
     }
-    const includeArchived = params[0] === 1;
     return toRows(
       Array.from(shoppingLists.values())
-        .filter(row => includeArchived || row.is_archived === 0)
         .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at)),
     );
   }
@@ -424,7 +421,6 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       icon_key: iconKey,
       icon_color_key: iconColorKey,
       is_locked: 0,
-      is_archived: 0,
       sort_order: sortOrder,
       locked_at: null,
       created_at: createdAt,
@@ -634,7 +630,6 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
         icon_key: 'refresh',
         icon_color_key: 'green',
         is_locked: 0,
-        is_archived: 0,
         sort_order: 0,
         locked_at: null,
         created_at: '2026-05-27T00:00:00.000Z',
@@ -870,7 +865,6 @@ describe('ProductRepository + database integration', () => {
       icon_key: 'refresh',
       icon_color_key: 'green',
       is_locked: 0,
-      is_archived: 0,
     });
   });
 
@@ -1100,7 +1094,6 @@ describe('ProductRepository + database integration', () => {
     lists = await shoppingListRepository.getLists();
 
     expect(lists.map(list => list.id)).not.toContain(second.id);
-    expect((await shoppingListRepository.getLists(true)).map(list => list.id)).not.toContain(second.id);
     expect(await shoppingListRepository.getItems(second.id)).toHaveLength(0);
   });
 
@@ -1190,7 +1183,7 @@ describe('ProductRepository + database integration', () => {
       catalogProductId: cheese.id as string,
       label: 'Ser',
       quantity: 1,
-      status: 'unavailable',
+      status: 'stored',
     });
     await shoppingListRepository.addItem(manual.id, {
       catalogProductId: butter.id as string,

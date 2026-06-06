@@ -33,7 +33,7 @@ export type ShoppingListIconKey = string;
 
 export type ShoppingListIconColorKey = string;
 
-export type ShoppingItemStatus = 'planned' | 'purchased' | 'unavailable' | 'stored';
+export type ShoppingItemStatus = 'planned' | 'purchased' | 'stored';
 
 export type ShoppingItemSource = 'manual' | 'suggestion' | 'reactivated';
 
@@ -44,7 +44,6 @@ export interface ShoppingListSummary {
   iconKey: ShoppingListIconKey;
   iconColorKey: ShoppingListIconColorKey;
   isLocked: boolean;
-  isArchived: boolean;
   sortOrder: number;
   lockedAt: string | null;
   createdAt: string;

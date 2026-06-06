@@ -43,7 +43,6 @@ erDiagram
         TEXT icon_key
         TEXT icon_color_key
         INTEGER is_locked
-        INTEGER is_archived
         INTEGER sort_order
         TEXT locked_at
         TEXT created_at
@@ -92,6 +91,7 @@ erDiagram
 - `shopping_list_items.catalog_product_id` jest opcjonalne, bo zwykle pozycje tekstowe nie musza miec wpisu w katalogu.
 - `shopping_list_items.icon_key` i `shopping_list_items.icon_color_key` przechowuja recznie wybrany wyglad ikony pozycji.
 - `shopping_list_items.sort_order` zapisuje reczna kolejnosc produktow w konkretnej liscie.
+- `shopping_list_items.status` przyjmuje `planned`, `purchased` albo `stored`; `stored` jest uzywane m.in. jako snapshot pozycji auto-listy.
 - `shopping_list_item_catalog_products` pozwala podpiac produkty katalogowe jako alternatywy dla pozycji listy, np. tekstowe `mleko` moze liczyc kilka konkretnych produktow z EAN.
 - `shopping_lists.icon_key` i `shopping_lists.icon_color_key` przechowuja wybrany wyglad ikony listy.
 - `shopping_lists.sort_order` zapisuje reczna kolejnosc list na ekranie list zakupow.
@@ -110,6 +110,9 @@ WHERE kind = 'generic';
 
 CREATE INDEX IF NOT EXISTS idx_shopping_list_items_list_status
 ON shopping_list_items(list_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_shopping_list_items_list_order
+ON shopping_list_items(list_id, sort_order, created_at);
 
 CREATE INDEX IF NOT EXISTS idx_shopping_lists_type_locked
 ON shopping_lists(type, is_locked);
