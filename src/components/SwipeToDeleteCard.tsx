@@ -7,13 +7,27 @@ const SWIPE_DELETE_THRESHOLD = 110;
 export function SwipeToDeleteCard({
   children,
   onDelete,
+  onSwipeRight,
+  resetAfterDelete = false,
+  borderRadius = 14,
+  allowRightDelete = true,
+  rightLabel = 'Kupione',
+  rightActionTone = 'success',
 }: {
   children: React.ReactNode;
   onDelete: () => void;
+  onSwipeRight?: () => void;
+  resetAfterDelete?: boolean;
+  borderRadius?: number;
+  allowRightDelete?: boolean;
+  rightLabel?: string;
+  rightActionTone?: 'success' | 'warning';
 }) {
   const {width} = useWindowDimensions();
   const translateX = useRef(new Animated.Value(0)).current;
   const [active, setActive] = useState(false);
+  const [direction, setDirection] = useState<1 | -1>(-1);
+  const hasRightAction = onSwipeRight != null || allowRightDelete;
 
   const animateBack = useCallback(() => {
     setActive(false);
@@ -25,8 +39,8 @@ export function SwipeToDeleteCard({
     }).start();
   }, [translateX]);
 
-  const animateOffAndDelete = useCallback(
-    (dir: 1 | -1) => {
+  const animateOffAndRun = useCallback(
+    (dir: 1 | -1, action: () => void, shouldResetAfterAction: boolean) => {
       setActive(false);
       Animated.timing(translateX, {
         toValue: dir * width,
@@ -34,13 +48,16 @@ export function SwipeToDeleteCard({
         useNativeDriver: true,
       }).start(({finished}) => {
         if (finished) {
-          onDelete();
+          action();
+          if (shouldResetAfterAction) {
+            animateBack();
+          }
         } else {
           animateBack();
         }
       });
     },
-    [animateBack, onDelete, translateX, width],
+    [animateBack, translateX, width],
   );
 
   const panResponder = useMemo(
@@ -56,14 +73,24 @@ export function SwipeToDeleteCard({
         },
         onPanResponderMove: (_evt, gesture) => {
           const dx = gesture.dx;
-          translateX.setValue(dx);
-          setActive(Math.abs(dx) >= SWIPE_DELETE_THRESHOLD);
+          const nextDx = dx > 0 && !hasRightAction ? Math.min(dx, 36) : dx;
+          translateX.setValue(nextDx);
+          setDirection(dx > 0 ? 1 : -1);
+          setActive(Math.abs(nextDx) >= SWIPE_DELETE_THRESHOLD);
         },
         onPanResponderTerminationRequest: () => true,
         onPanResponderRelease: (_evt, gesture) => {
           const dx = gesture.dx;
-          if (Math.abs(dx) >= SWIPE_DELETE_THRESHOLD) {
-            animateOffAndDelete(dx > 0 ? 1 : -1);
+          if (dx <= -SWIPE_DELETE_THRESHOLD) {
+            animateOffAndRun(-1, onDelete, resetAfterDelete);
+            return;
+          }
+          if (dx >= SWIPE_DELETE_THRESHOLD && onSwipeRight) {
+            animateOffAndRun(1, onSwipeRight, true);
+            return;
+          }
+          if (dx >= SWIPE_DELETE_THRESHOLD && allowRightDelete) {
+            animateOffAndRun(1, onDelete, resetAfterDelete);
             return;
           }
           animateBack();
@@ -72,14 +99,26 @@ export function SwipeToDeleteCard({
           animateBack();
         },
       }),
-    [animateBack, animateOffAndDelete, translateX],
+    [allowRightDelete, animateBack, animateOffAndRun, hasRightAction, onDelete, onSwipeRight, resetAfterDelete, translateX],
   );
 
   const bgOpacity = translateX.interpolate({
     inputRange: [-SWIPE_DELETE_THRESHOLD, 0, SWIPE_DELETE_THRESHOLD],
-    outputRange: [1, 0, 1],
+    outputRange: [1, 0, hasRightAction ? 1 : 0],
     extrapolate: 'clamp',
   });
+  const showsRightAction = direction === 1 && onSwipeRight != null;
+  const rightActionBgColor = rightActionTone === 'warning' ? colors.warning : colors.success;
+  const bgColor = showsRightAction ? rightActionBgColor : colors.danger;
+  const bgText = showsRightAction ? rightLabel : 'Usuń';
+  const deleteBackgroundStyle = useMemo(
+    () => ({
+      backgroundColor: bgColor,
+      borderRadius,
+      opacity: active ? 0.92 : bgOpacity,
+    }),
+    [active, bgColor, bgOpacity, borderRadius],
+  );
 
   return (
     <View style={styles.swipeWrap}>
@@ -87,9 +126,16 @@ export function SwipeToDeleteCard({
         pointerEvents="none"
         style={[
           styles.deleteBg,
-          {backgroundColor: colors.danger, opacity: active ? 0.92 : bgOpacity},
+          direction === 1 ? styles.deleteBgRight : styles.deleteBgLeft,
+          deleteBackgroundStyle,
         ]}>
-        <Text style={styles.deleteBgText}>Usuń</Text>
+        <Text
+          style={[
+            styles.deleteBgText,
+            showsRightAction && rightActionTone === 'warning' && styles.deleteBgTextWarning,
+          ]}>
+          {bgText}
+        </Text>
       </Animated.View>
 
       <Animated.View style={{transform: [{translateX}]}} {...panResponder.panHandlers}>
@@ -106,14 +152,22 @@ const styles = StyleSheet.create({
   },
   deleteBg: {
     ...StyleSheet.absoluteFill,
-    borderRadius: 14,
     justifyContent: 'center',
     paddingHorizontal: 18,
+  },
+  deleteBgLeft: {
+    alignItems: 'flex-end',
+  },
+  deleteBgRight: {
+    alignItems: 'flex-start',
   },
   deleteBgText: {
     color: colors.successText,
     fontWeight: '900',
     fontSize: 16,
     letterSpacing: 0.2,
+  },
+  deleteBgTextWarning: {
+    color: colors.warningText,
   },
 });

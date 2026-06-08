@@ -1,98 +1,59 @@
 import { ShoppingList } from "../../src/app/ShoppingList";
 
-describe("UC-06: ShoppingList - generateSuggestions & createList", () => {
-  it("suggests products with expired dates", async () => {
-    const databaseService = {
-      queryAllProducts: jest.fn().mockResolvedValue([
-        { id: "1", name: "Jogurt", expirationDate: new Date("2026-03-01") },
-        { id: "2", name: "Ser", expirationDate: new Date("2026-03-15") },
-        { id: "3", name: "Maslo", expirationDate: new Date("2026-06-01") },
-      ]),
+const manualList = {
+  id: "manual-1",
+  name: "Cotygodniowe",
+  type: "manual" as const,
+  isLocked: false,
+  sortOrder: 0,
+  lockedAt: null,
+  createdAt: "2026-05-27T00:00:00.000Z",
+  updatedAt: "2026-05-27T00:00:00.000Z",
+};
+
+describe("UC-06: ShoppingList - create and merge lists", () => {
+  it("creates a shopping list through the repository", async () => {
+    const shoppingRepository = {
+      createList: jest.fn(async () => manualList),
     };
+    const shoppingList = new ShoppingList(shoppingRepository as any);
 
-    const shoppingList = new ShoppingList(databaseService as any);
+    const result = await shoppingList.createList("Cotygodniowe", "manual");
 
-    const now = new Date("2026-04-09");
-    const result = await shoppingList.generateSuggestions(now);
-
-    expect(databaseService.queryAllProducts).toHaveBeenCalledTimes(1);
-    expect(result.suggestions).toHaveLength(2);
-    expect(result.suggestions.map((s: any) => s.name)).toContain("Jogurt");
-    expect(result.suggestions.map((s: any) => s.name)).toContain("Ser");
-    expect(result.suggestions.map((s: any) => s.name)).not.toContain("Maslo");
+    expect(shoppingRepository.createList).toHaveBeenCalledWith("Cotygodniowe", "manual");
+    expect(result).toEqual(manualList);
   });
 
-  it("returns empty suggestions when all products are fresh", async () => {
-    const databaseService = {
-      queryAllProducts: jest.fn().mockResolvedValue([
-        { id: "p1", name: "Ryz", expirationDate: new Date("2026-06-01") },
-        { id: "p2", name: "Makaron", expirationDate: new Date("2026-07-01") },
-      ]),
+  it("adds generated replenishment suggestions to a manual list", async () => {
+    const suggestion = {
+      catalogProductId: "catalog-specific-111",
+      linkedCatalogProductIds: [],
+      name: "Mleko",
+      normalizedName: "mleko",
+      missingQuantity: 1,
+      currentQuantity: 1,
+      targetQuantity: 2,
+      reason: "Masz 1 z 2",
+      priority: "low" as const,
+      sourceAutoListIds: ["auto-1"],
+      sourceAutoListNames: ["Moje minimum"],
     };
-
-    const shoppingList = new ShoppingList(databaseService as any);
-
-    const result = await shoppingList.generateSuggestions();
-
-    expect(databaseService.queryAllProducts).toHaveBeenCalledTimes(1);
-    expect(result.suggestions).toHaveLength(0);
-  });
-
-  it("creates shopping list from confirmed suggestions and custom items", async () => {
-    const databaseService = {
-      queryAllProducts: jest.fn().mockResolvedValue([
-        { id: "1", name: "Mleko", expirationDate: new Date("2026-03-10") },
-        { id: "2", name: "Chleb", expirationDate: new Date("2026-03-12") },
-      ]),
+    const summary = {added: 1, reactivated: 0, skipped: 0};
+    const shoppingRepository = {
+      getLists: jest.fn(async () => []),
+      addAllSuggestionsToManualList: jest.fn(async () => summary),
     };
+    const shoppingList = new ShoppingList(shoppingRepository as any);
+    jest.spyOn(shoppingList, "generateReplenishmentSuggestions").mockResolvedValueOnce([
+      suggestion,
+    ]);
 
-    const shoppingList = new ShoppingList(databaseService as any);
+    const result = await shoppingList.addAllSuggestionsToList("manual-1");
 
-    const result = await shoppingList.createList({
-      confirmedSuggestionIds: ["1", "2"],
-      customItems: [{ name: "Pomidory" }],
-    });
-
-    expect(result.items).toHaveLength(3);
-    const allNames = result.items.map((i: any) => i.name);
-    expect(allNames).toContain("Mleko");
-    expect(allNames).toContain("Chleb");
-    expect(allNames).toContain("Pomidory");
-  });
-
-  it("rejects unconfirmed suggestions", async () => {
-    const databaseService = {
-      queryAllProducts: jest.fn().mockResolvedValue([
-        { id: "1", name: "Mleko", expirationDate: new Date("2026-03-10") },
-        { id: "2", name: "Chleb", expirationDate: new Date("2026-03-12") },
-        { id: "3", name: "Jajka", expirationDate: new Date("2026-03-14") },
-      ]),
-    };
-
-    const shoppingList = new ShoppingList(databaseService as any);
-
-    const result = await shoppingList.createList({
-      confirmedSuggestionIds: ["1"],
-      customItems: [],
-    });
-
-    const allNames = result.items.map((i: any) => i.name);
-    expect(allNames).toContain("Mleko");
-    expect(allNames).not.toContain("Chleb");
-    expect(allNames).not.toContain("Jajka");
-    expect(result.items).toHaveLength(1);
-  });
-
-  it("returns empty suggestions when database has no products", async () => {
-    const databaseService = {
-      queryAllProducts: jest.fn().mockResolvedValue([]),
-    };
-
-    const shoppingList = new ShoppingList(databaseService as any);
-
-    const result = await shoppingList.generateSuggestions();
-
-    expect(databaseService.queryAllProducts).toHaveBeenCalledTimes(1);
-    expect(result.suggestions).toHaveLength(0);
+    expect(shoppingRepository.addAllSuggestionsToManualList).toHaveBeenCalledWith(
+      "manual-1",
+      [suggestion],
+    );
+    expect(result).toEqual(summary);
   });
 });

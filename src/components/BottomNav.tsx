@@ -1,6 +1,7 @@
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {Astroid, List, ScanBarcode, ShelvingUnit} from 'lucide-react-native';
 import {colors} from '../theme/colors';
 
 export type AppTab = 'pantry' | 'scan' | 'shopping' | 'recipes';
@@ -10,11 +11,17 @@ type BottomNavProps = {
   onTabChange: (tab: AppTab) => void;
 };
 
-const TAB_ITEMS: {key: AppTab; label: string; icon: string}[] = [
-  {key: 'pantry', label: 'Spiżarnia', icon: '▦'},
-  {key: 'scan', label: 'Dodaj produkt', icon: '+'},
-  {key: 'shopping', label: 'Listy zakupów', icon: '≡'},
-  {key: 'recipes', label: 'Przepisy AI', icon: '✦'},
+type NavIcon = React.ComponentType<{
+  color?: string;
+  size?: number;
+  strokeWidth?: number;
+}>;
+
+const TAB_ITEMS: {key: AppTab; label: string; Icon: NavIcon}[] = [
+  {key: 'pantry', label: 'Spiżarnia', Icon: ShelvingUnit},
+  {key: 'scan', label: 'Dodaj produkt', Icon: ScanBarcode},
+  {key: 'shopping', label: 'Listy zakupów', Icon: List},
+  {key: 'recipes', label: 'Przepisy AI', Icon: Astroid},
 ];
 
 export default function BottomNav({activeTab, onTabChange}: BottomNavProps) {
@@ -25,12 +32,17 @@ export default function BottomNav({activeTab, onTabChange}: BottomNavProps) {
       <View style={styles.bar}>
         {TAB_ITEMS.map(item => {
           const active = item.key === activeTab;
+          const Icon = item.Icon;
           return (
             <Pressable
               key={item.key}
               onPress={() => onTabChange(item.key)}
               style={({pressed}) => [styles.tab, active && styles.tabActive, pressed && styles.tabPressed]}>
-              <Text style={[styles.icon, active && styles.iconActive]}>{item.icon}</Text>
+              <Icon
+                color={active ? colors.tabActive : colors.tabInactive}
+                size={21}
+                strokeWidth={2.2}
+              />
               <Text style={[styles.label, active && styles.labelActive]} numberOfLines={1}>
                 {item.label}
               </Text>
@@ -67,14 +79,6 @@ const styles = StyleSheet.create({
   },
   tabPressed: {
     opacity: 0.8,
-  },
-  icon: {
-    fontSize: 17,
-    color: colors.tabInactive,
-    fontWeight: '700',
-  },
-  iconActive: {
-    color: colors.tabActive,
   },
   label: {
     fontSize: 10,

@@ -6,7 +6,7 @@
  */
 
 import React, {useEffect, useState} from 'react';
-import {StyleSheet, View} from 'react-native';
+import {BackHandler, StyleSheet, View} from 'react-native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import HomeView from './HomeView';
 import ProductScannerView from './ProductScannerView';
@@ -27,6 +27,7 @@ try {
 function App() {
   //const isDarkMode = useColorScheme() === 'dark';
   const [activeTab, setActiveTab] = useState<AppTab>('pantry');
+  const [bottomNavVisible, setBottomNavVisible] = useState(true);
   const [inventoryTick, setInventoryTick] = useState(0);
 
   useEffect(() => {
@@ -36,6 +37,18 @@ function App() {
       console.error('[ShelfChef] setupDatabase failed', e);
     }
   }, []);
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (activeTab === 'pantry') {
+        return false;
+      }
+      setBottomNavVisible(true);
+      setActiveTab('pantry');
+      return true;
+    });
+    return () => subscription.remove();
+  }, [activeTab]);
 
   return (
     <SafeAreaProvider>
@@ -47,9 +60,28 @@ function App() {
             <ProductScannerView onProductAdded={() => setInventoryTick(tick => tick + 1)} />
           ) : null}
           {activeTab === 'recipes' ? <RecipeGeneratorView /> : null}
-          {activeTab === 'shopping' ? <ShoppingListView onRequestClose={() => {}} /> : null}
+          {activeTab === 'shopping' ? (
+            <ShoppingListView
+              onRequestClose={() => {
+                setBottomNavVisible(true);
+                setActiveTab('pantry');
+              }}
+              onInventoryChanged={() => setInventoryTick(tick => tick + 1)}
+              setBottomNavVisible={setBottomNavVisible}
+            />
+          ) : null}
         </View>
-        <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
+        {bottomNavVisible ? (
+          <BottomNav
+            activeTab={activeTab}
+            onTabChange={tab => {
+              if (tab !== 'shopping') {
+                setBottomNavVisible(true);
+              }
+              setActiveTab(tab);
+            }}
+          />
+        ) : null}
       </View>
     </SafeAreaProvider>
   );

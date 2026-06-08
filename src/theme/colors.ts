@@ -12,7 +12,10 @@ Naming guidelines:
   - `textMuted` placeholders/disabled labels.
 - `accent` / `accentSoft` are for brand highlights and selected states.
 - `success` is for positive actions; `danger` only for destructive actions.
+- `warning` is for reversible caution actions.
+- `warningSoft` is for subtle warning/caution backgrounds.
 - `tab*` is reserved for bottom navigation only.
+- `modalBackdrop` is for dimming the app behind modal sheets.
 */
 const lightTheme = {
   // App/page background.
@@ -44,6 +47,10 @@ const lightTheme = {
   successText: '#ffffff',
   // Destructive actions (delete).
   danger: '#be3f3f',
+  // Reversible caution actions.
+  warning: '#c8792a',
+  warningSoft: '#C8792A1F',
+  warningText: '#ffffff',
 
   // Bottom navigation states.
   tabActive: '#305d34',
@@ -52,6 +59,8 @@ const lightTheme = {
 
   // Shadows and overlays that need black base.
   shadow: '#000000',
+  // Modal backdrop overlay.
+  modalBackdrop: '#000000B8',
 } as const;
 
 const darkTheme = {
@@ -68,10 +77,14 @@ const darkTheme = {
   success: '#47d16b',
   successText: '#102014',
   danger: '#f06a6a',
+  warning: '#f0a84a',
+  warningSoft: '#4f341f',
+  warningText: '#1f170b',
   tabActive: '#9ef2aa',
   tabInactive: '#9aa6ba',
   tabBackground: '#12171f',
   shadow: '#000000',
+  modalBackdrop: '#000000B8',
 } as const;
 
 export const themes = {

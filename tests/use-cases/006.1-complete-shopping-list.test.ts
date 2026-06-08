@@ -1,77 +1,52 @@
 import { ShoppingList } from "../../src/app/ShoppingList";
 
 describe("UC-06: ShoppingList - completePurchase", () => {
-  it("adds purchased products to inventory as separate records", async () => {
-    const databaseService = {
-      insertProduct: jest.fn()
-        .mockResolvedValueOnce("uuid-1")
-        .mockResolvedValueOnce("uuid-2"),
+  it("returns separate inventory records for multiple purchased units", async () => {
+    const result = {
+      inventoryIds: ["inv-1", "inv-2"],
+      storedItemIds: ["item-milk"],
     };
+    const shoppingRepository = {
+      completePurchase: jest.fn(async () => result),
+    };
+    const shoppingList = new ShoppingList(shoppingRepository as any);
 
-    const shoppingList = new ShoppingList(databaseService as any);
+    const returned = await shoppingList.completePurchase("list-1", {
+      "item-milk": "2026-06-01",
+    });
 
-    await shoppingList.completePurchase([
-      { name: "Mleko", expirationDate: new Date("2026-05-01") },
-      { name: "Chleb", expirationDate: new Date("2026-04-20") },
-    ]);
-
-    expect(databaseService.insertProduct).toHaveBeenCalledTimes(2);
-    expect(databaseService.insertProduct).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Mleko" })
-    );
-    expect(databaseService.insertProduct).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Chleb" })
-    );
+    expect(shoppingRepository.completePurchase).toHaveBeenCalledWith("list-1", {
+      "item-milk": "2026-06-01",
+    });
+    expect(returned.inventoryIds).toEqual(["inv-1", "inv-2"]);
+    expect(returned.inventoryIds).toHaveLength(2);
+    expect(returned.storedItemIds).toEqual(["item-milk"]);
   });
 
-  it("removes purchased items from shopping list", async () => {
-    const databaseService = {
-      insertProduct: jest.fn().mockResolvedValue("uuid-new"),
-      deleteProduct: jest.fn().mockResolvedValue(undefined),
+  it("updates item status through the shopping list repository", async () => {
+    const shoppingRepository = {
+      updateItemStatus: jest.fn(async () => undefined),
     };
+    const shoppingList = new ShoppingList(shoppingRepository as any);
 
-    const shoppingList = new ShoppingList(databaseService as any);
+    await shoppingList.updateItemStatus("item-1", "purchased");
 
-    await shoppingList.completePurchase([
-      { name: "Maslo", expirationDate: new Date("2026-05-01") },
-      { name: "Jajka", expirationDate: new Date("2026-04-20") },
-    ]);
-
-    expect(databaseService.insertProduct).toHaveBeenCalledTimes(2);
+    expect(shoppingRepository.updateItemStatus).toHaveBeenCalledWith("item-1", "purchased");
   });
 
-  it("does not add not purchased products to inventory", async () => {
-    const databaseService = {
-      insertProduct: jest.fn().mockResolvedValue("uuid-new"),
+  it("updates a text item through the shopping list repository", async () => {
+    const shoppingRepository = {
+      updateTextItem: jest.fn(async () => undefined),
+    };
+    const shoppingList = new ShoppingList(shoppingRepository as any);
+    const input = {
+      label: "Mleko do kawy",
+      iconKey: "bottle",
+      iconColorKey: "blue",
     };
 
-    const shoppingList = new ShoppingList(databaseService as any);
+    await shoppingList.updateTextItem("item-1", input);
 
-    await shoppingList.completePurchase([
-      { name: "Ryz", expirationDate: new Date("2026-06-01") },
-      { name: "Makaron", expirationDate: new Date("2026-07-01") },
-    ]);
-
-    expect(databaseService.insertProduct).toHaveBeenCalledTimes(2);
-    expect(databaseService.insertProduct).not.toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Cukier" })
-    );
-  });
-
-  it("returns UUIDs of added products", async () => {
-    const databaseService = {
-      insertProduct: jest.fn()
-        .mockResolvedValueOnce("uuid-aaa")
-        .mockResolvedValueOnce("uuid-bbb"),
-    };
-
-    const shoppingList = new ShoppingList(databaseService as any);
-
-    const result = await shoppingList.completePurchase([
-      { name: "Ser", expirationDate: new Date("2026-05-10") },
-      { name: "Szynka", expirationDate: new Date("2026-05-15") },
-    ]);
-
-    expect(result).toEqual(["uuid-aaa", "uuid-bbb"]);
+    expect(shoppingRepository.updateTextItem).toHaveBeenCalledWith("item-1", input);
   });
 });
