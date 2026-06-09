@@ -46,22 +46,6 @@ type FlowScreen = 'preferences' | 'progress' | 'results';
 import { LlmCompletionKind } from './features/recipe-generator/recipeGeneratorConstants';
 import { boundedLlmGenerate } from './features/recipe-generator/infrastructure/llmCompletionGuard';
 
-function inferPromptKind(systemPrompt: string, userPrompt: string): LlmCompletionKind {
-  const system = systemPrompt.toLowerCase();
-  const user = userPrompt.toLowerCase();
-
-  if (system.includes('data categorization ai')) {
-    return 'dietary-categorization';
-  }
-  if (system.includes('recipe ideation assistant')) {
-    return 'recipe-generation';
-  }
-  if (user.includes('text to repair')) {
-    return 'json-repair';
-  }
-  return 'unknown';
-}
-
 const repo = new ProductRepository();
 
 export default function RecipeGeneratorView({ onRequestClose }: RecipeGeneratorViewProps) {
@@ -221,8 +205,11 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
 
   const modelClient = useMemo(
     () => ({
-      complete: async (systemPrompt: string, userPrompt: string): Promise<string> => {
-        const kind = inferPromptKind(systemPrompt, userPrompt);
+      complete: async (
+        systemPrompt: string,
+        userPrompt: string,
+        kind: LlmCompletionKind,
+      ): Promise<string> => {
         pushDebugEvent(`llm request (${kind})`, {
           systemPrompt,
           userPrompt,

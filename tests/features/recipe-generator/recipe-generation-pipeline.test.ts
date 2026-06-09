@@ -7,7 +7,10 @@ import { RecipeGenerationError } from '../../../src/features/recipe-generator/do
 const createPipeline = (deps: {
   repository: Partial<ProductRepository>;
   lazyDietaryCategorizationService: Partial<LazyDietaryCategorizationService>;
-  complete: jest.Mock<Promise<string>, [string, string]>;
+  complete: jest.Mock<
+    Promise<string>,
+    [string, string, 'recipe-generation' | 'json-repair']
+  >;
 }) => {
   const recipeGenerationService = new RecipeGenerationService({
     modelClient: {
@@ -58,9 +61,10 @@ describe('RecipeGenerationPipeline', () => {
         ],
       }),
     };
-    const complete = jest.fn<Promise<string>, [string, string]>(
-      async () => '{"dishes":["Omlet","Jajecznica"]}',
-    );
+    const complete = jest.fn<
+      Promise<string>,
+      [string, string, 'recipe-generation' | 'json-repair']
+    >(async () => '{"dishes":["Omlet","Jajecznica"]}');
     const pipeline = createPipeline({
       repository,
       lazyDietaryCategorizationService,
@@ -95,9 +99,10 @@ describe('RecipeGenerationPipeline', () => {
     const lazyDietaryCategorizationService: Partial<LazyDietaryCategorizationService> = {
       categorizeBatch: jest.fn(),
     };
-    const complete = jest.fn<Promise<string>, [string, string]>(
-      async () => '{"dishes":["Omlet"]}',
-    );
+    const complete = jest.fn<
+      Promise<string>,
+      [string, string, 'recipe-generation' | 'json-repair']
+    >(async () => '{"dishes":["Omlet"]}');
     const pipeline = createPipeline({
       repository,
       lazyDietaryCategorizationService,
@@ -134,9 +139,10 @@ describe('RecipeGenerationPipeline', () => {
     const lazyDietaryCategorizationService: Partial<LazyDietaryCategorizationService> = {
       categorizeBatch: jest.fn(),
     };
-    const complete = jest.fn<Promise<string>, [string, string]>(
-      async () => '{"dishes":["Omlet"]}',
-    );
+    const complete = jest.fn<
+      Promise<string>,
+      [string, string, 'recipe-generation' | 'json-repair']
+    >(async () => '{"dishes":["Omlet"]}');
     const pipeline = createPipeline({
       repository,
       lazyDietaryCategorizationService,
@@ -163,7 +169,7 @@ describe('RecipeGenerationPipeline', () => {
       categorizeBatch: jest.fn(),
     };
     const complete = jest
-      .fn<Promise<string>, [string, string]>()
+      .fn<Promise<string>, [string, string, 'recipe-generation' | 'json-repair']>()
       .mockResolvedValue('not-json')
       .mockResolvedValue('still invalid')
       .mockResolvedValue('invalid again');

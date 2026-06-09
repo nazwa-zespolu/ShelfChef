@@ -9,16 +9,17 @@ const CANDIDATES = [
 describe('LazyDietaryCategorizationService', () => {
   it('maps valid dietary flags from parsed JSON', async () => {
     const modelClient: DietaryCategorizationModelClient = {
-      complete: jest.fn(async () =>
-        JSON.stringify({
+      complete: jest.fn(async (_systemPrompt, _userPrompt, kind) => {
+        expect(kind).toBe('dietary-categorization');
+        return JSON.stringify({
           Jajka: {
             is_vegetarian: true,
             is_vegan: false,
             is_gluten_free: true,
             is_lactose_free: true,
           },
-        }),
-      ),
+        });
+      }),
     };
     const service = new LazyDietaryCategorizationService({ modelClient });
 

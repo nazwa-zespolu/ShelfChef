@@ -28,7 +28,7 @@ export const LLM_SAMPLING_BY_KIND: Record<
   Pick<GenerationConfig, 'temperature' | 'topP'>
 > = {
   'dietary-categorization': { temperature: 0.1, topP: 0.9 },
-  'recipe-generation': { temperature: 0.35, topP: 0.5 },
+  'recipe-generation': { temperature: 0.45, topP: 0.9 },
   'json-repair': { temperature: 0.1, topP: 0.9 },
   unknown: { temperature: 0.35, topP: 0.5 },
 };

@@ -1,3 +1,5 @@
+import { LlmCompletionKind } from '../recipeGeneratorConstants';
+
 export type DishType =
   | 'breakfast'
   | 'lunch'
@@ -49,7 +51,11 @@ export interface RecipeGenerationResult {
 }
 
 export interface RecipeGenerationModelClient {
-  complete(systemPrompt: string, userPrompt: string): Promise<string>;
+  complete(
+    systemPrompt: string,
+    userPrompt: string,
+    kind: Extract<LlmCompletionKind, 'recipe-generation' | 'json-repair'>,
+  ): Promise<string>;
 }
 
 export type RecipeGenerationErrorCode =

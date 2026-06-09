@@ -58,10 +58,15 @@ export class RecipeGenerationService {
 
     let retriesUsed = 0;
     let lastRawResponse = '';
+    let completionKind: 'recipe-generation' | 'json-repair' = 'recipe-generation';
 
     for (let attempt = 0; attempt <= this.maxParseRetries; attempt += 1) {
       try {
-        lastRawResponse = await this.modelClient.complete(systemPrompt, userPrompt);
+        lastRawResponse = await this.modelClient.complete(
+          systemPrompt,
+          userPrompt,
+          completionKind,
+        );
       } catch (error) {
         throw new RecipeGenerationError(
           'MODEL_FAILURE',
@@ -94,6 +99,7 @@ export class RecipeGenerationService {
         }
         retriesUsed += 1;
         userPrompt = buildRepairPrompt(lastRawResponse);
+        completionKind = 'json-repair';
       }
     }
 

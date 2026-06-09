@@ -43,7 +43,11 @@ export class LazyDietaryCategorizationService {
     let parsed: Record<string, DietaryFlags> | null = null;
 
     for (let attempt = 0; attempt <= this.maxParseRetries; attempt += 1) {
-      const rawResponse = await this.modelClient.complete(systemPrompt, userPrompt);
+      const rawResponse = await this.modelClient.complete(
+        systemPrompt,
+        userPrompt,
+        'dietary-categorization',
+      );
       try {
         parsed = parseDietaryCategorizationResponse(rawResponse);
         break;

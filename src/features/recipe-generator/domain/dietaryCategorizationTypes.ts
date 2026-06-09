@@ -1,3 +1,4 @@
+import { LlmCompletionKind } from '../recipeGeneratorConstants';
 import { DietPreference } from './recipeGenerationTypes';
 
 export interface DietaryFlags {
@@ -21,7 +22,11 @@ export interface DietaryCategorizationUpdate {
 }
 
 export interface DietaryCategorizationModelClient {
-  complete(systemPrompt: string, userPrompt: string): Promise<string>;
+  complete(
+    systemPrompt: string,
+    userPrompt: string,
+    kind: Extract<LlmCompletionKind, 'dietary-categorization'>,
+  ): Promise<string>;
 }
 
 export interface LazyDietaryCategorizationBatchResult {
