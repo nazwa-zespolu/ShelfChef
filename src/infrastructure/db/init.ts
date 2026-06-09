@@ -2,7 +2,14 @@ import { open } from 'react-native-quick-sqlite';
 
 // Otwarcie bazy danych
 export const db = open({ name: 'shelfchef.db' });
-
+const SCHEMA_VERSION_KEY = 'schema_version';
+const CURRENT_SCHEMA_VERSION = 3;
+const DIETARY_COLUMNS = [
+  'is_vegetarian',
+  'is_vegan',
+  'is_gluten_free',
+  'is_lactose_free',
+] as const;
 const MOCK_DATA_SQL = [
   // 1. Product definitions (in English) - expanded base for the LLM
   `INSERT OR IGNORE INTO product_definitions (ean, name, brand, image_url, category) VALUES 
@@ -184,7 +191,7 @@ export const setupDatabase = () => {
         category TEXT
       );
     `);
-  
+
   // 2. Tabela zapasow
   db.execute(`
       CREATE TABLE IF NOT EXISTS inventory (
@@ -203,8 +210,92 @@ export const setupDatabase = () => {
         value TEXT NOT NULL
       );
     `);
+
+  runSchemaMigrations();
+
   MOCK_DATA_SQL.forEach(sql => {
     db.execute(sql);
   });
   runInTransaction(setupShoppingListsSchema);
+};
+
+const runSchemaMigrations = () => {
+  const currentVersion = getStoredSchemaVersion();
+
+  if (currentVersion < 2 || !hasProductDefinitionsColumn('normalized_name')) {
+    db.execute(
+      'ALTER TABLE product_definitions ADD COLUMN normalized_name TEXT',
+    );
+  }
+
+  if (currentVersion < 3) {
+    for (const column of DIETARY_COLUMNS) {
+      if (!hasProductDefinitionsColumn(column)) {
+        db.execute(
+          `ALTER TABLE product_definitions ADD COLUMN ${column} INTEGER`,
+        );
+      }
+      if (!hasInventoryColumn(column)) {
+        db.execute(`ALTER TABLE inventory ADD COLUMN ${column} INTEGER`);
+      }
+    }
+  }
+
+  setStoredSchemaVersion(CURRENT_SCHEMA_VERSION);
+};
+
+const getStoredSchemaVersion = (): number => {
+  const result = db.execute(
+    'SELECT value FROM app_settings WHERE key = ?',
+    [SCHEMA_VERSION_KEY],
+  );
+
+  if (!result.rows || result.rows.length === 0) {
+    return 0;
+  }
+
+  const row = result.rows.item(0);
+  const parsed = Number.parseInt(String(row.value), 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const setStoredSchemaVersion = (version: number) => {
+  db.execute(
+    'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
+    [SCHEMA_VERSION_KEY, String(version)],
+  );
+};
+
+const hasProductDefinitionsColumn = (columnName: string): boolean => {
+  const result = db.execute('PRAGMA table_info(product_definitions)');
+
+  if (!result.rows) {
+    return false;
+  }
+
+  for (let i = 0; i < result.rows.length; i++) {
+    const row = result.rows.item(i);
+    if (String(row.name) === columnName) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const hasInventoryColumn = (columnName: string): boolean => {
+  const result = db.execute('PRAGMA table_info(inventory)');
+
+  if (!result.rows) {
+    return false;
+  }
+
+  for (let i = 0; i < result.rows.length; i++) {
+    const row = result.rows.item(i);
+    if (String(row.name) === columnName) {
+      return true;
+    }
+  }
+
+  return false;
 };

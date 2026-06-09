@@ -1,138 +1,54 @@
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {colors} from './theme/colors';
-import {ProductRepository} from './infrastructure/ProductRepository';
-import {InventoryItem} from './domain/types';
-import {QWEN2_5_3B_QUANTIZED, Message, useLLM} from 'react-native-executorch';
-import {BareResourceFetcher} from 'react-native-executorch-bare-resource-fetcher';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors } from './theme/colors';
+import { ProductRepository } from './infrastructure/ProductRepository';
+import {
+  QWEN2_5_3B_QUANTIZED,
+  Message,
+  useLLM,
+} from 'react-native-executorch';
+import { BareResourceFetcher } from 'react-native-executorch-bare-resource-fetcher';
+import { LazyDietaryCategorizationService } from './features/recipe-generator/application/lazyDietaryCategorizationService';
+import { RecipeGenerationService } from './features/recipe-generator/application/recipeGenerationService';
+import { RecipeGenerationPipeline } from './features/recipe-generator/application/recipeGenerationPipeline';
+import {
+  CategorizationProgress,
+  DietPreference,
+  dietRequiresCategorization,
+  DishType,
+  RecipeGenerationError,
+  RecipeGenerationProgressStage,
+} from './features/recipe-generator/domain/recipeGenerationTypes';
+import { RecipePreferencesScreen } from './features/recipe-generator/ui/RecipePreferencesScreen';
+import { RecipeGenerationProgressScreen } from './features/recipe-generator/ui/RecipeGenerationProgressScreen';
+import { RecipeResultsScreen } from './features/recipe-generator/ui/RecipeResultsScreen';
+
+import {
+  categorizationBatchSize,
+  maxDishes,
+} from './features/recipe-generator/recipeGeneratorConstants';
 
 type RecipeGeneratorViewProps = {
   onRequestClose?: () => void;
 };
 
 type ConsentState = 'unknown' | 'accepted' | 'declined';
+type FlowScreen = 'preferences' | 'progress' | 'results';
 
-function uniqByName(items: InventoryItem[], max = 80): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const it of items) {
-    const name = (it.name ?? '').trim();
-    if (!name) continue;
-    const key = name.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(name);
-    if (out.length >= max) break;
-  }
-  return out;
-}
-
-function normalizeLlmOutput(response: unknown): string {
-  if (typeof response === 'string') {
-    return response;
-  }
-  if (response == null) {
-    return '';
-  }
-  try {
-    return JSON.stringify(response, null, 2);
-  } catch {
-    return String(response);
-  }
-}
-
-function dishEntryToLabel(entry: unknown): string {
-  if (typeof entry === 'string') {
-    return entry.trim();
-  }
-  if (typeof entry === 'number' && Number.isFinite(entry)) {
-    return String(entry).trim();
-  }
-  if (entry && typeof entry === 'object') {
-    const o = entry as Record<string, unknown>;
-    for (const key of ['name', 'title', 'dish', 'recipe', 'nazwa', 'label']) {
-      const v = o[key];
-      if (typeof v === 'string' && v.trim()) {
-        return v.trim();
-      }
-    }
-  }
-  return '';
-}
-
-function extractJsonCandidate(raw: string): string {
-  const text = (raw ?? '').trim();
-  if (!text) return '';
-
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenced?.[1]) {
-    return fenced[1].trim();
-  }
-
-  const startObj = text.indexOf('{');
-  const endObj = text.lastIndexOf('}');
-  if (startObj !== -1 && endObj > startObj) {
-    return text.slice(startObj, endObj + 1).trim();
-  }
-
-  const startArr = text.indexOf('[');
-  const endArr = text.lastIndexOf(']');
-  if (startArr !== -1 && endArr > startArr) {
-    return text.slice(startArr, endArr + 1).trim();
-  }
-
-  return text;
-}
-
-function parseDishes(raw: string): string[] {
-  const text = (raw ?? '').trim();
-  if (!text) return [];
-
-  const candidates = [text, extractJsonCandidate(text)];
-  for (const chunk of candidates) {
-    if (!chunk) continue;
-    try {
-      const json = JSON.parse(chunk) as unknown;
-      if (Array.isArray(json)) {
-        return json.map(dishEntryToLabel).filter(Boolean);
-      }
-      if (
-        json &&
-        typeof json === 'object' &&
-        'dishes' in (json as Record<string, unknown>) &&
-        Array.isArray((json as {dishes?: unknown}).dishes)
-      ) {
-        return (json as {dishes: unknown[]}).dishes.map(dishEntryToLabel).filter(Boolean);
-      }
-    } catch {
-      // try next candidate / fall through
-    }
-  }
-
-  // Heuristic fallback: bullet/line list
-  return text
-    .split(/\r?\n/)
-    .map(l => l.trim())
-    .filter(Boolean)
-    .map(l => l.replace(/^[-*•]\s*/, ''))
-    .map(l => l.replace(/^\d+[.)]\s*/, ''))
-    .map(l => l.replace(/^"+|"+$/g, '').trim())
-    .filter(Boolean);
-}
+import { LlmCompletionKind } from './features/recipe-generator/recipeGeneratorConstants';
+import { boundedLlmGenerate } from './features/recipe-generator/infrastructure/llmCompletionGuard';
 
 const repo = new ProductRepository();
 
-export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorViewProps) {
+export default function RecipeGeneratorView({ onRequestClose }: RecipeGeneratorViewProps) {
   const insets = useSafeAreaInsets();
   const [consent, setConsent] = useState<ConsentState>('unknown');
   const [consentBooting, setConsentBooting] = useState(true);
@@ -204,12 +120,12 @@ export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorVie
           <View style={styles.ctaRow}>
             <Pressable
               onPress={acceptConsent}
-              style={({pressed}) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}>
+              style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}>
               <Text style={styles.primaryButtonText}>Pobierz i uruchom</Text>
             </Pressable>
             <Pressable
               onPress={declineConsent}
-              style={({pressed}) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
+              style={({ pressed }) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
               <Text style={styles.secondaryButtonText}>Nie, dziękuję</Text>
             </Pressable>
           </View>
@@ -225,165 +141,269 @@ export default function RecipeGeneratorView({onRequestClose}: RecipeGeneratorVie
           <View style={styles.ctaRow}>
             <Pressable
               onPress={acceptConsent}
-              style={({pressed}) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}>
+              style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}>
               <Text style={styles.primaryButtonText}>Zgadzam się</Text>
             </Pressable>
             <Pressable
               onPress={declineConsent}
-              style={({pressed}) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
+              style={({ pressed }) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
               <Text style={styles.secondaryButtonText}>Nie teraz</Text>
             </Pressable>
           </View>
         </View>
       ) : null}
 
-      {!consentBooting && consent === 'accepted' ? <RecipeGeneratorLLM onRequestClose={onRequestClose} /> : null}
+      {!consentBooting && consent === 'accepted' ? (
+        <RecipeGeneratorFlow onRequestClose={onRequestClose} />
+      ) : null}
     </View>
   );
 }
 
-function RecipeGeneratorLLM({onRequestClose}: {onRequestClose?: () => void}) {
+function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }) {
   const llm = useLLM({model: QWEN2_5_3B_QUANTIZED});
-  const [dishNames, setDishNames] = useState<string[]>([]);
-  const [rawLlmOutput, setRawLlmOutput] = useState<string | null>(null);
-  const [inventory, setInventory] = useState<InventoryItem[] | null>(null);
-  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [screen, setScreen] = useState<FlowScreen>('preferences');
+  const [dishType, setDishType] = useState<DishType>('dinner');
+  const [diet, setDiet] = useState<DietPreference>('none');
+  const [skipCategorization, setSkipCategorization] = useState(true);
+  const [dishes, setDishes] = useState<string[]>([]);
+  const [progressStage, setProgressStage] =
+    useState<RecipeGenerationProgressStage>('categorizing');
+  const [categorizationProgress, setCategorizationProgress] =
+    useState<CategorizationProgress | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [isRunningPipeline, setIsRunningPipeline] = useState(false);
   const [remountKey, setRemountKey] = useState(0);
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [debugEvents, setDebugEvents] = useState<string[]>([]);
+  const [debugDbSnapshot, setDebugDbSnapshot] = useState('');
+  const debugEnabledRef = useRef(false);
 
   const pendingCloseRef = useRef(false);
-  const generationConfiguredRef = useRef(false);
+  const debugSeqRef = useRef(0);
 
-  const canClose = !llm.isGenerating;
+  useEffect(() => {
+    debugEnabledRef.current = debugEnabled;
+  }, [debugEnabled]);
+
+  const pushDebugEvent = useCallback((label: string, payload?: unknown) => {
+    if (!debugEnabledRef.current) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    debugSeqRef.current += 1;
+    const payloadText =
+      payload === undefined
+        ? ''
+        : `\n${typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2)}`;
+    const entry = `[${debugSeqRef.current}] ${timestamp} ${label}${payloadText}`;
+
+    console.log('[RecipeDebug]', label, payload);
+    setDebugEvents(prev => [entry, ...prev].slice(0, 40));
+  }, []);
+
+  const modelClient = useMemo(
+    () => ({
+      complete: async (
+        systemPrompt: string,
+        userPrompt: string,
+        kind: LlmCompletionKind,
+      ): Promise<string> => {
+        pushDebugEvent(`llm request (${kind})`, {
+          systemPrompt,
+          userPrompt,
+        });
+        const { text, interrupted, tokenCount } = await boundedLlmGenerate(
+          llm,
+          [
+            { role: 'system', content: systemPrompt } as Message,
+            { role: 'user', content: userPrompt } as Message,
+          ],
+          kind,
+        );
+        if (interrupted) {
+          pushDebugEvent(`llm interrupted (${kind})`, { tokenCount });
+        }
+        pushDebugEvent(`llm response (${kind})`, text);
+        return text;
+      },
+    }),
+    [llm, pushDebugEvent],
+  );
+
+  const lazyDietaryCategorizationService = useMemo(
+    () =>
+      new LazyDietaryCategorizationService({
+        modelClient,
+        maxParseRetries: 2,
+      }),
+    [modelClient],
+  );
+
+  const recipeGenerationService = useMemo(
+    () =>
+      new RecipeGenerationService({
+        modelClient,
+        maxParseRetries: 2,
+      }),
+    [modelClient],
+  );
+
+  const pipeline = useMemo(
+    () =>
+      new RecipeGenerationPipeline({
+        repository: repo,
+        lazyDietaryCategorizationService,
+        recipeGenerationService,
+        
+      }),
+    [lazyDietaryCategorizationService, recipeGenerationService],
+  );
+
+  const canClose = !isRunningPipeline && !llm.isGenerating;
   const requestClose = useCallback(() => {
     if (!onRequestClose) {
       return;
     }
-    if (llm.isGenerating) {
+    if (!canClose) {
       pendingCloseRef.current = true;
       llm.interrupt();
       return;
     }
     onRequestClose();
-  }, [llm, onRequestClose]);
+  }, [canClose, llm, onRequestClose]);
 
   useEffect(() => {
     if (!onRequestClose) {
       return;
     }
-    if (!llm.isGenerating && pendingCloseRef.current) {
+    if (canClose && pendingCloseRef.current) {
       pendingCloseRef.current = false;
       onRequestClose();
     }
-  }, [llm.isGenerating, onRequestClose]);
-
-  useEffect(() => {
-    if (!llm.isReady) {
-      generationConfiguredRef.current = false;
-      return;
-    }
-    if (llm.error) {
-      return;
-    }
-    if (generationConfiguredRef.current) {
-      return;
-    }
-    generationConfiguredRef.current = true;
-    llm.configure({
-      generationConfig: {
-        outputTokenBatchSize: 32,
-        batchTimeInterval: 500,
-        temperature: 0.35,
-        topP: 0.9,
-      },
-    });
-  }, [llm.isReady, llm.error]); // eslint-disable-line react-hooks/exhaustive-deps -- llm.configure once per ready; llm identity churns during streaming
-
-  // Load inventory once model is ready (or earlier)
-  const loadInventory = useCallback(async () => {
-    setInventoryLoading(true);
-    try {
-      const all = await repo.getFullInventory();
-      setInventory(all);
-    } finally {
-      setInventoryLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadInventory().catch(() => {});
-  }, [loadInventory]);
-
-  const ingredients = useMemo(() => (inventory ? uniqByName(inventory, 60) : []), [inventory]);
+  }, [canClose, onRequestClose]);
 
   const generate = useCallback(async () => {
     setGenerateError(null);
-    setDishNames([]);
-    setRawLlmOutput(null);
+    setIsRunningPipeline(true);
+    setScreen('progress');
+    setProgressStage('categorizing');
+    setCategorizationProgress(null);
 
     if (!llm.isReady) {
       setGenerateError('Model jeszcze się ładuje.');
-      return;
-    }
-    if (!inventory) {
-      setGenerateError('Nie udało się wczytać zapasów.');
-      return;
-    }
-    if (ingredients.length === 0) {
-      setGenerateError('Spiżarnia jest pusta — dodaj produkty, a potem spróbuj ponownie.');
+      setIsRunningPipeline(false);
       return;
     }
 
-    const system: Message = {
-      role: 'system',
-      content:
-        'You are a kitchen assistant. Respond ONLY with JSON in the format {"dishes":["..."]}.' +
-        ' No comments, no Markdown, no extra fields. Only dish names.' +
-        ' Each element of the dishes array MUST be a single string (the dish name), not an object.' +
-        ' Suggest only dishes that can be made using given ingredients.',
-   
-    };
-    // const system: Message = {
-    //   role: 'system',
-    //   content:
-    //     'Jesteś szefem kuchni i planujesz dania na podstawie składników, które są w lodówce i spiżarni.' +
-    //     'Nie wszystkie skladniki musisz wykorzytać a te których ci brakuje mozna dokupić.',
-    // };
 
-    const user: Message = {
-      role: 'user',
-      content:
-        'My ingredients:\n' +
-        ingredients.map(x => `- ${x}`).join('\n') +
-        '\n\nPropose 5 dishes. If some ingredients are missing its ok. Return only JSON as instructed.',
-    };
 
     try {
-      const response = await llm.generate([system, user]);
-      const rawText = normalizeLlmOutput(response);
-      setRawLlmOutput(rawText);
-
-      const parsed = parseDishes(rawText);
-      if (parsed.length === 0) {
-        setGenerateError(
-          'Nie udało się wyciągnąć listy dań z odpowiedzi — zobacz sekcję „Surowa odpowiedź modelu”.',
-        );
-        return;
+      pushDebugEvent('pipeline started', { dishType, diet, skipCategorization });
+      const result = await pipeline.run(
+        {
+          dishType,
+          diet,
+          maxDishes: maxDishes,
+          categorizationBatchSize: categorizationBatchSize,
+          skipCategorization,
+        },
+        event => {
+          pushDebugEvent('pipeline stage', event);
+          setProgressStage(event.stage);
+          if (event.categorization) {
+            setCategorizationProgress(event.categorization);
+          } else if (event.stage !== 'categorizing') {
+            setCategorizationProgress(null);
+          }
+        },
+      );
+      pushDebugEvent('pipeline finished', {
+        dishes: result.dishes,
+        categorization: result.categorization,
+        retriesUsed: result.retriesUsed,
+      });
+      setDishes(result.dishes);
+      setScreen('results');
+    } catch (error) {
+      pushDebugEvent('pipeline error', String(error));
+      if (error instanceof RecipeGenerationError) {
+        if (error.code === 'EMPTY_PANTRY') {
+          setGenerateError('Spiżarnia jest pusta. Dodaj produkty i spróbuj ponownie.');
+        } else if (error.code === 'INVALID_JSON_RESPONSE') {
+          setGenerateError('Model zwrócił niepoprawny JSON po retry. Spróbuj ponownie.');
+        } else {
+          setGenerateError('Wystąpił błąd modelu podczas generowania.');
+        }
+      } else {
+        setGenerateError('Generowanie nie powiodło się.');
       }
-      setDishNames(parsed.slice(0, 30));
-    } catch {
-      setGenerateError('Generowanie nie powiodło się.');
+      setScreen('progress');
+    } finally {
+      setIsRunningPipeline(false);
     }
-  }, [ingredients, inventory, llm]);
+  }, [diet, dishType, llm.isReady, pipeline, skipCategorization, pushDebugEvent]);
+
+  const refreshDebugSnapshot = useCallback(async () => {
+    try {
+      const snapshot = await repo.getDebugSnapshot(300);
+      const snapshotText = JSON.stringify(snapshot, null, 2);
+      setDebugDbSnapshot(snapshotText);
+      pushDebugEvent('sqlite snapshot refreshed', snapshot);
+    } catch (error) {
+      const message = `Nie udało się pobrać snapshotu SQLite: ${String(error)}`;
+      setDebugDbSnapshot(message);
+      pushDebugEvent('sqlite snapshot error', message);
+    }
+  }, [pushDebugEvent]);
+
+  const resetDietaryCategorization = useCallback(async () => {
+    try {
+      const changed = await repo.resetAllDietaryCategorization();
+      pushDebugEvent('dietary categorization reset', { changed });
+      await refreshDebugSnapshot();
+    } catch (error) {
+      pushDebugEvent('dietary categorization reset error', String(error));
+    }
+  }, [pushDebugEvent, refreshDebugSnapshot]);
+
+  useEffect(() => {
+    if (!__DEV__) {
+      return;
+    }
+
+    (globalThis as any).__SHELFCHEF_DEBUG__ = {
+      resetDietaryCategorization: async () => {
+        const changed = await repo.resetAllDietaryCategorization();
+        console.log('[ShelfChefDebug] resetDietaryCategorization changed:', changed);
+        return changed;
+      },
+      getDbSnapshot: async (limit = 200) => {
+        const snapshot = await repo.getDebugSnapshot(limit);
+        console.log('[ShelfChefDebug] getDbSnapshot', snapshot);
+        return snapshot;
+      },
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!debugEnabled) {
+      return;
+    }
+    if (debugDbSnapshot) {
+      return;
+    }
+    refreshDebugSnapshot().catch(() => {});
+  }, [debugEnabled, debugDbSnapshot, refreshDebugSnapshot]);
 
   const retryModel = useCallback(() => {
-    setDishNames([]);
-    setRawLlmOutput(null);
     setGenerateError(null);
     setRemountKey(k => k + 1);
   }, []);
 
   const progressPct = Math.round((llm.downloadProgress ?? 0) * 100);
+  const llmError = llm.error ? String((llm.error as { message?: string })?.message ?? llm.error) : null;
 
   return (
     <View style={styles.body} key={remountKey}>
@@ -403,141 +423,73 @@ function RecipeGeneratorLLM({onRequestClose}: {onRequestClose?: () => void}) {
         ) : null}
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Model AI</Text>
-        {!llm.isReady ? (
-          <View style={styles.row}>
-            <ActivityIndicator color={colors.success} />
-            <View style={styles.rowTextCol}>
-              <Text style={styles.cardLine}>Pobieranie/ładowanie…</Text>
-              <Text style={styles.cardHint}>{progressPct}%</Text>
-            </View>
-          </View>
-        ) : (
-          <Text style={styles.cardLine}>Gotowe do generowania.</Text>
-        )}
-        {llm.error ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorTitle}>Błąd modelu</Text>
-            <Text style={styles.errorText}>{String((llm.error as any)?.message ?? llm.error)}</Text>
-            <Pressable style={styles.smallButton} onPress={retryModel}>
-              <Text style={styles.smallButtonText}>Spróbuj ponownie</Text>
-            </Pressable>
-          </View>
-        ) : null}
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Spiżarnia</Text>
-        {inventoryLoading ? (
-          <View style={styles.row}>
-            <ActivityIndicator color={colors.success} />
-            <Text style={styles.cardLine}>Wczytywanie zapasów…</Text>
-          </View>
-        ) : (
-          <Text style={styles.cardLine}>Składniki: {ingredients.length}</Text>
-        )}
-        <Pressable style={styles.smallButton} onPress={loadInventory} disabled={inventoryLoading}>
-          <Text style={styles.smallButtonText}>Odśwież zapasy</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.actionsRow}>
-        <Pressable
-          onPress={() => {
+      {screen === 'results' ? (
+        <RecipeResultsScreen
+          dishes={dishes}
+          onGenerateAgain={() => {
             generate().catch(() => {});
           }}
-          disabled={!llm.isReady || llm.isGenerating || inventoryLoading}
-          style={({pressed}) => [
-            styles.primaryButton,
-            (pressed && !llm.isGenerating) && styles.primaryButtonPressed,
-            (!llm.isReady || llm.isGenerating || inventoryLoading) && styles.primaryButtonDisabled,
-          ]}>
-          <Text style={styles.primaryButtonText}>{llm.isGenerating ? 'Generuję…' : 'Generuj propozycje'}</Text>
-        </Pressable>
+          onBackToPreferences={() => setScreen('preferences')}
+        />
+      ) : (
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          style={styles.flowBody}
+          contentContainerStyle={styles.flowBodyContent}>
+          {screen === 'preferences' ? (
+            <RecipePreferencesScreen
+              dishType={dishType}
+              diet={diet}
+              skipCategorization={skipCategorization}
+              isModelReady={llm.isReady}
+              downloadProgress={progressPct}
+              modelError={llmError}
+              onDishTypeChange={setDishType}
+              onDietChange={value => {
+                setDiet(value);
+                setSkipCategorization(!dietRequiresCategorization(value));
+              }}
+              onSkipCategorizationChange={setSkipCategorization}
+              onStart={() => {
+                generate().catch(() => {});
+              }}
+              onRetryModel={retryModel}
+              debugEnabled={debugEnabled}
+              debugSnapshot={debugDbSnapshot}
+              debugEvents={debugEvents}
+              onToggleDebug={() => {
+                setDebugEnabled(prev => {
+                  const next = !prev;
+                  if (next) {
+                    pushDebugEvent('debug mode enabled');
+                  }
+                  return next;
+                });
+              }}
+              onRefreshDebugSnapshot={() => {
+                refreshDebugSnapshot().catch(() => {});
+              }}
+              onResetDietaryCategorization={() => {
+                resetDietaryCategorization().catch(() => {});
+              }}
+            />
+          ) : null}
 
-        <Pressable
-          onPress={() => llm.interrupt()}
-          disabled={!llm.isGenerating}
-          style={({pressed}) => [
-            styles.secondaryButton,
-            pressed && styles.secondaryButtonPressed,
-            !llm.isGenerating && styles.secondaryButtonDisabled,
-          ]}>
-          <Text style={styles.secondaryButtonText}>Stop</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => {
-            setDishNames([]);
-            setRawLlmOutput(null);
-            setGenerateError(null);
-          }}
-          style={({pressed}) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}>
-          <Text style={styles.secondaryButtonText}>Wyczyść</Text>
-        </Pressable>
-      </View>
-
-      {generateError ? (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorTitle}>Nie udało się</Text>
-          <Text style={styles.errorText}>{generateError}</Text>
-        </View>
-      ) : null}
-
-      {llm.isGenerating ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Generowanie (na żywo)</Text>
-          <View style={styles.streamingStatusRow}>
-            <ActivityIndicator color={colors.success} />
-            <Text style={styles.streamingText}>
-              Model pisze odpowiedź… Aktualizacje są ograniczone (batching), żeby nie obciążać UI.
-            </Text>
-          </View>
-          <ScrollView
-            style={styles.rawScroll}
-            nestedScrollEnabled
-            keyboardShouldPersistTaps="handled">
-            <Text selectable style={styles.rawText}>
-              {llm.response || '…'}
-            </Text>
-          </ScrollView>
-        </View>
-      ) : null}
-
-      {rawLlmOutput !== null ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Surowa odpowiedź modelu</Text>
-          <Text style={styles.rawHint}>Pełny tekst zwrócony przez model (przed parsowaniem listy dań).</Text>
-          <ScrollView
-            style={styles.rawScroll}
-            nestedScrollEnabled
-            keyboardShouldPersistTaps="handled">
-            <Text selectable style={styles.rawText}>
-              {rawLlmOutput}
-            </Text>
-          </ScrollView>
-        </View>
-      ) : null}
-
-      <Text style={styles.listTitle}>Propozycje dań (po parsowaniu)</Text>
-      <FlatList
-        style={styles.dishList}
-        data={dishNames}
-        keyExtractor={(x, idx) => `${idx}-${x}`}
-        contentContainerStyle={[styles.listContent, dishNames.length === 0 && styles.listEmpty]}
-        ListEmptyComponent={
-          <View style={styles.emptyBox}>
-            <Text style={styles.emptyTitle}>Brak propozycji</Text>
-            <Text style={styles.emptyHint}>Kliknij „Generuj propozycje”, aby zobaczyć listę dań.</Text>
-          </View>
-        }
-        renderItem={({item}) => (
-          <View style={styles.dishRow}>
-            <Text style={styles.dishName}>{item}</Text>
-          </View>
-        )}
-      />
+          {screen === 'progress' ? (
+            <RecipeGenerationProgressScreen
+              stage={progressStage}
+              categorizationProgress={categorizationProgress}
+              error={generateError}
+              isGenerating={isRunningPipeline || llm.isGenerating}
+              onCancel={() => llm.interrupt()}
+              onRetry={() => {
+                generate().catch(() => {});
+              }}
+              onBack={() => setScreen('preferences')}
+            />
+          ) : null}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -550,6 +502,12 @@ const styles = StyleSheet.create({
   body: {
     flex: 1,
     padding: 20,
+  },
+  flowBody: {
+    flex: 1,
+  },
+  flowBodyContent: {
+    paddingBottom: 24,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -571,11 +529,6 @@ const styles = StyleSheet.create({
   ctaRow: {
     marginTop: 18,
     gap: 10,
-  },
-  actionsRow: {
-    marginTop: 6,
-    gap: 10,
-    marginBottom: 10,
   },
   primaryButton: {
     backgroundColor: colors.success,
@@ -607,156 +560,20 @@ const styles = StyleSheet.create({
   secondaryButtonPressed: {
     opacity: 0.9,
   },
-  secondaryButtonDisabled: {
-    opacity: 0.5,
-  },
   secondaryButtonText: {
     color: colors.textPrimary,
     fontWeight: '800',
     fontSize: 15,
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: 10,
-  },
-  cardTitle: {
-    color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '800',
-    marginBottom: 8,
   },
   cardLine: {
     color: colors.textSecondary,
     fontSize: 14,
     fontWeight: '600',
   },
-  cardHint: {
-    color: colors.textMuted,
-    fontSize: 12,
-    marginTop: 2,
-  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-  },
-  rowTextCol: {
-    flex: 1,
-  },
-  errorBox: {
-    marginTop: 10,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  errorTitle: {
-    color: colors.textPrimary,
-    fontSize: 13,
-    fontWeight: '800',
-    marginBottom: 4,
-  },
-  errorText: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  smallButton: {
-    marginTop: 10,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: colors.success,
-  },
-  smallButtonText: {
-    color: colors.successText,
-    fontWeight: '800',
-    fontSize: 13,
-  },
-  streamingStatusRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    marginBottom: 10,
-  },
-  streamingText: {
-    flex: 1,
-    color: colors.textSecondary,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  dishList: {
-    flex: 1,
-  },
-  rawHint: {
-    color: colors.textMuted,
-    fontSize: 12,
-    lineHeight: 17,
-    marginBottom: 8,
-  },
-  rawScroll: {
-    maxHeight: 260,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceMuted,
-    padding: 10,
-  },
-  rawText: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    lineHeight: 18,
-  },
-  listTitle: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 6,
-    marginBottom: 6,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  listContent: {
-    paddingBottom: 24,
-  },
-  listEmpty: {
-    flexGrow: 1,
-  },
-  emptyBox: {
-    padding: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyTitle: {
-    color: colors.textPrimary,
-    fontSize: 16,
-    fontWeight: '800',
-    marginBottom: 6,
-  },
-  emptyHint: {
-    color: colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  dishRow: {
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: 10,
-  },
-  dishName: {
-    color: colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '700',
   },
   closeChip: {
     paddingHorizontal: 12,

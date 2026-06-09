@@ -1,9 +1,17 @@
+export interface DietaryFlags {
+  isVegetarian: boolean;
+  isVegan: boolean;
+  isGlutenFree: boolean;
+  isLactoseFree: boolean;
+}
+
 export interface ProductDefinition {
     ean: string;
     name: string;
     brand?: string;
     imageUrl?: string;
     category?: string;
+    dietary?: DietaryFlags;
   }
   
   export interface InventoryItem extends ProductDefinition {
