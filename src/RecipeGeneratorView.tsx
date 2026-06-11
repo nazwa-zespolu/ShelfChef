@@ -187,13 +187,8 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
     useState<CategorizationProgress | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [isRunningPipeline, setIsRunningPipeline] = useState(false);
-  const [debugEnabled, setDebugEnabled] = useState(false);
-  const [debugEvents, setDebugEvents] = useState<string[]>([]);
-  const [debugDbSnapshot, setDebugDbSnapshot] = useState('');
-  const debugEnabledRef = useRef(false);
 
   const pendingCloseRef = useRef(false);
-  const debugSeqRef = useRef(0);
   const downloadRecoveryAttemptedRef = useRef(false);
 
   useEffect(() => {
@@ -231,27 +226,6 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
     restartModelLoad();
   }, [llm.error, restartModelLoad]);
 
-  useEffect(() => {
-    debugEnabledRef.current = debugEnabled;
-  }, [debugEnabled]);
-
-  const pushDebugEvent = useCallback((label: string, payload?: unknown) => {
-    if (!debugEnabledRef.current) {
-      return;
-    }
-
-    const timestamp = new Date().toISOString();
-    debugSeqRef.current += 1;
-    const payloadText =
-      payload === undefined
-        ? ''
-        : `\n${typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2)}`;
-    const entry = `[${debugSeqRef.current}] ${timestamp} ${label}${payloadText}`;
-
-    console.log('[RecipeDebug]', label, payload);
-    setDebugEvents(prev => [entry, ...prev].slice(0, 40));
-  }, []);
-
   const modelClient = useMemo(
     () => ({
       complete: async (
@@ -259,10 +233,6 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
         userPrompt: string,
         kind: LlmCompletionKind,
       ): Promise<string> => {
-        pushDebugEvent(`llm request (${kind})`, {
-          systemPrompt,
-          userPrompt,
-        });
         const { text, interrupted, tokenCount } = await boundedLlmGenerate(
           llm,
           [
@@ -271,14 +241,13 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
           ],
           kind,
         );
-        if (interrupted) {
-          pushDebugEvent(`llm interrupted (${kind})`, { tokenCount });
+        if (__DEV__ && interrupted) {
+          console.log('[RecipeDebug] llm interrupted', kind, { tokenCount });
         }
-        pushDebugEvent(`llm response (${kind})`, text);
         return text;
       },
     }),
-    [llm, pushDebugEvent],
+    [llm],
   );
 
   const lazyDietaryCategorizationService = useMemo(
@@ -349,7 +318,6 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
 
 
     try {
-      pushDebugEvent('pipeline started', { dishType, diet, skipCategorization });
       const result = await pipeline.run(
         {
           dishType,
@@ -359,7 +327,6 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
           skipCategorization,
         },
         event => {
-          pushDebugEvent('pipeline stage', event);
           setProgressStage(event.stage);
           if (event.categorization) {
             setCategorizationProgress(event.categorization);
@@ -368,15 +335,9 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
           }
         },
       );
-      pushDebugEvent('pipeline finished', {
-        dishes: result.dishes,
-        categorization: result.categorization,
-        retriesUsed: result.retriesUsed,
-      });
       setDishes(result.dishes);
       setScreen('results');
     } catch (error) {
-      pushDebugEvent('pipeline error', String(error));
       if (error instanceof RecipeGenerationError) {
         if (error.code === 'EMPTY_PANTRY') {
           setGenerateError('Spiżarnia jest pusta. Dodaj produkty i spróbuj ponownie.');
@@ -392,30 +353,7 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
     } finally {
       setIsRunningPipeline(false);
     }
-  }, [diet, dishType, llm.isReady, pipeline, skipCategorization, pushDebugEvent]);
-
-  const refreshDebugSnapshot = useCallback(async () => {
-    try {
-      const snapshot = await repo.getDebugSnapshot(300);
-      const snapshotText = JSON.stringify(snapshot, null, 2);
-      setDebugDbSnapshot(snapshotText);
-      pushDebugEvent('sqlite snapshot refreshed', snapshot);
-    } catch (error) {
-      const message = `Nie udało się pobrać snapshotu SQLite: ${String(error)}`;
-      setDebugDbSnapshot(message);
-      pushDebugEvent('sqlite snapshot error', message);
-    }
-  }, [pushDebugEvent]);
-
-  const resetDietaryCategorization = useCallback(async () => {
-    try {
-      const changed = await repo.resetAllDietaryCategorization();
-      pushDebugEvent('dietary categorization reset', { changed });
-      await refreshDebugSnapshot();
-    } catch (error) {
-      pushDebugEvent('dietary categorization reset error', String(error));
-    }
-  }, [pushDebugEvent, refreshDebugSnapshot]);
+  }, [diet, dishType, llm.isReady, pipeline, skipCategorization]);
 
   useEffect(() => {
     if (!__DEV__) {
@@ -435,16 +373,6 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
       },
     };
   }, []);
-
-  useEffect(() => {
-    if (!debugEnabled) {
-      return;
-    }
-    if (debugDbSnapshot) {
-      return;
-    }
-    refreshDebugSnapshot().catch(() => {});
-  }, [debugEnabled, debugDbSnapshot, refreshDebugSnapshot]);
 
   const retryModel = useCallback(() => {
     restartModelLoad();
@@ -502,24 +430,6 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
                 generate().catch(() => {});
               }}
               onRetryModel={retryModel}
-              debugEnabled={debugEnabled}
-              debugSnapshot={debugDbSnapshot}
-              debugEvents={debugEvents}
-              onToggleDebug={() => {
-                setDebugEnabled(prev => {
-                  const next = !prev;
-                  if (next) {
-                    pushDebugEvent('debug mode enabled');
-                  }
-                  return next;
-                });
-              }}
-              onRefreshDebugSnapshot={() => {
-                refreshDebugSnapshot().catch(() => {});
-              }}
-              onResetDietaryCategorization={() => {
-                resetDietaryCategorization().catch(() => {});
-              }}
             />
           ) : null}
 
