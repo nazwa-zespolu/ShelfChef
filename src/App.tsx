@@ -29,6 +29,8 @@ function App() {
   const [activeTab, setActiveTab] = useState<AppTab>('pantry');
   const [bottomNavVisible, setBottomNavVisible] = useState(true);
   const [inventoryTick, setInventoryTick] = useState(0);
+  const [inventorySwipeHintPending, setInventorySwipeHintPending] = useState(false);
+  const [inventoryItemCount, setInventoryItemCount] = useState<number | null>(null);
 
   useEffect(() => {
     try {
@@ -55,11 +57,31 @@ function App() {
       {/* <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} /> */}
       <View style={styles.shell}>
         <View style={styles.content}>
-          {activeTab === 'pantry' ? <HomeView refreshToken={inventoryTick} /> : null}
-          {activeTab === 'scan' ? (
-            <ProductScannerView onProductAdded={() => setInventoryTick(tick => tick + 1)} />
+          {activeTab === 'pantry' ? (
+            <HomeView
+              refreshToken={inventoryTick}
+              shouldPlaySwipeHint={inventorySwipeHintPending}
+              onInventoryCountChanged={setInventoryItemCount}
+              onSwipeHintPlayed={() => {
+                setInventorySwipeHintPending(false);
+              }}
+            />
           ) : null}
-          {activeTab === 'recipes' ? <RecipeGeneratorView /> : null}
+          {activeTab === 'scan' ? (
+            <ProductScannerView
+              onProductAdded={() => {
+                setInventoryTick(tick => tick + 1);
+                if (inventoryItemCount === 0) {
+                  setInventorySwipeHintPending(true);
+                }
+              }}
+            />
+          ) : null}
+          <View
+            style={[styles.tabPanel, activeTab !== 'recipes' && styles.tabPanelHidden]}
+            pointerEvents={activeTab === 'recipes' ? 'auto' : 'none'}>
+            <RecipeGeneratorView />
+          </View>
           {activeTab === 'shopping' ? (
             <ShoppingListView
               onRequestClose={() => {
@@ -96,5 +118,11 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  tabPanel: {
+    flex: 1,
+  },
+  tabPanelHidden: {
+    display: 'none',
   },
 });

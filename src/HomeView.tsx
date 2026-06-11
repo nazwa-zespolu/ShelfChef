@@ -1,6 +1,8 @@
-import React, {useCallback, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   FlatList,
   Image,
   RefreshControl,
@@ -11,7 +13,7 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {CalendarDays, Clock3, Package, Search} from 'lucide-react-native';
+import {CalendarDays, Check, Clock3, Package, Search, X} from 'lucide-react-native';
 import {InventoryItem} from './domain/types';
 import {SwipeToDeleteCard} from './components/SwipeToDeleteCard';
 import {ProductRepository} from './infrastructure/ProductRepository';
@@ -32,6 +34,16 @@ let rememberedSortKey: SortKey = 'expiry_asc';
 
 type HomeViewProps = {
   refreshToken?: number;
+  shouldPlaySwipeHint?: boolean;
+  onInventoryCountChanged?: (count: number) => void;
+  onSwipeHintPlayed?: () => void;
+};
+
+type ToastTone = 'success' | 'error';
+
+type ToastMessage = {
+  message: string;
+  tone: ToastTone;
 };
 
 function pluralizeProducts(count: number) {
@@ -77,7 +89,7 @@ function compareOpened(a: InventoryItem, b: InventoryItem) {
   return a.name.localeCompare(b.name, 'pl', {sensitivity: 'base'});
 }
 
-function formatOpenedDuration(openedAt?: string) {
+function formatOpenedBadgeDuration(openedAt?: string | null) {
   if (!openedAt) {
     return null;
   }
@@ -109,14 +121,53 @@ function getCategoryLabel(item: InventoryItem) {
   return item.category?.trim() || item.brand?.trim() || 'Bez kategorii';
 }
 
-export default function HomeView({refreshToken}: HomeViewProps) {
+export default function HomeView({
+  refreshToken,
+  shouldPlaySwipeHint = false,
+  onInventoryCountChanged,
+  onSwipeHintPlayed,
+}: HomeViewProps) {
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>(rememberedSortKey);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
+  const toastAnim = useRef(new Animated.Value(0)).current;
+  const toastRunId = useRef(0);
+  const hintTranslateX = useRef(new Animated.Value(0)).current;
+  const [swipeHintVisible, setSwipeHintVisible] = useState(false);
   const openedCount = useMemo(() => items.filter(item => item.isOpened).length, [items]);
   const inventoryMeta = `${pluralizeProducts(items.length)} · ${openedProductsLabel(openedCount)}`;
+  const toastTop = useMemo(() => insets.top + 12, [insets.top]);
+
+  const showToast = useCallback(
+    (message: string, tone: ToastTone = 'success') => {
+      const runId = toastRunId.current + 1;
+      toastRunId.current = runId;
+      toastAnim.stopAnimation();
+      toastAnim.setValue(0);
+      setToast({message, tone});
+      Animated.sequence([
+        Animated.timing(toastAnim, {
+          toValue: 1,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+        Animated.delay(1450),
+        Animated.timing(toastAnim, {
+          toValue: 2,
+          duration: 240,
+          useNativeDriver: true,
+        }),
+      ]).start(({finished}) => {
+        if (finished && toastRunId.current === runId) {
+          setToast(null);
+        }
+      });
+    },
+    [toastAnim],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,9 +179,16 @@ export default function HomeView({refreshToken}: HomeViewProps) {
     }
   }, []);
 
-  React.useEffect(() => {
+  useEffect(() => {
     load().catch(() => {});
   }, [load, refreshToken]);
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+    onInventoryCountChanged?.(items.length);
+  }, [items.length, loading, onInventoryCountChanged]);
 
   const filteredSorted = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -160,60 +218,167 @@ export default function HomeView({refreshToken}: HomeViewProps) {
       await repo.removeFromInventory(id);
       setItems(prev => prev.filter(p => p.id !== id));
     } catch {
-      // jeśli usuwanie nie przejdzie, wróć do spójnego stanu z bazą
       load().catch(() => {});
     }
   }, [load]);
 
+  const toggleOpened = useCallback(
+    async (item: InventoryItem) => {
+      try {
+        if (item.isOpened) {
+          await repo.markAsClosed(item.id);
+          setItems(prev =>
+            prev.map(product =>
+              product.id === item.id
+                ? {...product, isOpened: false, openedAt: undefined}
+                : product,
+            ),
+          );
+          showToast(`Cofnięto otwarcie: ${item.name}`);
+          return;
+        }
+
+        const openedAt = new Date().toISOString();
+        await repo.markAsOpened(item.id, openedAt);
+        setItems(prev =>
+          prev.map(product =>
+            product.id === item.id ? {...product, isOpened: true, openedAt} : product,
+          ),
+        );
+        showToast(`Otworzono produkt: ${item.name}`);
+      } catch {
+        load().catch(() => {});
+        showToast('Nie udało się zaktualizować produktu', 'error');
+      }
+    },
+    [load, showToast],
+  );
+
+  useEffect(() => {
+    if (!shouldPlaySwipeHint || loading || filteredSorted.length === 0) {
+      return;
+    }
+    setSwipeHintVisible(true);
+    hintTranslateX.setValue(0);
+    let active = true;
+    const animation = Animated.sequence([
+      Animated.delay(520),
+      Animated.timing(hintTranslateX, {
+        toValue: 86,
+        duration: 460,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.delay(170),
+      Animated.timing(hintTranslateX, {
+        toValue: 0,
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.delay(180),
+      Animated.timing(hintTranslateX, {
+        toValue: -86,
+        duration: 460,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.delay(170),
+      Animated.timing(hintTranslateX, {
+        toValue: 0,
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]);
+    animation.start(() => {
+      if (active) {
+        setSwipeHintVisible(false);
+        onSwipeHintPlayed?.();
+      }
+    });
+    return () => {
+      active = false;
+      animation.stop();
+    };
+  }, [filteredSorted.length, hintTranslateX, loading, onSwipeHintPlayed, shouldPlaySwipeHint]);
+
   const renderItem = useCallback(
-    ({item}: {item: InventoryItem}) => {
-      const openedDuration = item.isOpened ? formatOpenedDuration(item.openedAt) : null;
+    ({item, index}: {item: InventoryItem; index: number}) => {
+      const openedDuration = item.isOpened ? formatOpenedBadgeDuration(item.openedAt) : null;
+      const playSwipeHint = index === 0 && swipeHintVisible;
 
       return (
         <SwipeToDeleteCard
+          resetAfterDelete
+          allowRightDelete={false}
           borderRadius={8}
           onDelete={() => {
             deleteItem(item.id).catch(() => {});
-          }}>
-          <View style={styles.card}>
-            <View style={styles.cardRow}>
-              {item.imageUrl ? (
-                <Image source={{uri: item.imageUrl}} style={styles.productImage} />
-              ) : (
-                <View style={styles.productImagePlaceholder}>
-                  <Package color={colors.textMuted} size={28} strokeWidth={2} />
-                </View>
-              )}
-              <View style={styles.cardBody}>
-                <View style={styles.cardHeader}>
-                  <Text style={styles.productName} numberOfLines={2}>
-                    {item.name}
+          }}
+          onSwipeRight={() => {
+            toggleOpened(item).catch(() => {});
+          }}
+          rightLabel={item.isOpened ? 'Cofnij' : 'Otwórz'}
+          rightActionTone={item.isOpened ? 'warning' : 'success'}>
+          {playSwipeHint ? (
+            <View pointerEvents="none" style={styles.swipeHintBackground}>
+              <View
+                style={[
+                  styles.swipeHintAction,
+                  item.isOpened ? styles.swipeHintActionUndo : styles.swipeHintActionOpen,
+                ]}>
+                <Text style={[styles.swipeHintActionText, item.isOpened && styles.swipeHintActionTextUndo]}>
+                  {item.isOpened ? 'Cofnij' : 'Otwórz'}
+                </Text>
+              </View>
+              <View style={[styles.swipeHintAction, styles.swipeHintActionDelete]}>
+                <Text style={styles.swipeHintActionText}>Usuń</Text>
+              </View>
+            </View>
+          ) : null}
+          <Animated.View
+            style={playSwipeHint ? {transform: [{translateX: hintTranslateX}]} : undefined}>
+            <View style={styles.card}>
+              <View style={styles.cardRow}>
+                {item.imageUrl ? (
+                  <Image source={{uri: item.imageUrl}} style={styles.productImage} />
+                ) : (
+                  <View style={styles.productImagePlaceholder}>
+                    <Package color={colors.textMuted} size={28} strokeWidth={2} />
+                  </View>
+                )}
+                <View style={styles.cardBody}>
+                  <View style={styles.cardHeader}>
+                    <Text style={styles.productName} numberOfLines={2}>
+                      {item.name}
+                    </Text>
+                    {openedDuration ? (
+                      <View style={styles.openedBadge}>
+                        <Clock3 color={colors.accent} size={15} strokeWidth={2.1} />
+                        <Text style={styles.openedBadgeText}>{openedDuration}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.category} numberOfLines={1}>
+                    {getCategoryLabel(item)}
                   </Text>
-                  {openedDuration ? (
-                    <View style={styles.openedBadge}>
-                      <Clock3 color={colors.accent} size={15} strokeWidth={2.1} />
-                      <Text style={styles.openedBadgeText}>{openedDuration}</Text>
+                  {item.expiryDate ? (
+                    <View style={styles.expiryRow}>
+                      <CalendarDays color={colors.textMuted} size={17} strokeWidth={2} />
+                      <Text style={styles.metaLine}>
+                        Ważne do: <Text style={styles.metaValue}>{formatExpiryLine(item.expiryDate)}</Text>
+                      </Text>
                     </View>
                   ) : null}
                 </View>
-                <Text style={styles.category} numberOfLines={1}>
-                  {getCategoryLabel(item)}
-                </Text>
-                {item.expiryDate ? (
-                  <View style={styles.expiryRow}>
-                    <CalendarDays color={colors.textMuted} size={17} strokeWidth={2} />
-                    <Text style={styles.metaLine}>
-                      Ważne do: <Text style={styles.metaValue}>{formatExpiryLine(item.expiryDate)}</Text>
-                    </Text>
-                  </View>
-                ) : null}
               </View>
             </View>
-          </View>
+          </Animated.View>
         </SwipeToDeleteCard>
       );
     },
-    [deleteItem],
+    [deleteItem, hintTranslateX, swipeHintVisible, toggleOpened],
   );
 
   return (
@@ -291,6 +456,41 @@ export default function HomeView({refreshToken}: HomeViewProps) {
           }
         />
       )}
+      {toast ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.toastOverlay,
+            {
+              top: toastTop,
+              opacity: toastAnim.interpolate({
+                inputRange: [0, 1, 2],
+                outputRange: [0, 1, 0],
+              }),
+              transform: [
+                {
+                  translateY: toastAnim.interpolate({
+                    inputRange: [0, 1, 2],
+                    outputRange: [8, 0, -14],
+                  }),
+                },
+              ],
+            },
+          ]}>
+          <View style={[styles.toastBubble, toast.tone === 'error' && styles.toastBubbleError]}>
+            <View style={[styles.toastIcon, toast.tone === 'error' && styles.toastIconError]}>
+              {toast.tone === 'error' ? (
+                <X color={colors.successText} size={15} strokeWidth={3} />
+              ) : (
+                <Check color={colors.successText} size={15} strokeWidth={3} />
+              )}
+            </View>
+            <Text style={styles.toastText} numberOfLines={1}>
+              {toast.message}
+            </Text>
+          </View>
+        </Animated.View>
+      ) : null}
     </View>
   );
 }
@@ -474,6 +674,80 @@ const styles = StyleSheet.create({
   },
   metaValue: {
     color: colors.textSecondary,
+    fontWeight: '900',
+  },
+  swipeHintBackground: {
+    ...StyleSheet.absoluteFill,
+    borderRadius: 8,
+    overflow: 'hidden',
+    flexDirection: 'row',
+  },
+  swipeHintAction: {
+    flex: 1,
+    minHeight: 92,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  swipeHintActionOpen: {
+    alignItems: 'flex-start',
+    backgroundColor: colors.success,
+  },
+  swipeHintActionUndo: {
+    alignItems: 'flex-start',
+    backgroundColor: colors.warning,
+  },
+  swipeHintActionDelete: {
+    alignItems: 'flex-end',
+    backgroundColor: colors.danger,
+  },
+  swipeHintActionText: {
+    color: colors.successText,
+    fontWeight: '900',
+    fontSize: 16,
+  },
+  swipeHintActionTextUndo: {
+    color: colors.warningText,
+  },
+  toastOverlay: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 1000,
+    elevation: 1000,
+    alignItems: 'center',
+  },
+  toastBubble: {
+    maxWidth: 520,
+    minHeight: 44,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: colors.success,
+    backgroundColor: colors.surfaceSubtle,
+    paddingVertical: 10,
+    paddingLeft: 12,
+    paddingRight: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  toastBubbleError: {
+    borderColor: colors.danger,
+  },
+  toastIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toastIconError: {
+    backgroundColor: colors.danger,
+  },
+  toastText: {
+    flexShrink: 1,
+    color: colors.textPrimary,
+    fontSize: 15,
     fontWeight: '900',
   },
   emptyBox: {
