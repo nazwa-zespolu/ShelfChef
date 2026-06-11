@@ -5,6 +5,7 @@ type InventoryRow = {
   expiry_date: string | null;
   opened_at: string | null;
   is_opened: number;
+  created_at: string;
 };
 
 const mockInventory = new Map<string, InventoryRow>();
@@ -21,10 +22,10 @@ const mockExecute = jest.fn((sql: string, params: any[] = []) => {
 
   if (
     normalized.startsWith(
-      'INSERT INTO INVENTORY (ID, PRODUCT_EAN, CUSTOM_NAME, EXPIRY_DATE) VALUES (?, ?, ?, ?)',
+      'INSERT INTO INVENTORY ( ID, PRODUCT_EAN, CUSTOM_NAME, EXPIRY_DATE, CREATED_AT ) VALUES (?, ?, ?, ?, ?)',
     )
   ) {
-    const [id, productEan, customName, expiryDate] = params;
+    const [id, productEan, customName, expiryDate, createdAt] = params;
     mockInventory.set(id, {
       id,
       product_ean: productEan ?? null,
@@ -32,6 +33,7 @@ const mockExecute = jest.fn((sql: string, params: any[] = []) => {
       expiry_date: expiryDate ?? null,
       opened_at: null,
       is_opened: 0,
+      created_at: createdAt,
     });
     return toRows([]);
   }
@@ -69,6 +71,7 @@ const mockExecute = jest.fn((sql: string, params: any[] = []) => {
         brand: null,
         image_url: null,
         category: null,
+        created_at: row.created_at,
       })),
     );
   }

@@ -18,6 +18,7 @@ type InventoryRow = {
   expiry_date: string | null;
   opened_at: string | null;
   is_opened: number;
+  created_at: string;
   is_vegetarian: number | null;
   is_vegan: number | null;
   is_gluten_free: number | null;
@@ -110,6 +111,7 @@ const inventoryColumns = new Set([
   'expiry_date',
   'opened_at',
   'is_opened',
+  'created_at',
 ]);
 const DIETARY_COLUMNS = [
   'is_vegetarian',
@@ -863,10 +865,10 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
 
   if (
     normalized.startsWith(
-      'INSERT INTO INVENTORY (ID, PRODUCT_EAN, CUSTOM_NAME, EXPIRY_DATE) VALUES (?, ?, ?, ?)',
+      'INSERT INTO INVENTORY ( ID, PRODUCT_EAN, CUSTOM_NAME, EXPIRY_DATE, CREATED_AT ) VALUES (?, ?, ?, ?, ?)',
     )
   ) {
-    const [id, productEan, customName, expiryDate] = params;
+    const [id, productEan, customName, expiryDate, createdAt] = params;
     inventory.set(id, {
       id,
       product_ean: productEan ?? null,
@@ -874,6 +876,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       expiry_date: expiryDate,
       opened_at: null,
       is_opened: 0,
+      created_at: createdAt,
       is_vegetarian: null,
       is_vegan: null,
       is_gluten_free: null,
@@ -918,6 +921,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
           brand: def?.brand ?? null,
           image_url: specificCatalog?.image_url ?? genericCatalog?.image_url ?? def?.image_url ?? null,
           category: def?.category ?? null,
+          created_at: row.created_at,
         };
       })
       .sort((a, b) => {

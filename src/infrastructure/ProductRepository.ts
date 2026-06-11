@@ -260,8 +260,14 @@ export class ProductRepository {
     expiryDate: string | null,
   ): Promise<void> {
     db.execute(
-      'INSERT INTO inventory (id, product_ean, custom_name, expiry_date) VALUES (?, ?, ?, ?)',
-      [id, ean, customName, expiryDate],
+      `INSERT INTO inventory (
+        id,
+        product_ean,
+        custom_name,
+        expiry_date,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?)`,
+      [id, ean, customName, expiryDate, new Date().toISOString()],
     );
   }
 
@@ -492,7 +498,7 @@ export class ProductRepository {
   async getFullInventory(): Promise<InventoryItem[]> {
     const query = `
       SELECT 
-        i.id, i.expiry_date, i.opened_at, i.is_opened, i.custom_name,
+        i.id, i.expiry_date, i.opened_at, i.is_opened, i.custom_name, i.created_at,
         COALESCE(d.ean, i.product_ean) AS ean,
         d.name, d.brand,
         COALESCE(specific_catalog.image_url, generic_catalog.image_url, d.image_url) AS image_url,
@@ -523,6 +529,7 @@ export class ProductRepository {
           expiryDate: row.expiry_date ?? null,
           openedAt: row.opened_at,
           isOpened: row.is_opened === 1,
+          createdAt: row.created_at,
         });
       }
     }
