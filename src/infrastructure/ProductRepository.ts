@@ -467,6 +467,10 @@ export class ProductRepository {
     db.execute('UPDATE inventory SET is_opened = 1, opened_at = ? WHERE id = ?', [date, id]);
   }
 
+  async markAsClosed(id: string): Promise<void> {
+    db.execute('UPDATE inventory SET is_opened = 0, opened_at = NULL WHERE id = ?', [id]);
+  }
+
   async removeFromInventory(id: string): Promise<void> {
     db.execute('DELETE FROM inventory WHERE id = ?', [id]);
   }
