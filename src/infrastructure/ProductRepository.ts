@@ -476,14 +476,19 @@ export class ProductRepository {
   }
 
   async getRecipeModelConsent(): Promise<boolean> {
+    const state = await this.getRecipeModelConsentState();
+    return state === 'accepted';
+  }
+
+  async getRecipeModelConsentState(): Promise<'unknown' | 'accepted' | 'declined'> {
     const result = db.execute('SELECT value FROM app_settings WHERE key = ?', [
       ProductRepository.RECIPE_MODEL_CONSENT_KEY,
     ]);
     if (!result.rows || result.rows.length === 0) {
-      return false;
+      return 'unknown';
     }
     const row = result.rows.item(0);
-    return row.value === '1';
+    return row.value === '1' ? 'accepted' : 'declined';
   }
 
   async setRecipeModelConsent(granted: boolean): Promise<void> {
