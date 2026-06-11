@@ -66,6 +66,7 @@ function setupShoppingListsSchema() {
         normalized_name TEXT NOT NULL,
         kind TEXT NOT NULL CHECK(kind IN ('generic', 'specific')),
         product_ean TEXT,
+        image_url TEXT,
         parent_catalog_product_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -73,6 +74,7 @@ function setupShoppingListsSchema() {
         FOREIGN KEY(parent_catalog_product_id) REFERENCES product_catalog(id)
       );
     `);
+  ensureProductCatalogImageUrlColumn();
 
   db.execute(`
       CREATE TABLE IF NOT EXISTS shopping_lists (
@@ -145,6 +147,7 @@ function setupShoppingListsSchema() {
         normalized_name,
         kind,
         product_ean,
+        image_url,
         parent_catalog_product_id,
         created_at,
         updated_at
@@ -155,6 +158,7 @@ function setupShoppingListsSchema() {
         lower(trim(name)),
         'specific',
         ean,
+        image_url,
         NULL,
         datetime('now'),
         datetime('now')
@@ -178,6 +182,12 @@ function createShoppingListItemCatalogProductsTable() {
       CREATE INDEX IF NOT EXISTS idx_shopping_item_catalog_products_catalog
       ON shopping_list_item_catalog_products(catalog_product_id);
     `);
+}
+
+function ensureProductCatalogImageUrlColumn() {
+  if (!hasProductCatalogColumn('image_url')) {
+    db.execute('ALTER TABLE product_catalog ADD COLUMN image_url TEXT');
+  }
 }
 
 export const setupDatabase = () => {
@@ -285,6 +295,23 @@ const hasProductDefinitionsColumn = (columnName: string): boolean => {
 
 const hasInventoryColumn = (columnName: string): boolean => {
   const result = db.execute('PRAGMA table_info(inventory)');
+
+  if (!result.rows) {
+    return false;
+  }
+
+  for (let i = 0; i < result.rows.length; i++) {
+    const row = result.rows.item(i);
+    if (String(row.name) === columnName) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const hasProductCatalogColumn = (columnName: string): boolean => {
+  const result = db.execute('PRAGMA table_info(product_catalog)');
 
   if (!result.rows) {
     return false;

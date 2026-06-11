@@ -6,6 +6,7 @@ import {
   Button,
   Easing,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -31,11 +32,30 @@ const visionCamera = (() => {
   }
 })();
 
+const imagePicker = (() => {
+  try {
+    // Runtime require keeps Jest/tests working when native module is missing.
+    return require('react-native-image-picker');
+  } catch {
+    return null;
+  }
+})();
+
+const fileSystem = (() => {
+  try {
+    // Runtime require keeps Jest/tests working when native module is missing.
+    return require('@dr.pogodin/react-native-fs');
+  } catch {
+    return null;
+  }
+})();
+
 const BOTTOM_SHEET_HEIGHT = 300;
+const PRODUCT_PHOTO_DIR_NAME = 'product-photos';
 
 function getDefaultExpirationDate() {
   const date = new Date();
-  date.setDate(date.getDate() + 7);
+  date.setDate(date.getDate() + 2);
   return date;
 }
 
@@ -58,6 +78,54 @@ function formatExpiryForDb(date: Date) {
 
 function generateInventoryId(index: number) {
   return `inv-${Date.now()}-${index}-${Math.floor(Math.random() * 1_000_000)}`;
+}
+
+type ProductPhotoSource = 'camera' | 'library';
+
+type ImagePickerAsset = {
+  uri?: string;
+  fileName?: string;
+  type?: string;
+};
+
+type ImagePickerResponse = {
+  didCancel?: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+  assets?: ImagePickerAsset[];
+};
+
+function extensionFromPhotoAsset(asset: ImagePickerAsset): string {
+  const fileName = asset.fileName?.trim();
+  const fileExtension = fileName?.match(/\.([a-zA-Z0-9]+)$/)?.[1];
+  if (fileExtension) {
+    return fileExtension.toLowerCase();
+  }
+  if (asset.type?.includes('png')) {
+    return 'png';
+  }
+  if (asset.type?.includes('webp')) {
+    return 'webp';
+  }
+  return 'jpg';
+}
+
+async function copyProductPhotoToAppStorage(asset: ImagePickerAsset): Promise<string | null> {
+  const sourceUri = asset.uri?.trim();
+  if (!sourceUri) {
+    return null;
+  }
+  if (!fileSystem?.DocumentDirectoryPath || !fileSystem?.mkdir || !fileSystem?.copyFile) {
+    return sourceUri;
+  }
+
+  const directory = `${fileSystem.DocumentDirectoryPath}/${PRODUCT_PHOTO_DIR_NAME}`;
+  const extension = extensionFromPhotoAsset(asset);
+  const fileName = `product-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}.${extension}`;
+  const destinationPath = `${directory}/${fileName}`;
+  await fileSystem.mkdir(directory);
+  await fileSystem.copyFile(sourceUri, destinationPath);
+  return `file://${destinationPath}`;
 }
 
 function isValidEAN(code: string) {
@@ -91,8 +159,8 @@ function ScannerUnavailable({onRequestClose}: {onRequestClose?: () => void}) {
           <Text style={styles.backText}>&#8592; Wróć</Text>
         </Pressable>
       ) : null}
-      <Text style={styles.title}>Scanner unavailable</Text>
-      <Text style={styles.info}>Missing scanner library or permission denied.</Text>
+      <Text style={styles.title}>Skaner niedostępny</Text>
+      <Text style={styles.info}>Brakuje biblioteki skanera albo zgody na użycie aparatu.</Text>
     </View>
   );
 }
@@ -125,10 +193,12 @@ function SheetScrollableForm({
   children,
   maxHeight,
   keyboardVerticalOffset = 0,
+  contentBottomInset = 8,
 }: {
   children: React.ReactNode;
   maxHeight: number;
   keyboardVerticalOffset?: number;
+  contentBottomInset?: number;
 }) {
   const [scrollEnabled, setScrollEnabled] = useState(true);
   const wheelLockCountRef = useRef(0);
@@ -149,7 +219,10 @@ function SheetScrollableForm({
         keyboardVerticalOffset={keyboardVerticalOffset}>
         <ScrollView
           style={styles.sheetScroll}
-          contentContainerStyle={styles.sheetScrollContent}
+          contentContainerStyle={[
+            styles.sheetScrollContent,
+            {paddingBottom: contentBottomInset},
+          ]}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
           scrollEnabled={scrollEnabled}
@@ -208,7 +281,7 @@ function ManualFormFooter({
       {expirationDate ? (
         <View style={styles.wheelsRow}>
           <WheelPicker
-            label="Day"
+            label="Dzień"
             values={days}
             selectedValue={expirationDate.getDate()}
             onValueChange={value => updateDatePart('day', value)}
@@ -216,7 +289,7 @@ function ManualFormFooter({
             onInteractionEnd={wheelInteraction.onInteractionEnd}
           />
           <WheelPicker
-            label="Month"
+            label="Miesiąc"
             values={months}
             selectedValue={expirationDate.getMonth() + 1}
             onValueChange={value => updateDatePart('month', value)}
@@ -224,7 +297,7 @@ function ManualFormFooter({
             onInteractionEnd={wheelInteraction.onInteractionEnd}
           />
           <WheelPicker
-            label="Year"
+            label="Rok"
             values={years}
             selectedValue={expirationDate.getFullYear()}
             onValueChange={value => updateDatePart('year', value)}
@@ -233,7 +306,7 @@ function ManualFormFooter({
           />
         </View>
       ) : null}
-      <Text style={styles.inputLabel}>Amount</Text>
+      <Text style={styles.inputLabel}>Ilość</Text>
       <View style={styles.amountRow}>
         <Pressable
           style={[styles.amountButtonBase, styles.amountButtonWide]}
@@ -262,7 +335,7 @@ function ManualFormFooter({
           style={[styles.actionButtonBase, styles.secondaryButton]}
           onPress={onClose}
           disabled={adding}>
-          <Text style={[styles.actionButtonTextBase, styles.secondaryButtonText]}>Close</Text>
+          <Text style={[styles.actionButtonTextBase, styles.secondaryButtonText]}>Zamknij</Text>
         </Pressable>
         <Pressable
           style={[styles.actionButtonBase, styles.primaryButton, adding && styles.buttonDisabled]}
@@ -274,6 +347,60 @@ function ManualFormFooter({
         </Pressable>
       </View>
     </>
+  );
+}
+
+type ProductPhotoPickerProps = {
+  imageUri: string | null;
+  disabled: boolean;
+  picking: boolean;
+  onTakePhoto: () => void;
+  onPickFromLibrary: () => void;
+  onClear: () => void;
+};
+
+function ProductPhotoPicker({
+  imageUri,
+  disabled,
+  picking,
+  onTakePhoto,
+  onPickFromLibrary,
+  onClear,
+}: ProductPhotoPickerProps) {
+  return (
+    <View style={styles.photoSection}>
+      <Text style={styles.inputLabel}>Zdjęcie produktu</Text>
+      <View style={styles.photoRow}>
+        {imageUri ? (
+          <Image source={{uri: imageUri}} style={styles.manualPhotoPreview} />
+        ) : (
+          <View style={styles.manualPhotoPlaceholder}>
+            <Text style={styles.manualPhotoPlaceholderText}>Brak zdjęcia</Text>
+          </View>
+        )}
+        <View style={styles.photoActions}>
+          <View style={styles.photoActionRow}>
+            <Pressable
+              style={[styles.photoButton, disabled && styles.buttonDisabled]}
+              onPress={onTakePhoto}
+              disabled={disabled}>
+              <Text style={styles.photoButtonText}>{picking ? 'Wybieram…' : 'Aparat'}</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.photoButton, disabled && styles.buttonDisabled]}
+              onPress={onPickFromLibrary}
+              disabled={disabled}>
+              <Text style={styles.photoButtonText}>Galeria</Text>
+            </Pressable>
+          </View>
+          {imageUri ? (
+            <Pressable style={styles.photoClearButton} onPress={onClear} disabled={disabled}>
+              <Text style={styles.photoClearButtonText}>Usuń zdjęcie</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -289,7 +416,12 @@ function ProductScannerVisionContent({
   const {Camera, useCameraPermission, useCameraDevice, useCodeScanner} = visionModule;
   const insets = useSafeAreaInsets();
   const {height: windowHeight} = useWindowDimensions();
-  const sheetFormMaxHeight = Math.round(windowHeight * 0.88);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const keyboardInset = Math.max(0, keyboardHeight - insets.bottom);
+  const sheetContentBottomInset = keyboardInset > 0 ? keyboardInset + 24 : 8;
+  const sheetFormMaxHeight = useMemo(() => {
+    return Math.round(Math.max(260, windowHeight * 0.88));
+  }, [windowHeight]);
   const sheetKeyboardOffset = Math.max(insets.top, 12);
   const {hasPermission, requestPermission} = useCameraPermission();
   const device = useCameraDevice('back');
@@ -299,11 +431,12 @@ function ProductScannerVisionContent({
   const [manualName, setManualName] = useState('');
   const [manualBrand, setManualBrand] = useState('');
   const [manualCategory, setManualCategory] = useState('');
-  const [manualCustomName, setManualCustomName] = useState('');
-  const [expirationDate, setExpirationDate] = useState<Date | null>(getDefaultExpirationDate);
+  const [manualPhotoUri, setManualPhotoUri] = useState<string | null>(null);
+  const [expirationDate, setExpirationDate] = useState<Date | null>(null);
   const [amount, setAmount] = useState(1);
   const [resolving, setResolving] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [photoPicking, setPhotoPicking] = useState(false);
   const sheetTranslateY = useRef(new Animated.Value(BOTTOM_SHEET_HEIGHT)).current;
   const lastAcceptedScanRef = useRef<{code: string; scannedAt: number} | null>(null);
   const resolveRequestIdRef = useRef(0);
@@ -325,8 +458,25 @@ function ProductScannerVisionContent({
     [activeDate],
   );
 
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSubscription = Keyboard.addListener(showEvent, event => {
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
   const resetCommonFormState = () => {
-    setExpirationDate(getDefaultExpirationDate());
+    setExpirationDate(null);
+    setManualPhotoUri(null);
     setAmount(1);
   };
 
@@ -347,13 +497,60 @@ function ProductScannerVisionContent({
   const openManualNoEanForm = () => {
     setScannedProduct(null);
     resetCommonFormState();
-    setManualCustomName('');
+    setManualEan('');
+    setManualName('');
+    setManualBrand('');
+    setManualCategory('');
     setSheetMode('manualNoEan');
   };
 
   const closeBottomSheet = () => {
     setSheetMode('none');
     setScannedProduct(null);
+  };
+
+  const pickProductPhoto = async (source: ProductPhotoSource) => {
+    if (!imagePicker) {
+      Alert.alert('Zdjęcie niedostępne', 'Nie udało się uruchomić wyboru zdjęcia.');
+      return;
+    }
+
+    const launcher =
+      source === 'camera' ? imagePicker.launchCamera : imagePicker.launchImageLibrary;
+    if (typeof launcher !== 'function') {
+      Alert.alert('Zdjęcie niedostępne', 'Wybrany sposób dodania zdjęcia nie jest dostępny.');
+      return;
+    }
+
+    setPhotoPicking(true);
+    try {
+      const response: ImagePickerResponse = await launcher({
+        mediaType: 'photo',
+        selectionLimit: 1,
+        quality: 0.82,
+        includeBase64: false,
+      });
+      if (response.didCancel) {
+        return;
+      }
+      if (response.errorCode) {
+        Alert.alert(
+          'Nie udało się dodać zdjęcia',
+          response.errorMessage || 'Spróbuj ponownie albo wybierz inne zdjęcie.',
+        );
+        return;
+      }
+
+      const pickedAsset = response.assets?.[0];
+      const storedUri = pickedAsset ? await copyProductPhotoToAppStorage(pickedAsset) : null;
+      if (storedUri) {
+        setManualPhotoUri(storedUri);
+      }
+    } catch {
+      Alert.alert('Nie udało się dodać zdjęcia', 'Spróbuj ponownie albo wybierz inne zdjęcie.');
+    } finally {
+      setPhotoPicking(false);
+    }
   };
 
   const updateDatePart = (part: 'day' | 'month' | 'year', value: number) => {
@@ -442,9 +639,9 @@ function ProductScannerVisionContent({
             <Text style={styles.backText}>&#8592; Wróć</Text>
           </Pressable>
         ) : null}
-        <Text style={styles.title}>Scan Product</Text>
-        <Text style={styles.info}>Camera permission denied</Text>
-        <Button title="Grant camera permission" onPress={requestPermission} />
+        <Text style={styles.title}>Skanuj produkt</Text>
+        <Text style={styles.info}>Brak zgody na użycie aparatu.</Text>
+        <Button title="Przyznaj dostęp do aparatu" onPress={requestPermission} />
       </View>
     );
   }
@@ -460,8 +657,8 @@ function ProductScannerVisionContent({
             <Text style={styles.backText}>&#8592; Wróć</Text>
           </Pressable>
         ) : null}
-        <Text style={styles.title}>Scan Product</Text>
-        <Text style={styles.info}>No camera is available on this device.</Text>
+        <Text style={styles.title}>Skanuj produkt</Text>
+        <Text style={styles.info}>Na tym urządzeniu nie znaleziono aparatu.</Text>
       </View>
     );
   }
@@ -504,6 +701,7 @@ function ProductScannerVisionContent({
         name: normalizedName,
         brand: manualBrand.trim() || undefined,
         category: manualCategory.trim() || undefined,
+        imageUrl: manualPhotoUri ?? undefined,
       });
       const expiryDate = expirationDate ? formatExpiryForDb(expirationDate) : null;
       for (let i = 0; i < amount; i += 1) {
@@ -519,17 +717,36 @@ function ProductScannerVisionContent({
   };
 
   const handleSaveManualNoEan = async () => {
-    const normalizedName = manualCustomName.trim();
+    const normalizedName = manualName.trim();
+    const normalizedEan = manualEan.trim();
     if (!normalizedName) {
       Alert.alert('Brak nazwy', 'Podaj nazwę produktu.');
+      return;
+    }
+    if (normalizedEan && !isValidEAN(normalizedEan)) {
+      Alert.alert('Nieprawidłowy EAN', 'Popraw EAN albo zostaw to pole puste.');
       return;
     }
 
     setAdding(true);
     try {
       const expiryDate = expirationDate ? formatExpiryForDb(expirationDate) : null;
-      for (let i = 0; i < amount; i += 1) {
-        await repo.addToInventory(generateInventoryId(i), null, normalizedName, expiryDate);
+      if (normalizedEan) {
+        await repo.saveDefinition({
+          ean: normalizedEan,
+          name: normalizedName,
+          brand: manualBrand.trim() || undefined,
+          category: manualCategory.trim() || undefined,
+          imageUrl: manualPhotoUri ?? undefined,
+        });
+        for (let i = 0; i < amount; i += 1) {
+          await repo.addToInventory(generateInventoryId(i), normalizedEan, null, expiryDate);
+        }
+      } else {
+        await repo.saveGenericCatalogProduct(normalizedName, manualPhotoUri);
+        for (let i = 0; i < amount; i += 1) {
+          await repo.addToInventory(generateInventoryId(i), null, normalizedName, expiryDate);
+        }
       }
       closeBottomSheet();
       onProductAdded?.();
@@ -560,7 +777,7 @@ function ProductScannerVisionContent({
         onPress={openManualNoEanForm}
         style={[styles.manualOverlayButton, {top: Math.max(insets.top, 12)}]}
         disabled={resolving || adding}>
-        <Text style={styles.manualOverlayButtonText}>Nie mam EAN</Text>
+        <Text style={styles.manualOverlayButtonText}>Dodaj ręcznie</Text>
       </Pressable>
 
       <Animated.View
@@ -599,13 +816,13 @@ function ProductScannerVisionContent({
 
             <View style={styles.expirationSection}>
               <Text style={styles.inputLabel}>
-                Expiration date: {expirationDate
+                Data ważności: {expirationDate
                   ? formatDate(
                       expirationDate.getDate(),
                       expirationDate.getMonth() + 1,
                       expirationDate.getFullYear(),
                     )
-                  : 'not set'}
+                  : 'brak'}
               </Text>
               <View style={styles.expirationToggleRow}>
                 <Pressable
@@ -619,7 +836,7 @@ function ProductScannerVisionContent({
                       styles.expirationToggleText,
                       expirationDate && styles.expirationToggleTextActive,
                     ]}>
-                    Set expiration date
+                    Ustaw datę
                   </Text>
                 </Pressable>
                 <Pressable
@@ -633,26 +850,26 @@ function ProductScannerVisionContent({
                       styles.expirationToggleText,
                       !expirationDate && styles.expirationToggleTextActive,
                     ]}>
-                    No expiration date
+                    Bez daty
                   </Text>
                 </Pressable>
               </View>
               {expirationDate ? (
                 <View style={styles.wheelsRow}>
                   <WheelPicker
-                    label="Day"
+                    label="Dzień"
                     values={days}
                     selectedValue={expirationDate.getDate()}
                     onValueChange={value => updateDatePart('day', value)}
                   />
                   <WheelPicker
-                    label="Month"
+                    label="Miesiąc"
                     values={months}
                     selectedValue={expirationDate.getMonth() + 1}
                     onValueChange={value => updateDatePart('month', value)}
                   />
                   <WheelPicker
-                    label="Year"
+                    label="Rok"
                     values={years}
                     selectedValue={expirationDate.getFullYear()}
                     onValueChange={value => updateDatePart('year', value)}
@@ -660,7 +877,7 @@ function ProductScannerVisionContent({
                 </View>
               ) : null}
               
-              <Text style={styles.inputLabel}>Amount</Text>
+              <Text style={styles.inputLabel}>Ilość</Text>
               <View style={styles.amountRow}>
                 <Pressable
                   style={[styles.amountButtonBase, styles.amountButtonWide]}
@@ -692,7 +909,7 @@ function ProductScannerVisionContent({
                 style={[styles.actionButtonBase, styles.secondaryButton]}
                 onPress={closeBottomSheet}
                 disabled={adding}>
-                <Text style={[styles.actionButtonTextBase, styles.secondaryButtonText]}>Close</Text>
+                <Text style={[styles.actionButtonTextBase, styles.secondaryButtonText]}>Zamknij</Text>
               </Pressable>
               <Pressable
                 style={[styles.actionButtonBase, styles.primaryButton, adding && styles.buttonDisabled]}
@@ -701,7 +918,7 @@ function ProductScannerVisionContent({
                 }}
                 disabled={adding || resolving}>
                 <Text style={[styles.actionButtonTextBase, styles.primaryButtonText]}>
-                  {adding ? 'Dodaję…' : 'Add'}
+                  {adding ? 'Dodaję…' : 'Dodaj'}
                 </Text>
               </Pressable>
             </View>
@@ -710,8 +927,9 @@ function ProductScannerVisionContent({
         {sheetMode === 'manualWithEan' ? (
           <SheetScrollableForm
             maxHeight={sheetFormMaxHeight - Math.max(insets.bottom, 12) - 14}
-            keyboardVerticalOffset={sheetKeyboardOffset}>
-            <Text style={styles.productName}>Dodaj produkt ręcznie (EAN)</Text>
+            keyboardVerticalOffset={sheetKeyboardOffset}
+            contentBottomInset={sheetContentBottomInset}>
+            <Text style={styles.productName}>Dodaj produkt ręcznie</Text>
             <Text style={styles.inputLabel}>EAN</Text>
             <TextInput
               value={manualEan}
@@ -741,18 +959,30 @@ function ProductScannerVisionContent({
               value={manualCategory}
               onChangeText={setManualCategory}
               style={styles.textInput}
-              placeholder="Np. Dry Goods"
+              placeholder="Np. Produkty suche"
               placeholderTextColor={colors.textMuted}
+            />
+            <ProductPhotoPicker
+              imageUri={manualPhotoUri}
+              disabled={adding || resolving || photoPicking}
+              picking={photoPicking}
+              onTakePhoto={() => {
+                pickProductPhoto('camera').catch(() => {});
+              }}
+              onPickFromLibrary={() => {
+                pickProductPhoto('library').catch(() => {});
+              }}
+              onClear={() => setManualPhotoUri(null)}
             />
             <View style={styles.expirationSection}>
               <Text style={styles.inputLabel}>
-                Expiration date: {expirationDate
+                Data ważności: {expirationDate
                   ? formatDate(
                       expirationDate.getDate(),
                       expirationDate.getMonth() + 1,
                       expirationDate.getFullYear(),
                     )
-                  : 'not set'}
+                  : 'brak'}
               </Text>
               <View style={styles.expirationToggleRow}>
                 <Pressable
@@ -766,7 +996,7 @@ function ProductScannerVisionContent({
                       styles.expirationToggleText,
                       expirationDate && styles.expirationToggleTextActive,
                     ]}>
-                    Set expiration date
+                    Ustaw datę
                   </Text>
                 </Pressable>
                 <Pressable
@@ -780,7 +1010,7 @@ function ProductScannerVisionContent({
                       styles.expirationToggleText,
                       !expirationDate && styles.expirationToggleTextActive,
                     ]}>
-                    No expiration date
+                    Bez daty
                   </Text>
                 </Pressable>
               </View>
@@ -794,7 +1024,7 @@ function ProductScannerVisionContent({
               amount={amount}
               setAmount={setAmount}
               adding={adding}
-              resolving={resolving}
+              resolving={resolving || photoPicking}
               onClose={closeBottomSheet}
               onSave={() => {
                 handleSaveManualWithEan().catch(() => {});
@@ -807,25 +1037,63 @@ function ProductScannerVisionContent({
         {sheetMode === 'manualNoEan' ? (
           <SheetScrollableForm
             maxHeight={sheetFormMaxHeight - Math.max(insets.bottom, 12) - 14}
-            keyboardVerticalOffset={sheetKeyboardOffset}>
-            <Text style={styles.productName}>Dodaj produkt ręcznie (bez EAN)</Text>
+            keyboardVerticalOffset={sheetKeyboardOffset}
+            contentBottomInset={sheetContentBottomInset}>
+            <Text style={styles.productName}>Dodaj produkt ręcznie</Text>
+            <Text style={styles.inputLabel}>EAN (opcjonalnie)</Text>
+            <TextInput
+              value={manualEan}
+              onChangeText={setManualEan}
+              style={styles.textInput}
+              placeholder="Np. 5901234123457"
+              placeholderTextColor={colors.textMuted}
+              keyboardType="number-pad"
+            />
             <Text style={styles.inputLabel}>Nazwa produktu</Text>
             <TextInput
-              value={manualCustomName}
-              onChangeText={setManualCustomName}
+              value={manualName}
+              onChangeText={setManualName}
               style={styles.textInput}
               placeholder="Np. Domowy zakwas"
               placeholderTextColor={colors.textMuted}
             />
+            <Text style={styles.inputLabel}>Marka (opcjonalnie)</Text>
+            <TextInput
+              value={manualBrand}
+              onChangeText={setManualBrand}
+              style={styles.textInput}
+              placeholder="Np. Barilla"
+              placeholderTextColor={colors.textMuted}
+            />
+            <Text style={styles.inputLabel}>Kategoria (opcjonalnie)</Text>
+            <TextInput
+              value={manualCategory}
+              onChangeText={setManualCategory}
+              style={styles.textInput}
+              placeholder="Np. Produkty suche"
+              placeholderTextColor={colors.textMuted}
+            />
+            <ProductPhotoPicker
+              imageUri={manualPhotoUri}
+              disabled={adding || resolving || photoPicking}
+              picking={photoPicking}
+              onTakePhoto={() => {
+                pickProductPhoto('camera').catch(() => {});
+              }}
+              onPickFromLibrary={() => {
+                pickProductPhoto('library').catch(() => {});
+              }}
+              onClear={() => setManualPhotoUri(null)}
+            />
             <View style={styles.expirationSection}>
               <Text style={styles.inputLabel}>
-                Expiration date: {expirationDate
+                Data ważności: {expirationDate
                   ? formatDate(
                       expirationDate.getDate(),
                       expirationDate.getMonth() + 1,
                       expirationDate.getFullYear(),
                     )
-                  : 'not set'}
+                  : 'brak'}
               </Text>
               <View style={styles.expirationToggleRow}>
                 <Pressable
@@ -839,7 +1107,7 @@ function ProductScannerVisionContent({
                       styles.expirationToggleText,
                       expirationDate && styles.expirationToggleTextActive,
                     ]}>
-                    Set expiration date
+                    Ustaw datę
                   </Text>
                 </Pressable>
                 <Pressable
@@ -853,7 +1121,7 @@ function ProductScannerVisionContent({
                       styles.expirationToggleText,
                       !expirationDate && styles.expirationToggleTextActive,
                     ]}>
-                    No expiration date
+                    Bez daty
                   </Text>
                 </Pressable>
               </View>
@@ -867,12 +1135,12 @@ function ProductScannerVisionContent({
               amount={amount}
               setAmount={setAmount}
               adding={adding}
-              resolving={resolving}
+              resolving={resolving || photoPicking}
               onClose={closeBottomSheet}
               onSave={() => {
                 handleSaveManualNoEan().catch(() => {});
               }}
-              saveLabel="Dodaj"
+              saveLabel="Zapisz i dodaj"
               savingLabel="Dodaję…"
             />
           </SheetScrollableForm>
@@ -1070,6 +1338,75 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  photoSection: {
+    gap: 8,
+  },
+  photoRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  manualPhotoPreview: {
+    width: 72,
+    height: 72,
+    borderRadius: 10,
+    backgroundColor: colors.surfaceMuted,
+  },
+  manualPhotoPlaceholder: {
+    width: 72,
+    height: 72,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  manualPhotoPlaceholderText: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  photoActions: {
+    flex: 1,
+    gap: 8,
+  },
+  photoActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  photoButton: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 9,
+    backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  photoButtonText: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  photoClearButton: {
+    minHeight: 34,
+    borderRadius: 9,
+    backgroundColor: colors.warningSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  photoClearButtonText: {
+    color: colors.warning,
+    fontSize: 12,
+    fontWeight: '800',
   },
   wheelsRow: {
     flexDirection: 'row',
