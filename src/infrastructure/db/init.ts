@@ -29,21 +29,21 @@ const MOCK_DATA_SQL = [
 
   // 2. Inventory (sample items currently in the fridge/pantry, focused on dinner possibilities)
   // Expiry dates set to have a mix (some short, some long) - to stimulate "use soon" logic
-  `INSERT OR IGNORE INTO inventory (id, product_ean, custom_name, expiry_date, opened_at, is_opened) VALUES 
-    ('mock-1', '5901234567890', NULL, '2026-05-20', NULL, 0), -- Milk
-    ('mock-2', '5909876543210', NULL, '2027-12-01', NULL, 0), -- Spaghetti Pasta
-    ('mock-3', '5904445556667', NULL, '2026-08-15', NULL, 0), -- Dark Chocolate
-    ('mock-4', '6901234567890', NULL, '2028-01-01', NULL, 0), -- Sugar
-    ('mock-5', '5901112223334', NULL, '2026-05-10', NULL, 0), -- Eggs (short expiry)
-    ('mock-6', '5905556667778', NULL, '2027-01-10', NULL, 0), -- Flour
-    ('mock-7', '5908889990001', NULL, '2026-05-12', strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-18 hours'), 1), -- Butter (opened & short expiry)
-    ('mock-8', '5902223334445', NULL, '2026-11-20', NULL, 0), -- Canned Tomatoes
-    ('mock-9', '5907778889992', NULL, '2026-05-09', strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-3 hours'), 1), -- Chicken Breast Fillet (opened, expiring soon)
-    ('mock-10', '5908887776661', NULL, '2026-05-18', NULL, 0), -- Onion
-    ('mock-11', '5903332221111', NULL, '2026-10-01', NULL, 0), -- Carrots
-    ('mock-12', '5902221110003', NULL, '2028-01-01', NULL, 0), -- Olive Oil
-    ('mock-13', '5909998887775', NULL, '2026-09-20', NULL, 0), -- Cheddar Cheese
-    ('mock-14', NULL, 'Grandma''s homemade jam', '2026-12-31', strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-2 days'), 1);`
+  `INSERT OR IGNORE INTO inventory (id, product_ean, custom_name, expiry_date, opened_at, is_opened, created_at) VALUES
+    ('mock-1', '5901234567890', NULL, '2026-05-20', NULL, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-13 days')), -- Milk
+    ('mock-2', '5909876543210', NULL, '2027-12-01', NULL, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-12 days')), -- Spaghetti Pasta
+    ('mock-3', '5904445556667', NULL, '2026-08-15', NULL, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-11 days')), -- Dark Chocolate
+    ('mock-4', '6901234567890', NULL, '2028-01-01', NULL, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-10 days')), -- Sugar
+    ('mock-5', '5901112223334', NULL, '2026-05-10', NULL, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-9 days')), -- Eggs (short expiry)
+    ('mock-6', '5905556667778', NULL, '2027-01-10', NULL, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-8 days')), -- Flour
+    ('mock-7', '5908889990001', NULL, '2026-05-12', strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-18 hours'), 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')), -- Butter (opened & short expiry)
+    ('mock-8', '5902223334445', NULL, '2026-11-20', NULL, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 days')), -- Canned Tomatoes
+    ('mock-9', '5907778889992', NULL, '2026-05-09', strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-3 hours'), 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-5 days')), -- Chicken Breast Fillet (opened, expiring soon)
+    ('mock-10', '5908887776661', NULL, '2026-05-18', NULL, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-4 days')), -- Onion
+    ('mock-11', '5903332221111', NULL, '2026-10-01', NULL, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-3 days')), -- Carrots
+    ('mock-12', '5902221110003', NULL, '2028-01-01', NULL, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-2 days')), -- Olive Oil
+    ('mock-13', '5909998887775', NULL, '2026-09-20', NULL, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day')), -- Cheddar Cheese
+    ('mock-14', NULL, 'Grandma''s homemade jam', '2026-12-31', strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-2 days'), 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));`
 ];
 
 export function runInTransaction<T>(work: () => T): T {
@@ -211,6 +211,7 @@ export const setupDatabase = () => {
         expiry_date TEXT,
         opened_at TEXT,
         is_opened INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
         FOREIGN KEY(product_ean) REFERENCES product_definitions(ean)
       );
     `);

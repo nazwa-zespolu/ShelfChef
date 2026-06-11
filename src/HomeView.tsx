@@ -13,20 +13,22 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {CalendarDays, Check, Clock3, Package, Search, X} from 'lucide-react-native';
+import {CalendarDays, Clock3, Package, Search} from 'lucide-react-native';
 import {InventoryItem} from './domain/types';
 import {SwipeToDeleteCard} from './components/SwipeToDeleteCard';
+import {AppToast, useAppToast} from './components/AppToast';
 import {ProductRepository} from './infrastructure/ProductRepository';
 import {colors} from './theme/colors';
 import {compareExpiry, formatExpiryLine} from './utils/inventory';
 
 const repo = new ProductRepository();
 
-type SortKey = 'name' | 'expiry_asc' | 'opened';
+type SortKey = 'name' | 'expiry_asc' | 'opened' | 'created_desc';
 
 const SORT_OPTIONS: {key: SortKey; label: string}[] = [
   {key: 'name', label: 'Nazwa'},
   {key: 'expiry_asc', label: 'Ważność'},
+  {key: 'created_desc', label: 'Dodane'},
   {key: 'opened', label: 'Otwarte'},
 ];
 
@@ -37,13 +39,6 @@ type HomeViewProps = {
   shouldPlaySwipeHint?: boolean;
   onInventoryCountChanged?: (count: number) => void;
   onSwipeHintPlayed?: () => void;
-};
-
-type ToastTone = 'success' | 'error';
-
-type ToastMessage = {
-  message: string;
-  tone: ToastTone;
 };
 
 function pluralizeProducts(count: number) {
@@ -89,6 +84,25 @@ function compareOpened(a: InventoryItem, b: InventoryItem) {
   return a.name.localeCompare(b.name, 'pl', {sensitivity: 'base'});
 }
 
+function getCreatedTimestamp(item: InventoryItem) {
+  const timestamp = new Date(item.createdAt).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function compareCreatedDesc(a: InventoryItem, b: InventoryItem) {
+  const createdDiff = getCreatedTimestamp(b) - getCreatedTimestamp(a);
+  if (createdDiff !== 0) {
+    return createdDiff;
+  }
+
+  const expiryDiff = compareExpiry(a, b);
+  if (expiryDiff !== 0) {
+    return expiryDiff;
+  }
+
+  return a.name.localeCompare(b.name, 'pl', {sensitivity: 'base'});
+}
+
 function formatOpenedBadgeDuration(openedAt?: string | null) {
   if (!openedAt) {
     return null;
@@ -118,7 +132,7 @@ function formatOpenedBadgeDuration(openedAt?: string | null) {
 }
 
 function getCategoryLabel(item: InventoryItem) {
-  return item.category?.trim() || item.brand?.trim() || 'Bez kategorii';
+  return item.category?.trim() || item.brand?.trim() || null;
 }
 
 export default function HomeView({
@@ -132,42 +146,12 @@ export default function HomeView({
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>(rememberedSortKey);
-  const [toast, setToast] = useState<ToastMessage | null>(null);
-  const toastAnim = useRef(new Animated.Value(0)).current;
-  const toastRunId = useRef(0);
+  const {toast, toastAnim, showToast} = useAppToast();
   const hintTranslateX = useRef(new Animated.Value(0)).current;
   const [swipeHintVisible, setSwipeHintVisible] = useState(false);
   const openedCount = useMemo(() => items.filter(item => item.isOpened).length, [items]);
   const inventoryMeta = `${pluralizeProducts(items.length)} · ${openedProductsLabel(openedCount)}`;
   const toastTop = useMemo(() => insets.top + 12, [insets.top]);
-
-  const showToast = useCallback(
-    (message: string, tone: ToastTone = 'success') => {
-      const runId = toastRunId.current + 1;
-      toastRunId.current = runId;
-      toastAnim.stopAnimation();
-      toastAnim.setValue(0);
-      setToast({message, tone});
-      Animated.sequence([
-        Animated.timing(toastAnim, {
-          toValue: 1,
-          duration: 180,
-          useNativeDriver: true,
-        }),
-        Animated.delay(1450),
-        Animated.timing(toastAnim, {
-          toValue: 2,
-          duration: 240,
-          useNativeDriver: true,
-        }),
-      ]).start(({finished}) => {
-        if (finished && toastRunId.current === runId) {
-          setToast(null);
-        }
-      });
-    },
-    [toastAnim],
-  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -207,20 +191,27 @@ export default function HomeView({
       copy.sort((a, b) => a.name.localeCompare(b.name, 'pl', {sensitivity: 'base'}));
     } else if (sortKey === 'opened') {
       copy.sort(compareOpened);
+    } else if (sortKey === 'created_desc') {
+      copy.sort(compareCreatedDesc);
     } else {
       copy.sort(compareExpiry);
     }
     return copy;
   }, [items, query, sortKey]);
 
-  const deleteItem = useCallback(async (id: string) => {
-    try {
-      await repo.removeFromInventory(id);
-      setItems(prev => prev.filter(p => p.id !== id));
-    } catch {
-      load().catch(() => {});
-    }
-  }, [load]);
+  const deleteItem = useCallback(
+    async (item: InventoryItem) => {
+      try {
+        await repo.removeFromInventory(item.id);
+        setItems(prev => prev.filter(p => p.id !== item.id));
+        showToast(`Usunięto produkt: ${item.name}`);
+      } catch {
+        load().catch(() => {});
+        showToast('Nie udało się usunąć produktu', 'error');
+      }
+    },
+    [load, showToast],
+  );
 
   const toggleOpened = useCallback(
     async (item: InventoryItem) => {
@@ -306,6 +297,7 @@ export default function HomeView({
   const renderItem = useCallback(
     ({item, index}: {item: InventoryItem; index: number}) => {
       const openedDuration = item.isOpened ? formatOpenedBadgeDuration(item.openedAt) : null;
+      const categoryLabel = getCategoryLabel(item);
       const playSwipeHint = index === 0 && swipeHintVisible;
 
       return (
@@ -314,7 +306,7 @@ export default function HomeView({
           allowRightDelete={false}
           borderRadius={8}
           onDelete={() => {
-            deleteItem(item.id).catch(() => {});
+            deleteItem(item).catch(() => {});
           }}
           onSwipeRight={() => {
             toggleOpened(item).catch(() => {});
@@ -350,7 +342,10 @@ export default function HomeView({
                 )}
                 <View style={styles.cardBody}>
                   <View style={styles.cardHeader}>
-                    <Text style={styles.productName} numberOfLines={2}>
+                    <Text
+                      style={[styles.productName, openedDuration && styles.productNameWithBadge]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail">
                       {item.name}
                     </Text>
                     {openedDuration ? (
@@ -360,9 +355,11 @@ export default function HomeView({
                       </View>
                     ) : null}
                   </View>
-                  <Text style={styles.category} numberOfLines={1}>
-                    {getCategoryLabel(item)}
-                  </Text>
+                  {categoryLabel ? (
+                    <Text style={styles.category} numberOfLines={1}>
+                      {categoryLabel}
+                    </Text>
+                  ) : null}
                   {item.expiryDate ? (
                     <View style={styles.expiryRow}>
                       <CalendarDays color={colors.textMuted} size={17} strokeWidth={2} />
@@ -456,41 +453,7 @@ export default function HomeView({
           }
         />
       )}
-      {toast ? (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.toastOverlay,
-            {
-              top: toastTop,
-              opacity: toastAnim.interpolate({
-                inputRange: [0, 1, 2],
-                outputRange: [0, 1, 0],
-              }),
-              transform: [
-                {
-                  translateY: toastAnim.interpolate({
-                    inputRange: [0, 1, 2],
-                    outputRange: [8, 0, -14],
-                  }),
-                },
-              ],
-            },
-          ]}>
-          <View style={[styles.toastBubble, toast.tone === 'error' && styles.toastBubbleError]}>
-            <View style={[styles.toastIcon, toast.tone === 'error' && styles.toastIconError]}>
-              {toast.tone === 'error' ? (
-                <X color={colors.successText} size={15} strokeWidth={3} />
-              ) : (
-                <Check color={colors.successText} size={15} strokeWidth={3} />
-              )}
-            </View>
-            <Text style={styles.toastText} numberOfLines={1}>
-              {toast.message}
-            </Text>
-          </View>
-        </Animated.View>
-      ) : null}
+      <AppToast toast={toast} animatedValue={toastAnim} top={toastTop} />
     </View>
   );
 }
@@ -610,6 +573,7 @@ const styles = StyleSheet.create({
   cardBody: {
     flex: 1,
     justifyContent: 'center',
+    position: 'relative',
   },
   productImage: {
     width: 72,
@@ -626,18 +590,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 8,
+    minHeight: 21,
+    justifyContent: 'center',
   },
   productName: {
     color: colors.textPrimary,
     fontSize: 17,
     fontWeight: '900',
-    flex: 1,
+    minWidth: 0,
+  },
+  productNameWithBadge: {
+    paddingRight: 92,
   },
   openedBadge: {
+    position: 'absolute',
+    top: -6,
+    right: 0,
     minHeight: 34,
     backgroundColor: colors.surfaceSubtle,
     borderWidth: 1,
@@ -707,48 +675,6 @@ const styles = StyleSheet.create({
   },
   swipeHintActionTextUndo: {
     color: colors.warningText,
-  },
-  toastOverlay: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    zIndex: 1000,
-    elevation: 1000,
-    alignItems: 'center',
-  },
-  toastBubble: {
-    maxWidth: 520,
-    minHeight: 44,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: colors.success,
-    backgroundColor: colors.surfaceSubtle,
-    paddingVertical: 10,
-    paddingLeft: 12,
-    paddingRight: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  toastBubbleError: {
-    borderColor: colors.danger,
-  },
-  toastIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colors.success,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  toastIconError: {
-    backgroundColor: colors.danger,
-  },
-  toastText: {
-    flexShrink: 1,
-    color: colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '900',
   },
   emptyBox: {
     padding: 24,

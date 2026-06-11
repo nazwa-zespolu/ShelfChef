@@ -1,10 +1,7 @@
 import React, {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
-  Alert,
-  Animated,
   Button,
-  Easing,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -18,10 +15,13 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {Camera as CameraIcon, ImagePlus, Trash2} from 'lucide-react-native';
 import WheelPicker from './components/WheelPicker';
 import {ProductDefinition} from './domain/types';
 import {getProductRepository, getScanToAdd} from './app/services';
 import {colors} from './theme/colors';
+import {DraggableBottomSheet} from './shopping-lists/modals/DraggableBottomSheet';
+import {AppToast, useAppToast} from './components/AppToast';
 
 const visionCamera = (() => {
   try {
@@ -50,7 +50,6 @@ const fileSystem = (() => {
   }
 })();
 
-const BOTTOM_SHEET_HEIGHT = 300;
 const PRODUCT_PHOTO_DIR_NAME = 'product-photos';
 
 function getDefaultExpirationDate() {
@@ -74,6 +73,13 @@ function formatExpiryForDb(date: Date) {
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const dd = String(date.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function formatAddSuccessMessage(name: string, amount: number) {
+  if (amount <= 1) {
+    return `Dodano produkt: ${name}`;
+  }
+  return `Dodano ${amount} szt.: ${name}`;
 }
 
 function generateInventoryId(index: number) {
@@ -307,29 +313,12 @@ function ManualFormFooter({
         </View>
       ) : null}
       <Text style={styles.inputLabel}>Ilość</Text>
-      <View style={styles.amountRow}>
-        <Pressable
-          style={[styles.amountButtonBase, styles.amountButtonWide]}
-          onPress={() => setAmount(current => Math.max(1, current - 5))}>
-          <Text style={styles.amountButtonText}>-5</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.amountButtonBase, styles.amountButtonRound]}
-          onPress={() => setAmount(current => Math.max(1, current - 1))}>
-          <Text style={styles.amountButtonText}>-</Text>
-        </Pressable>
-        <Text style={styles.amountValue}>{amount}</Text>
-        <Pressable
-          style={[styles.amountButtonBase, styles.amountButtonRound]}
-          onPress={() => setAmount(current => Math.min(999, current + 1))}>
-          <Text style={styles.amountButtonText}>+</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.amountButtonBase, styles.amountButtonWide]}
-          onPress={() => setAmount(current => Math.min(999, current + 5))}>
-          <Text style={styles.amountButtonText}>+5</Text>
-        </Pressable>
-      </View>
+      <QuantityStepper
+        value={amount}
+        busy={adding || resolving}
+        onDecrease={() => setAmount(current => Math.max(1, current - 1))}
+        onIncrease={() => setAmount(current => Math.min(999, current + 1))}
+      />
       <View style={styles.actions}>
         <Pressable
           style={[styles.actionButtonBase, styles.secondaryButton]}
@@ -347,6 +336,47 @@ function ManualFormFooter({
         </Pressable>
       </View>
     </>
+  );
+}
+
+function QuantityStepper({
+  value,
+  busy,
+  onDecrease,
+  onIncrease,
+}: {
+  value: number;
+  busy: boolean;
+  onDecrease: () => void;
+  onIncrease: () => void;
+}) {
+  const canDecrease = value > 1 && !busy;
+  const canIncrease = value < 999 && !busy;
+
+  return (
+    <View style={styles.quantityStepper}>
+      <Pressable
+        disabled={!canDecrease}
+        onPress={onDecrease}
+        style={({pressed}) => [
+          styles.stepButton,
+          !canDecrease && styles.buttonDisabled,
+          pressed && styles.pressed,
+        ]}>
+        <Text style={styles.stepText}>−</Text>
+      </Pressable>
+      <Text style={styles.quantityText}>{value}</Text>
+      <Pressable
+        disabled={!canIncrease}
+        onPress={onIncrease}
+        style={({pressed}) => [
+          styles.stepButton,
+          !canIncrease && styles.buttonDisabled,
+          pressed && styles.pressed,
+        ]}>
+        <Text style={styles.stepText}>+</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -384,17 +414,20 @@ function ProductPhotoPicker({
               style={[styles.photoButton, disabled && styles.buttonDisabled]}
               onPress={onTakePhoto}
               disabled={disabled}>
+              <CameraIcon color={colors.textPrimary} size={17} strokeWidth={2.2} />
               <Text style={styles.photoButtonText}>{picking ? 'Wybieram…' : 'Aparat'}</Text>
             </Pressable>
             <Pressable
               style={[styles.photoButton, disabled && styles.buttonDisabled]}
               onPress={onPickFromLibrary}
               disabled={disabled}>
+              <ImagePlus color={colors.textPrimary} size={17} strokeWidth={2.2} />
               <Text style={styles.photoButtonText}>Galeria</Text>
             </Pressable>
           </View>
           {imageUri ? (
             <Pressable style={styles.photoClearButton} onPress={onClear} disabled={disabled}>
+              <Trash2 color={colors.warning} size={16} strokeWidth={2.2} />
               <Text style={styles.photoClearButtonText}>Usuń zdjęcie</Text>
             </Pressable>
           ) : null}
@@ -437,11 +470,12 @@ function ProductScannerVisionContent({
   const [resolving, setResolving] = useState(false);
   const [adding, setAdding] = useState(false);
   const [photoPicking, setPhotoPicking] = useState(false);
-  const sheetTranslateY = useRef(new Animated.Value(BOTTOM_SHEET_HEIGHT)).current;
   const lastAcceptedScanRef = useRef<{code: string; scannedAt: number} | null>(null);
   const resolveRequestIdRef = useRef(0);
   const scanToAdd = useMemo(() => getScanToAdd(), []);
   const repo = useMemo(() => getProductRepository(), []);
+  const {toast, toastAnim, showToast} = useAppToast();
+  const toastTop = useMemo(() => insets.top + 12, [insets.top]);
   const currentYear = useMemo(() => new Date().getFullYear(), []);
   const years = useMemo(
     () => Array.from({length: 11}, (_, index) => currentYear + index),
@@ -511,14 +545,14 @@ function ProductScannerVisionContent({
 
   const pickProductPhoto = async (source: ProductPhotoSource) => {
     if (!imagePicker) {
-      Alert.alert('Zdjęcie niedostępne', 'Nie udało się uruchomić wyboru zdjęcia.');
+      showToast('Nie udało się uruchomić wyboru zdjęcia', 'error');
       return;
     }
 
     const launcher =
       source === 'camera' ? imagePicker.launchCamera : imagePicker.launchImageLibrary;
     if (typeof launcher !== 'function') {
-      Alert.alert('Zdjęcie niedostępne', 'Wybrany sposób dodania zdjęcia nie jest dostępny.');
+      showToast('Ten sposób dodania zdjęcia jest niedostępny', 'error');
       return;
     }
 
@@ -534,10 +568,7 @@ function ProductScannerVisionContent({
         return;
       }
       if (response.errorCode) {
-        Alert.alert(
-          'Nie udało się dodać zdjęcia',
-          response.errorMessage || 'Spróbuj ponownie albo wybierz inne zdjęcie.',
-        );
+        showToast(response.errorMessage || 'Nie udało się dodać zdjęcia', 'error');
         return;
       }
 
@@ -547,7 +578,7 @@ function ProductScannerVisionContent({
         setManualPhotoUri(storedUri);
       }
     } catch {
-      Alert.alert('Nie udało się dodać zdjęcia', 'Spróbuj ponownie albo wybierz inne zdjęcie.');
+      showToast('Nie udało się dodać zdjęcia', 'error');
     } finally {
       setPhotoPicking(false);
     }
@@ -564,15 +595,6 @@ function ProductScannerVisionContent({
       return nextDate;
     });
   };
-
-  useEffect(() => {
-    Animated.timing(sheetTranslateY, {
-      toValue: sheetMode !== 'none' || resolving ? 0 : BOTTOM_SHEET_HEIGHT,
-      duration: 250,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [resolving, sheetMode, sheetTranslateY]);
 
   const resolveScannedProduct = async (ean: string) => {
     const requestId = resolveRequestIdRef.current + 1;
@@ -623,7 +645,7 @@ function ProductScannerVisionContent({
         setResolving(false);
         setScannedProduct(null);
         setSheetMode('none');
-        Alert.alert('Błąd', 'Nie udało się odczytać produktu dla zeskanowanego EAN.');
+        showToast('Nie udało się odczytać produktu', 'error');
       });
     },
   });
@@ -675,8 +697,9 @@ function ProductScannerVisionContent({
       }
       closeBottomSheet();
       onProductAdded?.();
+      showToast(formatAddSuccessMessage(scannedProduct.name, amount));
     } catch {
-      Alert.alert('Błąd', 'Nie udało się dodać produktu do spiżarni.');
+      showToast('Nie udało się dodać produktu', 'error');
     } finally {
       setAdding(false);
     }
@@ -686,11 +709,11 @@ function ProductScannerVisionContent({
     const normalizedName = manualName.trim();
     const normalizedEan = manualEan.trim();
     if (!normalizedName) {
-      Alert.alert('Brak nazwy', 'Podaj nazwę produktu.');
+      showToast('Podaj nazwę produktu', 'error');
       return;
     }
     if (!isValidEAN(normalizedEan)) {
-      Alert.alert('Nieprawidłowy EAN', 'Nie udało się zapisać produktu bez poprawnego EAN.');
+      showToast('Nie udało się zapisać bez poprawnego EAN', 'error');
       return;
     }
 
@@ -709,8 +732,9 @@ function ProductScannerVisionContent({
       }
       closeBottomSheet();
       onProductAdded?.();
+      showToast(formatAddSuccessMessage(normalizedName, amount));
     } catch {
-      Alert.alert('Błąd', 'Nie udało się zapisać produktu manualnie.');
+      showToast('Nie udało się zapisać produktu', 'error');
     } finally {
       setAdding(false);
     }
@@ -720,11 +744,11 @@ function ProductScannerVisionContent({
     const normalizedName = manualName.trim();
     const normalizedEan = manualEan.trim();
     if (!normalizedName) {
-      Alert.alert('Brak nazwy', 'Podaj nazwę produktu.');
+      showToast('Podaj nazwę produktu', 'error');
       return;
     }
     if (normalizedEan && !isValidEAN(normalizedEan)) {
-      Alert.alert('Nieprawidłowy EAN', 'Popraw EAN albo zostaw to pole puste.');
+      showToast('Popraw EAN albo zostaw to pole puste', 'error');
       return;
     }
 
@@ -750,8 +774,9 @@ function ProductScannerVisionContent({
       }
       closeBottomSheet();
       onProductAdded?.();
+      showToast(formatAddSuccessMessage(normalizedName, amount));
     } catch {
-      Alert.alert('Błąd', 'Nie udało się dodać produktu bez EAN.');
+      showToast('Nie udało się dodać produktu', 'error');
     } finally {
       setAdding(false);
     }
@@ -780,17 +805,19 @@ function ProductScannerVisionContent({
         <Text style={styles.manualOverlayButtonText}>Dodaj ręcznie</Text>
       </Pressable>
 
-      <Animated.View
-        style={[
-          styles.bottomSheet,
+      <DraggableBottomSheet
+        visible={resolving || sheetMode !== 'none'}
+        accessibilityLabel="Zamknij dodawanie produktu"
+        onClose={resolving || adding ? () => {} : closeBottomSheet}
+        sheetStyle={[
+          styles.addProductSheet,
           (sheetMode === 'manualWithEan' || sheetMode === 'manualNoEan') && {
             maxHeight: sheetFormMaxHeight,
           },
-          {
-            paddingBottom: Math.max(insets.bottom, 12),
-            transform: [{translateY: sheetTranslateY}],
-          },
-        ]}>
+          {paddingBottom: Math.max(insets.bottom, 12)},
+        ]}
+        handleStyle={styles.sheetHandleTouch}
+        overlay={<AppToast toast={toast} animatedValue={toastAnim} top={toastTop} />}>
         {resolving ? (
           <View style={styles.resolvingBox}>
             <ActivityIndicator color={colors.success} />
@@ -878,30 +905,12 @@ function ProductScannerVisionContent({
               ) : null}
               
               <Text style={styles.inputLabel}>Ilość</Text>
-              <View style={styles.amountRow}>
-                <Pressable
-                  style={[styles.amountButtonBase, styles.amountButtonWide]}
-                  onPress={() => setAmount(current => Math.max(1, current - 5))}>
-                  <Text style={styles.amountButtonText}>-5</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.amountButtonBase, styles.amountButtonRound]}
-                  onPress={() => setAmount(current => Math.max(1, current - 1))}>
-                  <Text style={styles.amountButtonText}>-</Text>
-                </Pressable>
-
-                <Text style={styles.amountValue}>{amount}</Text>
-                <Pressable
-                  style={[styles.amountButtonBase, styles.amountButtonRound]}
-                  onPress={() => setAmount(current => Math.min(999, current + 1))}>
-                  <Text style={styles.amountButtonText}>+</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.amountButtonBase, styles.amountButtonWide]}
-                  onPress={() => setAmount(current => Math.min(999, current + 5))}>
-                  <Text style={styles.amountButtonText}>+5</Text>
-                </Pressable>
-              </View>
+              <QuantityStepper
+                value={amount}
+                busy={adding || resolving}
+                onDecrease={() => setAmount(current => Math.max(1, current - 1))}
+                onIncrease={() => setAmount(current => Math.min(999, current + 1))}
+              />
             </View>
 
             <View style={styles.actions}>
@@ -1145,7 +1154,8 @@ function ProductScannerVisionContent({
             />
           </SheetScrollableForm>
         ) : null}
-      </Animated.View>
+      </DraggableBottomSheet>
+      <AppToast toast={toast} animatedValue={toastAnim} top={toastTop} />
     </View>
   );
 }
@@ -1215,7 +1225,7 @@ const styles = StyleSheet.create({
     right: 16,
     zIndex: 20,
     backgroundColor: colors.surface,
-    borderRadius: 10,
+    borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderWidth: 1,
@@ -1256,22 +1266,21 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontWeight: '700',
   },
-  bottomSheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    minHeight: BOTTOM_SHEET_HEIGHT,
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+  addProductSheet: {
     paddingHorizontal: 16,
-    paddingTop: 14,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    shadowOffset: {width: 0, height: -3},
-    elevation: 10,
+    paddingTop: 4,
+    maxHeight: '92%',
+  },
+  sheetHandleTouch: {
+    alignSelf: 'stretch',
+    width: 'auto',
+    minHeight: 44,
+    marginHorizontal: -16,
+    marginTop: -4,
+    marginBottom: -8,
+    paddingHorizontal: 16,
+    justifyContent: 'flex-start',
+    paddingTop: 10,
   },
   sheetContent: {
     gap: 14,
@@ -1297,11 +1306,21 @@ const styles = StyleSheet.create({
   productRow: {
     flexDirection: 'row',
     gap: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: 12,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: {width: 0, height: 4},
+    elevation: 2,
   },
   productImage: {
     width: 84,
     height: 84,
-    borderRadius: 10,
+    borderRadius: 8,
     backgroundColor: colors.surfaceMuted,
   },
   productMeta: {
@@ -1312,7 +1331,7 @@ const styles = StyleSheet.create({
   productName: {
     color: colors.textPrimary,
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '900',
   },
   productProducer: {
     color: colors.textSecondary,
@@ -1328,16 +1347,21 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     color: colors.textPrimary,
-    fontWeight: '600',
+    fontWeight: '900',
   },
   textInput: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 10,
+    backgroundColor: colors.surface,
+    borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
     color: colors.textPrimary,
     borderWidth: 1,
     borderColor: colors.border,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 1,
   },
   photoSection: {
     gap: 8,
@@ -1350,13 +1374,15 @@ const styles = StyleSheet.create({
   manualPhotoPreview: {
     width: 72,
     height: 72,
-    borderRadius: 10,
+    borderRadius: 8,
     backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   manualPhotoPlaceholder: {
     width: 72,
     height: 72,
-    borderRadius: 10,
+    borderRadius: 8,
     borderWidth: 1,
     borderStyle: 'dashed',
     borderColor: colors.border,
@@ -1364,6 +1390,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 6,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 1,
   },
   manualPhotoPlaceholderText: {
     color: colors.textMuted,
@@ -1382,13 +1413,20 @@ const styles = StyleSheet.create({
   photoButton: {
     flex: 1,
     minHeight: 38,
-    borderRadius: 9,
+    borderRadius: 8,
     backgroundColor: colors.surfaceSubtle,
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
     paddingHorizontal: 8,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 1,
   },
   photoButtonText: {
     color: colors.textPrimary,
@@ -1397,11 +1435,18 @@ const styles = StyleSheet.create({
   },
   photoClearButton: {
     minHeight: 34,
-    borderRadius: 9,
+    borderRadius: 8,
     backgroundColor: colors.warningSoft,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
     paddingHorizontal: 8,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 1,
   },
   photoClearButtonText: {
     color: colors.warning,
@@ -1415,12 +1460,22 @@ const styles = StyleSheet.create({
   expirationToggleRow: {
     flexDirection: 'row',
     gap: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: 3,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 1,
   },
   expirationToggleButton: {
     flex: 1,
-    height: 36,
-    borderRadius: 9,
-    backgroundColor: colors.surfaceSubtle,
+    minHeight: 44,
+    borderRadius: 8,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1434,38 +1489,41 @@ const styles = StyleSheet.create({
   expirationToggleTextActive: {
     color: colors.successText,
   },
-  amountRow: {
+  quantityStepper: {
+    alignSelf: 'stretch',
+    height: 52,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSubtle,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 1,
   },
-  amountButtonBase: {
-    height: 42,
-    backgroundColor: colors.surfaceSubtle,
+  stepButton: {
+    width: 48,
+    height: 50,
+    borderRadius: 7,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.surfaceSubtle,
   },
-  amountButtonRound: {
-    width: 42,
-    borderRadius: 21,
-  },
-  amountButtonWide: {
-    width: 55,
-    borderRadius: 21,
-  },
-  amountButtonText: {
+  stepText: {
     color: colors.textPrimary,
-    fontSize: 24,
-    lineHeight: 28,
-    fontWeight: '700',
+    fontSize: 22,
+    fontWeight: '900',
   },
-  amountValue: {
-    minWidth: 52,
+  quantityText: {
+    flex: 1,
     textAlign: 'center',
     color: colors.textPrimary,
-    fontSize: 24,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '900',
   },
   actions: {
     flexDirection: 'row',
@@ -1473,28 +1531,44 @@ const styles = StyleSheet.create({
   },
   actionButtonBase: {
     flex: 1,
-    height: 44,
-    borderRadius: 10,
+    minHeight: 52,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
   actionButtonTextBase: {
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '900',
   },
   secondaryButton: {
     backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 1,
   },
   secondaryButtonText: {
     color: colors.textPrimary,
   },
   primaryButton: {
     backgroundColor: colors.success,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: {width: 0, height: 3},
+    elevation: 2,
   },
   primaryButtonText: {
     color: colors.successText,
     fontWeight: '800',
   },
   buttonDisabled: {
-    opacity: 0.6,
+    opacity: 0.45,
+  },
+  pressed: {
+    opacity: 0.78,
   },
 });

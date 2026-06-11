@@ -19,6 +19,7 @@ export interface ProductDefinition {
     expiryDate: string | null; // ISO 8601 (YYYY-MM-DD) or null when unknown
     openedAt?: string | null;
     isOpened: boolean;
+    createdAt: string;
   }
 
 export type CatalogProductKind = 'generic' | 'specific';

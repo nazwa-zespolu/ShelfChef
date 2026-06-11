@@ -17,6 +17,7 @@ export function DraggableBottomSheet({
   onClose,
   sheetStyle,
   handleStyle,
+  overlay,
   children,
 }: {
   visible: boolean;
@@ -24,6 +25,7 @@ export function DraggableBottomSheet({
   onClose: () => void;
   sheetStyle?: StyleProp<ViewStyle>;
   handleStyle?: StyleProp<ViewStyle>;
+  overlay?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const translateY = useRef(new Animated.Value(0)).current;
@@ -89,6 +91,7 @@ export function DraggableBottomSheet({
           </View>
           {children}
         </Animated.View>
+        {overlay}
       </View>
     </Modal>
   );
