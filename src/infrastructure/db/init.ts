@@ -14,35 +14,35 @@ const MOCK_DATA_SQL = [
   // 1. Product definitions (in English) - expanded base for the LLM
   `INSERT OR IGNORE INTO product_definitions (ean, name, brand, image_url, category) VALUES 
     ('5901234567890', 'Whole Milk UHT 3.2%', 'Mlekovita', 'https://images.openfoodfacts.org/images/products/590/780/928/4295/front_pl.4.full.jpg', 'Dairy'),
-    ('5909876543210', 'Spaghetti Pasta', 'Barilla', 'https://images.unsplash.com/photo-1571212515416-fef01fc43637?auto=format&fit=crop&w=640&q=80', 'Dry Goods'),
-    ('5904445556667', 'Dark Chocolate', 'Wedel', 'https://link-do-zdjecia.pl/czekolada.jpg', 'Sweets'),
-    ('6901234567890', 'White Sugar', 'Royal Sugar', 'https://link-do-zdjecia.pl/cukier.jpg', 'Pantry'),
-    ('5901112223334', 'Free-range Eggs', 'Free Hen', 'https://link-do-zdjecia.pl/jajka.jpg', 'Dairy'),
-    ('5905556667778', 'Wheat Flour Type 500', 'Szczepanki Mill', 'https://link-do-zdjecia.pl/maka.jpg', 'Dry Goods'),
-    ('5908889990001', 'Extra Butter 82%', 'Laciate', 'https://link-do-zdjecia.pl/maslo.jpg', 'Dairy'),
-    ('5902223334445', 'Chopped Tomatoes (canned)', 'Pudliszki', 'https://link-do-zdjecia.pl/pomidory.jpg', 'Pantry'),
-    ('5907778889992', 'Chicken Breast Fillet', 'Farm Fresh', 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=640&q=80', 'Meat'),
-    ('5908887776661', 'Yellow Onion', 'Local Farm', 'https://images.unsplash.com/photo-1519864600265-abb23847ef2c?auto=format&fit=crop&w=640&q=80', 'Vegetables'),
-    ('5903332221111', 'Carrots', 'Local Farm', 'https://images.unsplash.com/photo-1502741338009-cac2772e18bc?auto=format&fit=crop&w=640&q=80', 'Vegetables'),
-    ('5902221110003', 'Olive Oil', 'Bertolli', 'https://images.unsplash.com/photo-1519864600265-abb23847ef2c?auto=format&fit=crop&w=640&q=80', 'Oils'),
-    ('5909998887775', 'Cheddar Cheese', 'Cheese Co.', 'https://images.unsplash.com/photo-1523983303491-284aa6e53420?auto=format&fit=crop&w=640&q=80', 'Dairy');`,
+    ('8004690051573', 'Spaghetti Pasta', 'Barilla', 'https://images.openfoodfacts.org/images/products/800/469/005/1573/front_it.78.full.jpg', 'Dry Goods'),
+    ('5901588018195', 'Dark Chocolate', 'Wedel', 'https://images.openfoodfacts.org/images/products/590/158/801/8195/front_pl.44.full.jpg', 'Sweets'),
+    ('5907069000017', 'White Sugar', 'Royal Sugar', 'https://images.openfoodfacts.org/images/products/590/706/900/0017/front_pl.13.full.jpg', 'Pantry'),
+    ('5906750296111', 'Free-range Eggs', 'Free Hen', 'https://images.openfoodfacts.org/images/products/590/675/029/6111/front_pl.4.full.jpg', 'Dairy'),
+    ('5902020163213', 'Wheat Flour Type 500', 'Basia', 'https://images.openfoodfacts.org/images/products/590/202/016/3213/front_pl.4.full.jpg', 'Dry Goods'),
+    ('5900512300108', 'Extra Butter 82%', 'Laciate', 'https://images.openfoodfacts.org/images/products/590/051/230/0108/front_pl.24.full.jpg', 'Dairy'),
+    ('80042556', 'Chopped Tomatoes (canned)', 'Mutti', 'https://images.openfoodfacts.org/images/products/000/008/004/2556/front_pl.301.full.jpg', 'Pantry'),
+    ('2837410005077', 'Chicken Breast Fillet', 'Farm Fresh', 'https://images.openfoodfacts.org/images/products/283/741/000/5077/front_pl.5.full.jpg', 'Meat'),
+    ('5908887776661', 'Yellow Onion', 'Local Farm', 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS3_Eqyeh5ZSOzqs_zHEDyQLeOtbrjJQ-R8Vg&s', 'Vegetables'),
+    ('5903332221111', 'Carrots', 'Local Farm', 'https://irme.pl/wp-content/uploads/2020/11/ZD-3-20-1024x768.jpg', 'Vegetables'),
+    ('80053828', 'Olive Oil', 'Bertolli', 'https://images.openfoodfacts.org/images/products/000/008/005/3828/front_pl.4.full.jpg', 'Oils'),
+    ('5908250801284', 'Cheddar Cheese', 'Cheese Co.', 'https://images.openfoodfacts.org/images/products/590/825/080/1284/front_pl.16.full.jpg', 'Dairy');`,
 
   // 2. Inventory (sample items currently in the fridge/pantry, focused on dinner possibilities)
   // Expiry dates set to have a mix (some short, some long) - to stimulate "use soon" logic
   `INSERT OR IGNORE INTO inventory (id, product_ean, custom_name, expiry_date, is_opened) VALUES 
     ('mock-1', '5901234567890', NULL, '2026-05-20', 0), -- Milk
-    ('mock-2', '5909876543210', NULL, '2027-12-01', 0), -- Spaghetti Pasta
-    ('mock-3', '5904445556667', NULL, '2026-08-15', 0), -- Dark Chocolate
-    ('mock-4', '6901234567890', NULL, '2028-01-01', 0), -- Sugar
-    ('mock-5', '5901112223334', NULL, '2026-05-10', 0), -- Eggs (short expiry)
-    ('mock-6', '5905556667778', NULL, '2027-01-10', 0), -- Flour
-    ('mock-7', '5908889990001', NULL, '2026-05-12', 1), -- Butter (opened & short expiry)
-    ('mock-8', '5902223334445', NULL, '2026-11-20', 0), -- Canned Tomatoes
-    ('mock-9', '5907778889992', NULL, '2026-05-09', 1), -- Chicken Breast Fillet (opened, expiring soon)
+    ('mock-2', '8004690051573', NULL, '2027-12-01', 0), -- Spaghetti Pasta
+    ('mock-3', '5901588018195', NULL, '2026-08-15', 0), -- Dark Chocolate
+    ('mock-4', '5907069000017', NULL, '2028-01-01', 0), -- Sugar
+    ('mock-5', '5906750296111', NULL, '2026-05-10', 0), -- Eggs (short expiry)
+    ('mock-6', '5902020163213', NULL, '2027-01-10', 0), -- Flour
+    ('mock-7', '5900512300108', NULL, '2026-05-12', 1), -- Butter (opened & short expiry)
+    ('mock-8', '80042556', NULL, '2026-11-20', 0), -- Canned Tomatoes
+    ('mock-9', '2837410005077', NULL, '2026-05-09', 1), -- Chicken Breast Fillet (opened, expiring soon)
     ('mock-10', '5908887776661', NULL, '2026-05-18', 0), -- Onion
     ('mock-11', '5903332221111', NULL, '2026-10-01', 0), -- Carrots
-    ('mock-12', '5902221110003', NULL, '2028-01-01', 0), -- Olive Oil
-    ('mock-13', '5909998887775', NULL, '2026-09-20', 0), -- Cheddar Cheese
+    ('mock-12', '80053828', NULL, '2028-01-01', 0), -- Olive Oil
+    ('mock-13', '5908250801284', NULL, '2026-09-20', 0), -- Cheddar Cheese
     ('mock-14', NULL, 'Grandma''s homemade jam', '2026-12-31', 1);`
 ];
 
