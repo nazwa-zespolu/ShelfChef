@@ -30,6 +30,7 @@ type ProductCatalogRow = {
   normalized_name: string;
   kind: 'generic' | 'specific';
   product_ean: string | null;
+  image_url: string | null;
   parent_catalog_product_id: string | null;
   created_at: string;
   updated_at: string;
@@ -91,6 +92,17 @@ const productDefinitionColumns = new Set([
   'image_url',
   'category',
 ]);
+const productCatalogColumns = new Set([
+  'id',
+  'name',
+  'normalized_name',
+  'kind',
+  'product_ean',
+  'image_url',
+  'parent_catalog_product_id',
+  'created_at',
+  'updated_at',
+]);
 const inventoryColumns = new Set([
   'id',
   'product_ean',
@@ -108,14 +120,16 @@ const DIETARY_COLUMNS = [
 
 const withCatalogImage = (row: ProductCatalogRow): Record<string, unknown> => ({
   ...row,
-  image_url: row.product_ean ? productDefinitions.get(row.product_ean)?.image_url ?? null : null,
+  image_url: row.image_url ?? (row.product_ean ? productDefinitions.get(row.product_ean)?.image_url ?? null : null),
 });
 
 const withShoppingItemImage = (row: ShoppingListItemRow): Record<string, unknown> => {
   const catalog = row.catalog_product_id ? productCatalog.get(row.catalog_product_id) : undefined;
   return {
     ...row,
-    image_url: catalog?.product_ean ? productDefinitions.get(catalog.product_ean)?.image_url ?? null : null,
+    image_url:
+      catalog?.image_url ??
+      (catalog?.product_ean ? productDefinitions.get(catalog.product_ean)?.image_url ?? null : null),
   };
 };
 
@@ -269,6 +283,24 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
         pk: name === 'id' ? 1 : 0,
       })),
     );
+  }
+
+  if (normalized.startsWith('PRAGMA TABLE_INFO(PRODUCT_CATALOG)')) {
+    return toRows(
+      Array.from(productCatalogColumns).map((name, index) => ({
+        cid: index,
+        name,
+        type: 'TEXT',
+        notnull: ['name', 'normalized_name', 'kind', 'created_at', 'updated_at'].includes(name) ? 1 : 0,
+        dflt_value: null,
+        pk: name === 'id' ? 1 : 0,
+      })),
+    );
+  }
+
+  if (normalized.startsWith('ALTER TABLE PRODUCT_CATALOG ADD COLUMN IMAGE_URL TEXT')) {
+    productCatalogColumns.add('image_url');
+    return toRows([]);
   }
 
   if (normalized.includes('FROM PRODUCT_CATALOG CATALOG')) {
@@ -428,9 +460,8 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
   }
 
   if (
-    normalized.startsWith(
-      'INSERT INTO PRODUCT_DEFINITIONS (EAN, NAME, BRAND, IMAGE_URL, CATEGORY, IS_VEGETARIAN, IS_VEGAN, IS_GLUTEN_FREE, IS_LACTOSE_FREE) VALUES',
-    )
+    normalized.startsWith('INSERT INTO PRODUCT_DEFINITIONS') &&
+    normalized.includes('IS_LACTOSE_FREE')
   ) {
     const [ean, name, brand, imageUrl, category, isVegetarian, isVegan, isGlutenFree, isLactoseFree] =
       params;
@@ -439,7 +470,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       ean,
       name,
       brand: brand ?? null,
-      image_url: imageUrl ?? null,
+      image_url: imageUrl ?? existing?.image_url ?? null,
       category: category ?? null,
       normalized_name: existing?.normalized_name ?? null,
       is_vegetarian:
@@ -453,8 +484,30 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     return toRows([]);
   }
 
+  if (
+    normalized.startsWith(
+      'INSERT OR REPLACE INTO PRODUCT_DEFINITIONS (EAN, NAME, BRAND, IMAGE_URL, CATEGORY) VALUES',
+    )
+  ) {
+    const [ean, name, brand, imageUrl, category] = params;
+    const existing = productDefinitions.get(ean);
+    productDefinitions.set(ean, {
+      ean,
+      name,
+      brand: brand ?? null,
+      image_url: imageUrl ?? existing?.image_url ?? null,
+      category: category ?? null,
+      normalized_name: existing?.normalized_name ?? null,
+      is_vegetarian: existing?.is_vegetarian ?? null,
+      is_vegan: existing?.is_vegan ?? null,
+      is_gluten_free: existing?.is_gluten_free ?? null,
+      is_lactose_free: existing?.is_lactose_free ?? null,
+    });
+    return toRows([]);
+  }
+
   if (normalized.startsWith('INSERT OR REPLACE INTO PRODUCT_CATALOG')) {
-    const [, fallbackId, name, normalizedName, ean] = params;
+    const [, fallbackId, name, normalizedName, ean, imageUrl] = params;
     const existing = Array.from(productCatalog.values()).find(item => item.product_ean === ean);
     productCatalog.set(existing?.id ?? fallbackId, {
       id: existing?.id ?? fallbackId,
@@ -462,10 +515,37 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
       normalized_name: normalizedName,
       kind: 'specific',
       product_ean: ean,
+      image_url: imageUrl ?? existing?.image_url ?? productDefinitions.get(ean)?.image_url ?? null,
       parent_catalog_product_id: existing?.parent_catalog_product_id ?? null,
       created_at: existing?.created_at ?? '2026-05-27T00:00:00.000Z',
       updated_at: '2026-05-27T00:00:00.000Z',
     });
+    return toRows([]);
+  }
+
+  if (normalized.startsWith('INSERT INTO PRODUCT_CATALOG') && normalized.includes("'GENERIC'")) {
+    const [id, name, normalizedName, imageUrl, createdAt, updatedAt] = params;
+    const existing = Array.from(productCatalog.values()).find(
+      item => item.kind === 'generic' && item.normalized_name === normalizedName,
+    );
+    if (existing) {
+      existing.name = name;
+      existing.image_url = imageUrl ?? existing.image_url;
+      existing.updated_at = updatedAt ?? '2026-05-27T00:00:00.000Z';
+      productCatalog.set(existing.id, existing);
+    } else {
+      productCatalog.set(id, {
+        id,
+        name,
+        normalized_name: normalizedName,
+        kind: 'generic',
+        product_ean: null,
+        image_url: imageUrl ?? null,
+        parent_catalog_product_id: null,
+        created_at: createdAt ?? '2026-05-27T00:00:00.000Z',
+        updated_at: updatedAt ?? '2026-05-27T00:00:00.000Z',
+      });
+    }
     return toRows([]);
   }
 
@@ -492,6 +572,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
           normalized_name: normalizedName,
           kind: 'generic',
           product_ean: null,
+          image_url: null,
           parent_catalog_product_id: null,
           created_at: createdAt,
           updated_at: updatedAt,
@@ -512,6 +593,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
           normalized_name: row.name.trim().toLowerCase(),
           kind: 'specific',
           product_ean: row.ean,
+          image_url: row.image_url ?? null,
           parent_catalog_product_id: null,
           created_at: '2026-05-27T00:00:00.000Z',
           updated_at: '2026-05-27T00:00:00.000Z',
@@ -814,6 +896,17 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
     const rows = Array.from(inventory.values())
       .map(row => {
         const def = row.product_ean ? productDefinitions.get(row.product_ean) : undefined;
+        const specificCatalog = row.product_ean
+          ? Array.from(productCatalog.values()).find(item => item.product_ean === row.product_ean)
+          : undefined;
+        const genericCatalog =
+          row.product_ean == null && row.custom_name
+            ? Array.from(productCatalog.values()).find(
+                item =>
+                  item.kind === 'generic' &&
+                  item.normalized_name === row.custom_name?.trim().toLowerCase(),
+              )
+            : undefined;
         return {
           id: row.id,
           expiry_date: row.expiry_date,
@@ -823,7 +916,7 @@ const execute = (sql: string, params: any[] = []): SQLiteResult => {
           ean: def?.ean ?? row.product_ean,
           name: def?.name ?? null,
           brand: def?.brand ?? null,
-          image_url: def?.image_url ?? null,
+          image_url: specificCatalog?.image_url ?? genericCatalog?.image_url ?? def?.image_url ?? null,
           category: def?.category ?? null,
         };
       })
@@ -931,6 +1024,7 @@ describe('ProductRepository + database integration', () => {
       productDefinitionColumns.delete(column);
       inventoryColumns.delete(column);
     }
+    productCatalogColumns.add('image_url');
     setupDatabase();
     repository = new ProductRepository();
     shoppingListRepository = new ShoppingListRepository();
@@ -957,6 +1051,24 @@ describe('ProductRepository + database integration', () => {
     expect(columnNames).toContain('is_vegetarian');
     expect(schemaRows?.length).toBe(1);
     expect(schemaRows?.item(0).value).toBe('3');
+  });
+
+  it('uzupełnia image_url w product_catalog dla istniejącej lokalnej bazy', () => {
+    productCatalogColumns.delete('image_url');
+
+    setupDatabase();
+
+    const columnInfo = db.execute('PRAGMA table_info(product_catalog)');
+    const columnNames: string[] = [];
+    const rows = columnInfo.rows;
+
+    if (rows) {
+      for (let i = 0; i < rows.length; i++) {
+        columnNames.push(String(rows.item(i).name));
+      }
+    }
+
+    expect(columnNames).toContain('image_url');
   });
 
   it('zapisuje i odczytuje definicje produktu po EAN', async () => {
@@ -995,10 +1107,55 @@ describe('ProductRepository + database integration', () => {
       normalized_name: 'mleko 2%',
       kind: 'specific',
       product_ean: '5901234123457',
+      image_url: 'https://img/mleko.jpg',
       parent_catalog_product_id: null,
     });
     await expect(repository.findCatalogProductByEan('5901234123457')).resolves.toMatchObject({
       imageUrl: 'https://img/mleko.jpg',
+    });
+  });
+
+  it('zapisuje ręczny produkt bez EAN ze zdjęciem w katalogu generic', async () => {
+    await repository.saveGenericCatalogProduct('Domowy sos', 'file:///photos/domowy-sos.jpg');
+    await repository.addToInventory('inv-sauce', null, 'Domowy sos', null);
+
+    const inventoryItems = await repository.getFullInventory();
+    const catalogItems = await shoppingListRepository.searchCatalogProducts('sos');
+
+    expect(inventoryItems).toHaveLength(1);
+    expect(inventoryItems[0]).toMatchObject({
+      id: 'inv-sauce',
+      name: 'Domowy sos',
+      imageUrl: 'file:///photos/domowy-sos.jpg',
+      expiryDate: null,
+    });
+    expect(catalogItems).toHaveLength(1);
+    expect(catalogItems[0]).toMatchObject({
+      name: 'Domowy sos',
+      kind: 'generic',
+      productEan: null,
+      imageUrl: 'file:///photos/domowy-sos.jpg',
+    });
+  });
+
+  it('zapisuje ręczny produkt z EAN ze zdjęciem w definicji i katalogu specific', async () => {
+    await repository.saveDefinition({
+      ean: '5901234123457',
+      name: 'Mleko 2%',
+      brand: 'Lacpol',
+      imageUrl: 'file:///photos/mleko.jpg',
+      category: 'Nabial',
+    });
+
+    const definition = await repository.findDefinitionByEan('5901234123457');
+    const catalog = await repository.findCatalogProductByEan('5901234123457');
+
+    expect(definition?.imageUrl).toBe('file:///photos/mleko.jpg');
+    expect(catalog).toMatchObject({
+      id: 'catalog-specific-5901234123457',
+      kind: 'specific',
+      productEan: '5901234123457',
+      imageUrl: 'file:///photos/mleko.jpg',
     });
   });
 

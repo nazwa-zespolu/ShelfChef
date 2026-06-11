@@ -62,7 +62,7 @@ export class ProductRepository {
        ON CONFLICT(ean) DO UPDATE SET
          name = excluded.name,
          brand = excluded.brand,
-         image_url = excluded.image_url,
+         image_url = COALESCE(excluded.image_url, product_definitions.image_url),
          category = excluded.category,
          is_vegetarian = COALESCE(excluded.is_vegetarian, product_definitions.is_vegetarian),
          is_vegan = COALESCE(excluded.is_vegan, product_definitions.is_vegan),
@@ -88,6 +88,7 @@ export class ProductRepository {
           normalized_name,
           kind,
           product_ean,
+          image_url,
           parent_catalog_product_id,
           created_at,
           updated_at
@@ -98,6 +99,7 @@ export class ProductRepository {
           ?,
           'specific',
           ?,
+          COALESCE(?, (SELECT image_url FROM product_catalog WHERE product_ean = ?)),
           COALESCE((SELECT parent_catalog_product_id FROM product_catalog WHERE product_ean = ?), NULL),
           COALESCE((SELECT created_at FROM product_catalog WHERE product_ean = ?), datetime('now')),
           datetime('now')
@@ -109,10 +111,67 @@ export class ProductRepository {
         def.name,
         normalizeProductName(def.name),
         def.ean,
+        def.imageUrl ?? null,
+        def.ean,
         def.ean,
         def.ean,
       ],
     );
+  }
+
+  async saveGenericCatalogProduct(name: string, imageUrl?: string | null): Promise<CatalogProduct> {
+    const trimmedName = name.trim();
+    const normalizedName = normalizeProductName(trimmedName);
+    const id = `catalog-generic-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+    db.execute(
+      `
+        INSERT INTO product_catalog (
+          id,
+          name,
+          normalized_name,
+          kind,
+          product_ean,
+          image_url,
+          parent_catalog_product_id,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, 'generic', NULL, ?, NULL, datetime('now'), datetime('now'))
+        ON CONFLICT(kind, normalized_name) WHERE kind = 'generic' DO UPDATE SET
+          name = excluded.name,
+          image_url = COALESCE(excluded.image_url, product_catalog.image_url),
+          updated_at = datetime('now')
+      `,
+      [id, trimmedName, normalizedName, imageUrl ?? null],
+    );
+
+    const found = await this.findCatalogProductByNormalizedName('generic', normalizedName);
+    if (!found) {
+      throw new Error(`Catalog product not found after save: ${trimmedName}`);
+    }
+    return found;
+  }
+
+  async findCatalogProductByNormalizedName(
+    kind: CatalogProduct['kind'],
+    normalizedName: string,
+  ): Promise<CatalogProduct | null> {
+    const result = db.execute(
+      `
+        SELECT
+          catalog.*,
+          COALESCE(catalog.image_url, definition.image_url) AS image_url
+        FROM product_catalog catalog
+        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
+        WHERE catalog.kind = ?
+          AND catalog.normalized_name = ?
+      `,
+      [kind, normalizedName],
+    );
+    if (!result.rows || result.rows.length === 0) {
+      return null;
+    }
+    return mapCatalogProduct(result.rows.item(0));
   }
 
   async findCatalogProductByEan(ean: string): Promise<CatalogProduct | null> {
@@ -120,7 +179,7 @@ export class ProductRepository {
       `
         SELECT
           catalog.*,
-          definition.image_url
+          COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM product_catalog catalog
         LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
         WHERE catalog.product_ean = ?
@@ -435,9 +494,16 @@ export class ProductRepository {
       SELECT 
         i.id, i.expiry_date, i.opened_at, i.is_opened, i.custom_name,
         COALESCE(d.ean, i.product_ean) AS ean,
-        d.name, d.brand, d.image_url, d.category
+        d.name, d.brand,
+        COALESCE(specific_catalog.image_url, generic_catalog.image_url, d.image_url) AS image_url,
+        d.category
       FROM inventory i
       LEFT JOIN product_definitions d ON i.product_ean = d.ean
+      LEFT JOIN product_catalog specific_catalog ON i.product_ean = specific_catalog.product_ean
+      LEFT JOIN product_catalog generic_catalog
+        ON i.product_ean IS NULL
+       AND generic_catalog.kind = 'generic'
+       AND generic_catalog.normalized_name = lower(trim(i.custom_name))
       ORDER BY i.expiry_date ASC
     `;
 

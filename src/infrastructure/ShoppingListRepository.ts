@@ -257,7 +257,7 @@ export class ShoppingListRepository {
       `
         SELECT
           item.*,
-          definition.image_url
+          COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM shopping_list_items item
         LEFT JOIN product_catalog catalog ON item.catalog_product_id = catalog.id
         LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
@@ -280,7 +280,7 @@ export class ShoppingListRepository {
       `
         SELECT
           catalog.*,
-          definition.image_url
+          COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM product_catalog catalog
         LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
         ORDER BY catalog.kind ASC, catalog.name ASC
@@ -490,25 +490,33 @@ export class ShoppingListRepository {
     );
   }
 
-  async createGenericCatalogProduct(name: string): Promise<CatalogProduct> {
+  async createGenericCatalogProduct(
+    name: string,
+    imageUrl?: string | null,
+  ): Promise<CatalogProduct> {
     const timestamp = nowIso();
     const normalizedName = normalizeProductName(name);
     const id = generateId('catalog-generic');
     db.execute(
       `
-        INSERT OR IGNORE INTO product_catalog (
+        INSERT INTO product_catalog (
           id,
           name,
           normalized_name,
           kind,
           product_ean,
+          image_url,
           parent_catalog_product_id,
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, 'generic', NULL, NULL, ?, ?)
+        VALUES (?, ?, ?, 'generic', NULL, ?, NULL, ?, ?)
+        ON CONFLICT(kind, normalized_name) WHERE kind = 'generic' DO UPDATE SET
+          name = excluded.name,
+          image_url = COALESCE(excluded.image_url, product_catalog.image_url),
+          updated_at = excluded.updated_at
       `,
-      [id, name.trim(), normalizedName, timestamp, timestamp],
+      [id, name.trim(), normalizedName, imageUrl ?? null, timestamp, timestamp],
     );
     const existing = await this.findCatalogProductByNormalizedName('generic', normalizedName);
     if (existing) {
@@ -532,7 +540,7 @@ export class ShoppingListRepository {
       `
         SELECT
           catalog.*,
-          definition.image_url
+          COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM product_catalog catalog
         LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
         WHERE catalog.id = ?
@@ -553,7 +561,7 @@ export class ShoppingListRepository {
       `
         SELECT
           catalog.*,
-          definition.image_url
+          COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM product_catalog catalog
         LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
         WHERE catalog.kind = ?
@@ -573,7 +581,7 @@ export class ShoppingListRepository {
       `
         SELECT
           catalog.*,
-          definition.image_url
+          COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM product_catalog catalog
         LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
         WHERE catalog.normalized_name LIKE ?
@@ -838,7 +846,7 @@ export class ShoppingListRepository {
           catalog.normalized_name,
           catalog.kind,
           catalog.product_ean,
-          definition.image_url,
+          COALESCE(catalog.image_url, definition.image_url) AS image_url,
           catalog.parent_catalog_product_id,
           catalog.created_at,
           catalog.updated_at

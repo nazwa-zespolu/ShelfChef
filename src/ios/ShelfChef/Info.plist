@@ -36,6 +36,10 @@
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string></string>
+	<key>NSCameraUsageDescription</key>
+	<string>Aplikacja używa aparatu do skanowania kodów i dodawania zdjęć produktów.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Aplikacja używa biblioteki zdjęć, aby dodać zdjęcie produktu do katalogu.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

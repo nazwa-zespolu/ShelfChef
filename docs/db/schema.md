@@ -31,6 +31,7 @@ erDiagram
         TEXT normalized_name
         TEXT kind
         TEXT product_ean FK
+        TEXT image_url
         TEXT parent_catalog_product_id FK
         TEXT created_at
         TEXT updated_at
@@ -86,6 +87,7 @@ erDiagram
 
 - `inventory.product_ean` wskazuje na `product_definitions.ean`, jesli produkt pochodzi ze skanu.
 - `product_catalog.product_ean` wskazuje na `product_definitions.ean` dla produktow konkretnych (`specific`).
+- `product_catalog.image_url` przechowuje zdjecie katalogowe uzywane m.in. w listach zakupowych.
 - `product_catalog.parent_catalog_product_id` laczy produkt konkretny z produktem ogolnym (`generic`).
 - `shopping_list_items.list_id` wskazuje liste zakupow.
 - `shopping_list_items.catalog_product_id` jest opcjonalne, bo zwykle pozycje tekstowe nie musza miec wpisu w katalogu.
