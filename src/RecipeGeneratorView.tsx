@@ -45,6 +45,10 @@ type FlowScreen = 'preferences' | 'progress' | 'results';
 
 import { LlmCompletionKind } from './features/recipe-generator/recipeGeneratorConstants';
 import { boundedLlmGenerate } from './features/recipe-generator/infrastructure/llmCompletionGuard';
+import {
+  cancelStaleRecipeModelDownloads,
+  isStaleModelDownloadError,
+} from './features/recipe-generator/infrastructure/recipeModelDownloadLifecycle';
 
 const repo = new ProductRepository();
 
@@ -69,13 +73,22 @@ export default function RecipeGeneratorView({ onRequestClose }: RecipeGeneratorV
   useEffect(() => {
     const bootstrapConsent = async () => {
       try {
-        const savedConsent = await repo.getRecipeModelConsent();
-        if (!savedConsent) {
-          setConsent('unknown');
+        const savedConsent = await repo.getRecipeModelConsentState();
+        if (savedConsent === 'accepted') {
+          setConsent('accepted');
+          return;
+        }
+        if (savedConsent === 'declined') {
+          setConsent('declined');
           return;
         }
         const hasModel = await checkModelDownloaded();
-        setConsent(hasModel ? 'accepted' : 'unknown');
+        if (hasModel) {
+          await repo.setRecipeModelConsent(true);
+          setConsent('accepted');
+          return;
+        }
+        setConsent('unknown');
       } finally {
         setConsentBooting(false);
       }
@@ -161,7 +174,8 @@ export default function RecipeGeneratorView({ onRequestClose }: RecipeGeneratorV
 }
 
 function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }) {
-  const llm = useLLM({model: QWEN2_5_3B_QUANTIZED});
+  const [modelLoadEnabled, setModelLoadEnabled] = useState(false);
+  const llm = useLLM({model: QWEN2_5_3B_QUANTIZED, preventLoad: !modelLoadEnabled});
   const [screen, setScreen] = useState<FlowScreen>('preferences');
   const [dishType, setDishType] = useState<DishType>('dinner');
   const [diet, setDiet] = useState<DietPreference>('none');
@@ -173,7 +187,6 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
     useState<CategorizationProgress | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [isRunningPipeline, setIsRunningPipeline] = useState(false);
-  const [remountKey, setRemountKey] = useState(0);
   const [debugEnabled, setDebugEnabled] = useState(false);
   const [debugEvents, setDebugEvents] = useState<string[]>([]);
   const [debugDbSnapshot, setDebugDbSnapshot] = useState('');
@@ -181,6 +194,42 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
 
   const pendingCloseRef = useRef(false);
   const debugSeqRef = useRef(0);
+  const downloadRecoveryAttemptedRef = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      await cancelStaleRecipeModelDownloads();
+      if (active) {
+        setModelLoadEnabled(true);
+      }
+    })();
+    return () => {
+      active = false;
+      setModelLoadEnabled(false);
+      cancelStaleRecipeModelDownloads().catch(() => {});
+    };
+  }, []);
+
+  const restartModelLoad = useCallback(() => {
+    setGenerateError(null);
+    setModelLoadEnabled(false);
+    cancelStaleRecipeModelDownloads()
+      .catch(() => {})
+      .finally(() => setModelLoadEnabled(true));
+  }, []);
+
+  useEffect(() => {
+    if (!llm.error || !isStaleModelDownloadError(llm.error)) {
+      downloadRecoveryAttemptedRef.current = false;
+      return;
+    }
+    if (downloadRecoveryAttemptedRef.current) {
+      return;
+    }
+    downloadRecoveryAttemptedRef.current = true;
+    restartModelLoad();
+  }, [llm.error, restartModelLoad]);
 
   useEffect(() => {
     debugEnabledRef.current = debugEnabled;
@@ -398,15 +447,14 @@ function RecipeGeneratorFlow({ onRequestClose }: { onRequestClose?: () => void }
   }, [debugEnabled, debugDbSnapshot, refreshDebugSnapshot]);
 
   const retryModel = useCallback(() => {
-    setGenerateError(null);
-    setRemountKey(k => k + 1);
-  }, []);
+    restartModelLoad();
+  }, [restartModelLoad]);
 
   const progressPct = Math.round((llm.downloadProgress ?? 0) * 100);
   const llmError = llm.error ? String((llm.error as { message?: string })?.message ?? llm.error) : null;
 
   return (
-    <View style={styles.body} key={remountKey}>
+    <View style={styles.body}>
       <View style={styles.sectionHeader}>
         <Text style={styles.title}>Generator przepisów</Text>
         {onRequestClose ? (

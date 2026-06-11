@@ -29,6 +29,10 @@ export const buildRecipeGenerationSystemPrompt = (): string =>
   '3. CLEAN NAMES: Do not copy exact brands or specific product names from the input list into the dish name.\n' +
   '4. Return ONLY valid JSON in this exact format: {"dishes":["Dish 1", "Dish 2", "Dish 3", "Dish 4", "Dish 5"]}.\n\n' +
   'EXAMPLE INPUT:\n' +
+  'Dish type target: dinner.\n' +
+  'Dietary preference: no special diet.\n' +
+  'Propose up to 5 dishes.\n' +
+  'If some ingredients are missing its ok. Here are the ingredients:\n'+
   '- Chicken Breast Fillet\n' +
   '- Chopped Tomatoes (canned)\n' +
   '- Gochujang Pasta\n' +

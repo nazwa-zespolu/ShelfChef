@@ -77,7 +77,11 @@ function App() {
               }}
             />
           ) : null}
-          {activeTab === 'recipes' ? <RecipeGeneratorView /> : null}
+          <View
+            style={[styles.tabPanel, activeTab !== 'recipes' && styles.tabPanelHidden]}
+            pointerEvents={activeTab === 'recipes' ? 'auto' : 'none'}>
+            <RecipeGeneratorView />
+          </View>
           {activeTab === 'shopping' ? (
             <ShoppingListView
               onRequestClose={() => {
@@ -114,5 +118,11 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  tabPanel: {
+    flex: 1,
+  },
+  tabPanelHidden: {
+    display: 'none',
   },
 });
