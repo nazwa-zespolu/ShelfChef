@@ -751,12 +751,13 @@ export class ShoppingListRepository {
             const inventoryId = generateId('inv');
             inventoryIds.push(inventoryId);
             db.execute(
-              'INSERT INTO inventory (id, product_ean, custom_name, expiry_date) VALUES (?, ?, ?, ?)',
+              'INSERT INTO inventory (id, product_ean, custom_name, expiry_date, created_at) VALUES (?, ?, ?, ?, ?)',
               [
                 inventoryId,
                 row.product_ean ?? row.linked_product_ean ?? null,
                 row.label,
                 expiryDateByItemId[row.id] ?? null,
+                nowIso(),
               ],
             );
           }
