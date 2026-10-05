@@ -1,69 +1,39 @@
-import { Product } from "../../src/app/Product";
+import {sqlite} from '../helpers/sqlite';
 
-describe("Product", () => {
-  it("isExpiringSoon returns true when within threshold days", () => {
-    const product = new Product({
-      id: "uuid-1",
-      name: "Mleko",
-      expirationDate: new Date("2026-04-10"),
-      openedDate: null,
-    });
+jest.mock('react-native-quick-sqlite', () => ({
+  open: () => sqlite,
+}), {virtual: true});
 
-    const result = product.isExpiringSoon(3, new Date("2026-04-08"));
+import {setupDatabase} from '../../src/infrastructure/db/init';
+import {ProductRepository} from '../../src/infrastructure/ProductRepository';
 
-    expect(result).toBe(true);
+describe('inventory product state', () => {
+  let repository: ProductRepository;
+
+  beforeEach(() => {
+    sqlite.reset();
+    setupDatabase();
+    repository = new ProductRepository();
   });
 
-  it("isExpiringSoon returns false when outside threshold days", () => {
-    const product = new Product({
-      id: "uuid-2",
-      name: "Ryż",
-      expirationDate: new Date("2026-06-01"),
-      openedDate: null,
-    });
+  afterAll(() => sqlite.close());
 
-    const result = product.isExpiringSoon(3, new Date("2026-04-08"));
+  it('stores a new product as closed', async () => {
+    await repository.addToInventory('uuid-3', null, 'Sok pomarańczowy', '2026-05-15');
 
-    expect(result).toBe(false);
+    const [product] = await repository.getFullInventory();
+
+    expect(product.isOpened).toBe(false);
+    expect(product.openedAt).toBeNull();
   });
 
-  it("isOpened returns false when openedDate is null", () => {
-    const product = new Product({
-      id: "uuid-3",
-      name: "Sok pomarańczowy",
-      expirationDate: new Date("2026-05-15"),
-      openedDate: null,
-    });
+  it('stores the opening date when a product is marked as opened', async () => {
+    await repository.addToInventory('uuid-4', null, 'Ketchup', '2026-08-01');
+    await repository.markAsOpened('uuid-4', '2026-04-08T12:00:00.000Z');
 
-    expect(product.isOpened()).toBe(false);
-    expect(product.openedDate).toBeNull();
-  });
+    const [product] = await repository.getFullInventory();
 
-  it("markAsOpened sets openedDate", () => {
-    const product = new Product({
-      id: "uuid-4",
-      name: "Ketchup",
-      expirationDate: new Date("2026-08-01"),
-      openedDate: null,
-    });
-
-    product.markAsOpened();
-
-    expect(product.isOpened()).toBe(true);
-    expect(product.openedDate).toBeInstanceOf(Date);
-  });
-
-  it("getFormattedExpiration returns date as readable string", () => {
-    const product = new Product({
-      id: "uuid-5",
-      name: "Masło",
-      expirationDate: new Date("2026-04-15"),
-      openedDate: null,
-    });
-
-    const formatted = product.getFormattedExpiration();
-
-    expect(typeof formatted).toBe("string");
-    expect(formatted).toContain("2026");
+    expect(product.isOpened).toBe(true);
+    expect(product.openedAt).toBe('2026-04-08T12:00:00.000Z');
   });
 });
