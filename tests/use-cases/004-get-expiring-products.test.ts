@@ -1,36 +1,76 @@
-import { getExpiringProducts } from "../../src/app/getExpiringProducts";
+import {
+  getExpiringProducts,
+  getExpiryUrgency,
+} from '../../src/domain/expiry';
+import {InventoryItem} from '../../src/domain/types';
 
-describe("UC-04: getExpiringProducts", () => {
-  it("returns only products expiring within 2 days, sorted by date ascending", async () => {
-    const databaseService = {
-      queryAllProducts: jest.fn().mockResolvedValue([
-        { id: "1", name: "Ryż", expirationDate: new Date("2026-06-01") },
-        { id: "2", name: "Mleko", expirationDate: new Date("2026-04-09") },
-        { id: "3", name: "Jogurt", expirationDate: new Date("2026-04-10") },
-      ]),
-    };
+const inventoryItem = (
+  id: string,
+  name: string,
+  expiryDate: string | null,
+): InventoryItem => ({
+  id,
+  ean: '',
+  name,
+  expiryDate,
+  isOpened: false,
+  createdAt: '2026-04-01T10:00:00.000Z',
+});
 
-    const now = new Date("2026-04-08");
-    const result = await getExpiringProducts(databaseService as any, now);
+describe('UC-04: getExpiringProducts', () => {
+  const now = new Date(2026, 3, 8, 12);
 
-    expect(databaseService.queryAllProducts).toHaveBeenCalledTimes(1);
-    expect(result).toHaveLength(2);
-    expect(result[0].name).toBe("Mleko");
-    expect(result[1].name).toBe("Jogurt");
+  it('returns expired products and products expiring within two days in date order', () => {
+    const items = [
+      inventoryItem('1', 'Rice', '2026-04-11'),
+      inventoryItem('2', 'Milk', '2026-04-09'),
+      inventoryItem('3', 'Yogurt', '2026-04-10'),
+      inventoryItem('4', 'Cheese', '2026-04-07'),
+    ];
+
+    const result = getExpiringProducts(items, now);
+
+    expect(result.map(item => item.name)).toEqual(['Cheese', 'Milk', 'Yogurt']);
+    expect(items.map(item => item.name)).toEqual(['Rice', 'Milk', 'Yogurt', 'Cheese']);
   });
 
-  it("excludes products without expiration date", async () => {
-    const databaseService = {
-      queryAllProducts: jest.fn().mockResolvedValue([
-        { id: "1", name: "Sól", expirationDate: null },
-        { id: "2", name: "Mleko", expirationDate: new Date("2026-04-09") },
-      ]),
-    };
+  it('excludes products without a valid expiration date', () => {
+    const result = getExpiringProducts([
+      inventoryItem('1', 'Salt', null),
+      inventoryItem('2', 'Flour', ''),
+      inventoryItem('3', 'Oil', 'not-a-date'),
+      inventoryItem('4', 'Butter', '2026-02-30'),
+      inventoryItem('5', 'Milk', '2026-04-09'),
+    ], now);
 
-    const now = new Date("2026-04-08");
-    const result = await getExpiringProducts(databaseService as any, now);
+    expect(result.map(item => item.name)).toEqual(['Milk']);
+  });
 
-    expect(result).toHaveLength(1);
-    expect(result[0].name).toBe("Mleko");
+  it('uses calendar days across daylight-saving time changes', () => {
+    const beforeClockChange = new Date(2026, 2, 28, 23, 30);
+
+    const result = getExpiringProducts([
+      inventoryItem('1', 'Milk', '2026-03-30'),
+      inventoryItem('2', 'Rice', '2026-03-31'),
+    ], beforeClockChange);
+
+    expect(result.map(item => item.name)).toEqual(['Milk']);
+  });
+});
+
+describe('getExpiryUrgency', () => {
+  const now = new Date(2026, 3, 8, 12);
+
+  it.each([
+    ['2026-04-07', {status: 'expired', daysRemaining: -1}],
+    ['2026-04-08', {status: 'today', daysRemaining: 0}],
+    ['2026-04-09', {status: 'tomorrow', daysRemaining: 1}],
+    ['2026-04-10', {status: 'soon', daysRemaining: 2}],
+  ] as const)('maps %s to its urgency', (expiryDate, expected) => {
+    expect(getExpiryUrgency(expiryDate, now)).toEqual(expected);
+  });
+
+  it('returns null when expiration is more than two days away', () => {
+    expect(getExpiryUrgency('2026-04-11', now)).toBeNull();
   });
 });
