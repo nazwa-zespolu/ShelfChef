@@ -36,7 +36,7 @@ export class ScanToAdd {
     let fetchedDefinition: ProductDefinition;
     try {
       fetchedDefinition = await this.openFoodFactsService.fetchProductByEAN(input.ean);
-    } catch (_error) {
+    } catch {
       return { fallback: "manual", ean: input.ean };
     }
 

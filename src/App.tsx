@@ -6,7 +6,7 @@
  */
 
 import React, {useEffect, useState} from 'react';
-import {BackHandler, StyleSheet, View} from 'react-native';
+import {ActivityIndicator, BackHandler, Button, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import HomeView from './HomeView';
 import ProductScannerView from './ProductScannerView';
@@ -31,14 +31,18 @@ function App() {
   const [inventoryTick, setInventoryTick] = useState(0);
   const [inventorySwipeHintPending, setInventorySwipeHintPending] = useState(false);
   const [inventoryItemCount, setInventoryItemCount] = useState<number | null>(null);
+  const [databaseState, setDatabaseState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [databaseAttempt, setDatabaseAttempt] = useState(0);
 
   useEffect(() => {
     try {
       setupDatabase();
+      setDatabaseState('ready');
     } catch (e) {
       console.error('[ShelfChef] setupDatabase failed', e);
+      setDatabaseState('error');
     }
-  }, []);
+  }, [databaseAttempt]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -51,6 +55,33 @@ function App() {
     });
     return () => subscription.remove();
   }, [activeTab]);
+
+  if (databaseState !== 'ready') {
+    return (
+      <SafeAreaProvider>
+        <View style={[styles.shell, styles.databaseStatus]}>
+          {databaseState === 'loading' ? (
+            <>
+              <ActivityIndicator color={colors.success} />
+              <Text style={styles.databaseStatusText}>Przygotowuję dane aplikacji…</Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.databaseStatusText}>Nie udało się otworzyć danych aplikacji.</Text>
+              <Button
+                title="Spróbuj ponownie"
+                color={colors.success}
+                onPress={() => {
+                  setDatabaseState('loading');
+                  setDatabaseAttempt(attempt => attempt + 1);
+                }}
+              />
+            </>
+          )}
+        </View>
+      </SafeAreaProvider>
+    );
+  }
 
   return (
     <SafeAreaProvider>
@@ -118,6 +149,16 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  databaseStatus: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    gap: 16,
+  },
+  databaseStatusText: {
+    color: colors.textPrimary,
+    textAlign: 'center',
   },
   tabPanel: {
     flex: 1,

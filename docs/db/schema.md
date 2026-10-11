@@ -9,6 +9,11 @@ erDiagram
         TEXT brand
         TEXT image_url
         TEXT category
+        TEXT normalized_name
+        INTEGER is_vegetarian
+        INTEGER is_vegan
+        INTEGER is_gluten_free
+        INTEGER is_lactose_free
     }
 
     INVENTORY {
@@ -18,6 +23,11 @@ erDiagram
         TEXT expiry_date
         TEXT opened_at
         INTEGER is_opened
+        TEXT created_at
+        INTEGER is_vegetarian
+        INTEGER is_vegan
+        INTEGER is_gluten_free
+        INTEGER is_lactose_free
     }
 
     APP_SETTINGS {
@@ -85,6 +95,9 @@ erDiagram
 
 ## Najwazniejsze relacje
 
+- Schemat jest tworzony w jednej transakcji, bez migracji i bez danych demonstracyjnych. Po zmianie schematu należy ręcznie wyczyścić dane instalacji deweloperskiej; zwykły restart zachowuje dane.
+- `inventory.created_at` jest wymagane i zapisywane zarówno przy dodawaniu produktu, jak i finalizacji zakupów. Jedna sztuka odpowiada jednemu rekordowi.
+- Pola dietetyczne i ustawienia modelu zachowują dotychczasowe znaczenie. Początkowe `NULL` w polach dietetycznych oznacza brak klasyfikacji.
 - `inventory.product_ean` wskazuje na `product_definitions.ean`, jesli produkt pochodzi ze skanu.
 - `product_catalog.product_ean` wskazuje na `product_definitions.ean` dla produktow konkretnych (`specific`).
 - `product_catalog.image_url` przechowuje zdjecie katalogowe uzywane m.in. w listach zakupowych.

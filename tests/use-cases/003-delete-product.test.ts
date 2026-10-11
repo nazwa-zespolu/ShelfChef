@@ -1,15 +1,26 @@
-import { DeleteProduct } from "../../src/app/DeleteProduct";
+import {sqlite} from '../helpers/sqlite';
 
-describe("UC-03: DeleteProduct", () => {
-  it("deletes product from database by id", async () => {
-    const databaseService = {
-      deleteProduct: jest.fn().mockResolvedValue(undefined),
-    };
+jest.mock('react-native-quick-sqlite', () => ({
+  open: () => sqlite,
+}), {virtual: true});
 
-    const deleteProduct = new DeleteProduct(databaseService as any);
+import {setupDatabase} from '../../src/infrastructure/db/init';
+import {ProductRepository} from '../../src/infrastructure/ProductRepository';
 
-    await deleteProduct.execute("uuid-123");
+describe('UC-03: DeleteProduct', () => {
+  beforeEach(() => {
+    sqlite.reset();
+    setupDatabase();
+  });
 
-    expect(databaseService.deleteProduct).toHaveBeenCalledWith("uuid-123");
+  afterAll(() => sqlite.close());
+
+  it('deletes a product from the database by id', async () => {
+    const repository = new ProductRepository();
+    await repository.addToInventory('uuid-123', null, 'Ketchup', '2026-08-01');
+
+    await repository.removeFromInventory('uuid-123');
+
+    expect(await repository.getFullInventory()).toEqual([]);
   });
 });

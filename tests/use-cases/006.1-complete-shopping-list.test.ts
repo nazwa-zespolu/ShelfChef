@@ -1,7 +1,7 @@
 import { ShoppingList } from "../../src/app/ShoppingList";
 
 describe("UC-06: ShoppingList - completePurchase", () => {
-  it("returns separate inventory records for multiple purchased units", async () => {
+  it("delegates purchase completion and returns the repository summary", async () => {
     const result = {
       inventoryIds: ["inv-1", "inv-2"],
       storedItemIds: ["item-milk"],
@@ -18,9 +18,7 @@ describe("UC-06: ShoppingList - completePurchase", () => {
     expect(shoppingRepository.completePurchase).toHaveBeenCalledWith("list-1", {
       "item-milk": "2026-06-01",
     });
-    expect(returned.inventoryIds).toEqual(["inv-1", "inv-2"]);
-    expect(returned.inventoryIds).toHaveLength(2);
-    expect(returned.storedItemIds).toEqual(["item-milk"]);
+    expect(returned).toEqual(result);
   });
 
   it("updates item status through the shopping list repository", async () => {
