@@ -43,6 +43,14 @@ function parseExpiryDate(value: string | null): Date | null {
   return date;
 }
 
+function parseTimestamp(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function formatExpiryForDatabase(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -50,12 +58,61 @@ function formatExpiryForDatabase(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function formatExpiryForDisplay(date: Date) {
+function formatDateForDisplay(date: Date) {
   return date.toLocaleDateString('pl-PL', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
   });
+}
+
+function DateWheels({
+  testID,
+  date,
+  days,
+  months,
+  years,
+  onValueChange,
+  onInteractionStart,
+  onInteractionEnd,
+}: {
+  testID: string;
+  date: Date;
+  days: number[];
+  months: number[];
+  years: number[];
+  onValueChange: (part: DatePart, value: number) => void;
+  onInteractionStart: () => void;
+  onInteractionEnd: () => void;
+}) {
+  return (
+    <View style={styles.wheelsRow} testID={testID}>
+      <WheelPicker
+        label="Dzień"
+        values={days}
+        selectedValue={date.getDate()}
+        onValueChange={value => onValueChange('day', value)}
+        onInteractionStart={onInteractionStart}
+        onInteractionEnd={onInteractionEnd}
+      />
+      <WheelPicker
+        label="Miesiąc"
+        values={months}
+        selectedValue={date.getMonth() + 1}
+        onValueChange={value => onValueChange('month', value)}
+        onInteractionStart={onInteractionStart}
+        onInteractionEnd={onInteractionEnd}
+      />
+      <WheelPicker
+        label="Rok"
+        values={years}
+        selectedValue={date.getFullYear()}
+        onValueChange={value => onValueChange('year', value)}
+        onInteractionStart={onInteractionStart}
+        onInteractionEnd={onInteractionEnd}
+      />
+    </View>
+  );
 }
 
 export function ProductDetailsModal({
@@ -74,6 +131,7 @@ export function ProductDetailsModal({
   const [expiryDate, setExpiryDate] = useState<Date | null>(null);
   const [openedAt, setOpenedAt] = useState<string | null>(null);
   const [datePickerVisible, setDatePickerVisible] = useState(false);
+  const [openingDatePickerVisible, setOpeningDatePickerVisible] = useState(false);
   const [scrollEnabled, setScrollEnabled] = useState(true);
 
   useEffect(() => {
@@ -81,8 +139,12 @@ export function ProductDetailsModal({
       return;
     }
     setExpiryDate(parseExpiryDate(item.expiryDate));
-    setOpenedAt(item.isOpened ? item.openedAt ?? new Date().toISOString() : null);
+    const storedOpenedAt = parseTimestamp(item.openedAt);
+    const now = new Date();
+    const initialOpenedAt = storedOpenedAt && storedOpenedAt <= now ? storedOpenedAt : now;
+    setOpenedAt(item.isOpened ? initialOpenedAt.toISOString() : null);
     setDatePickerVisible(false);
+    setOpeningDatePickerVisible(false);
     setScrollEnabled(true);
   }, [item]);
 
@@ -103,6 +165,30 @@ export function ProductDetailsModal({
       ),
     [activeMonth, selectedYear],
   );
+  const openingDate = useMemo(() => parseTimestamp(openedAt), [openedAt]);
+  const openingSelectedYear = openingDate?.getFullYear() ?? currentYear;
+  const openingYears = useMemo(() => {
+    const firstYear = Math.min(currentYear - 5, openingSelectedYear);
+    return Array.from(
+      {length: currentYear - firstYear + 1},
+      (_, index) => firstYear + index,
+    );
+  }, [currentYear, openingSelectedYear]);
+  const openingMonths = useMemo(() => {
+    if (openingSelectedYear === currentYear) {
+      return months.slice(0, new Date().getMonth() + 1);
+    }
+    return months;
+  }, [currentYear, months, openingSelectedYear]);
+  const openingSelectedMonth = openingDate?.getMonth() ?? new Date().getMonth();
+  const openingDays = useMemo(() => {
+    const today = new Date();
+    const lastDay =
+      openingSelectedYear === today.getFullYear() && openingSelectedMonth === today.getMonth()
+        ? today.getDate()
+        : getDaysInMonth(openingSelectedYear, openingSelectedMonth + 1);
+    return Array.from({length: lastDay}, (_, index) => index + 1);
+  }, [openingSelectedMonth, openingSelectedYear]);
 
   const updateDatePart = (part: DatePart, value: number) => {
     setExpiryDate(current => {
@@ -112,6 +198,28 @@ export function ProductDetailsModal({
       const maxDay = getDaysInMonth(nextYear, nextMonth);
       const nextDay = part === 'day' ? value : Math.min(base.getDate(), maxDay);
       return new Date(nextYear, nextMonth - 1, Math.min(nextDay, maxDay));
+    });
+  };
+
+  const updateOpeningDatePart = (part: DatePart, value: number) => {
+    setOpenedAt(current => {
+      const now = new Date();
+      const base = parseTimestamp(current) ?? now;
+      const nextYear = part === 'year' ? value : base.getFullYear();
+      const requestedMonth = part === 'month' ? value : base.getMonth() + 1;
+      const nextMonth =
+        nextYear === now.getFullYear()
+          ? Math.min(requestedMonth, now.getMonth() + 1)
+          : requestedMonth;
+      const monthLastDay = getDaysInMonth(nextYear, nextMonth);
+      const allowedLastDay =
+        nextYear === now.getFullYear() && nextMonth === now.getMonth() + 1
+          ? now.getDate()
+          : monthLastDay;
+      const requestedDay = part === 'day' ? value : base.getDate();
+      const next = new Date(base);
+      next.setFullYear(nextYear, nextMonth - 1, Math.min(requestedDay, allowedLastDay));
+      return (next.getTime() > now.getTime() ? now : next).toISOString();
     });
   };
 
@@ -178,13 +286,14 @@ export function ProductDetailsModal({
               onPress={() => {
                 setExpiryDate(current => current ?? getDefaultExpiryDate());
                 setDatePickerVisible(current => !current);
+                setOpeningDatePickerVisible(false);
               }}
               style={({pressed}) => [styles.dateField, pressed && styles.pressed]}>
               <CalendarDays color={colors.accent} size={22} strokeWidth={2.2} />
               <View style={styles.dateCopy}>
                 <Text style={styles.dateLabel}>{expiryDate ? 'Ważne do' : 'Brak terminu'}</Text>
                 <Text style={styles.dateValue}>
-                  {expiryDate ? formatExpiryForDisplay(expiryDate) : 'Dodaj termin ważności'}
+                  {expiryDate ? formatDateForDisplay(expiryDate) : 'Dodaj termin ważności'}
                 </Text>
               </View>
               <Text style={styles.dateAction}>{expiryDate ? 'Zmień' : 'Dodaj'}</Text>
@@ -204,40 +313,27 @@ export function ProductDetailsModal({
             ) : null}
 
             {expiryDate && datePickerVisible ? (
-              <View style={styles.wheelsRow} testID="product-expiry-picker">
-                <WheelPicker
-                  label="Dzień"
-                  values={days}
-                  selectedValue={expiryDate.getDate()}
-                  onValueChange={value => updateDatePart('day', value)}
-                  onInteractionStart={() => setScrollEnabled(false)}
-                  onInteractionEnd={() => setScrollEnabled(true)}
-                />
-                <WheelPicker
-                  label="Miesiąc"
-                  values={months}
-                  selectedValue={expiryDate.getMonth() + 1}
-                  onValueChange={value => updateDatePart('month', value)}
-                  onInteractionStart={() => setScrollEnabled(false)}
-                  onInteractionEnd={() => setScrollEnabled(true)}
-                />
-                <WheelPicker
-                  label="Rok"
-                  values={years}
-                  selectedValue={expiryDate.getFullYear()}
-                  onValueChange={value => updateDatePart('year', value)}
-                  onInteractionStart={() => setScrollEnabled(false)}
-                  onInteractionEnd={() => setScrollEnabled(true)}
-                />
-              </View>
+              <DateWheels
+                testID="product-expiry-picker"
+                date={expiryDate}
+                days={days}
+                months={months}
+                years={years}
+                onValueChange={updateDatePart}
+                onInteractionStart={() => setScrollEnabled(false)}
+                onInteractionEnd={() => setScrollEnabled(true)}
+              />
             ) : null}
 
-            <Text style={styles.sectionTitle}>Stan produktu</Text>
+            <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>Stan produktu</Text>
             <View style={styles.stateControl}>
               <Pressable
                 testID="product-state-closed"
                 disabled={busy}
-                onPress={() => setOpenedAt(null)}
+                onPress={() => {
+                  setOpenedAt(null);
+                  setOpeningDatePickerVisible(false);
+                }}
                 style={({pressed}) => [
                   styles.stateButton,
                   openedAt === null && styles.stateButtonSelected,
@@ -269,6 +365,40 @@ export function ProductDetailsModal({
                 </Text>
               </Pressable>
             </View>
+
+            {openingDate ? (
+              <>
+                <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>Data otwarcia</Text>
+                <Pressable
+                  testID="product-opening-date-field"
+                  disabled={busy}
+                  onPress={() => {
+                    setOpeningDatePickerVisible(current => !current);
+                    setDatePickerVisible(false);
+                  }}
+                  style={({pressed}) => [styles.dateField, pressed && styles.pressed]}>
+                  <CalendarDays color={colors.accent} size={22} strokeWidth={2.2} />
+                  <View style={styles.dateCopy}>
+                    <Text style={styles.dateLabel}>Otwarty od</Text>
+                    <Text style={styles.dateValue}>{formatDateForDisplay(openingDate)}</Text>
+                  </View>
+                  <Text style={styles.dateAction}>Zmień</Text>
+                </Pressable>
+
+                {openingDatePickerVisible ? (
+                  <DateWheels
+                    testID="product-opening-date-picker"
+                    date={openingDate}
+                    days={openingDays}
+                    months={openingMonths}
+                    years={openingYears}
+                    onValueChange={updateOpeningDatePart}
+                    onInteractionStart={() => setScrollEnabled(false)}
+                    onInteractionEnd={() => setScrollEnabled(true)}
+                  />
+                ) : null}
+              </>
+            ) : null}
 
             {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
           </ScrollView>
@@ -387,6 +517,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
     marginBottom: 8,
+  },
+  sectionTitleSpaced: {
+    marginTop: 16,
   },
   dateField: {
     minHeight: 64,

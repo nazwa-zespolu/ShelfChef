@@ -273,4 +273,74 @@ describe('UI: HomeView', () => {
       openedAt: null,
     });
   });
+
+  it('changes the opening date without allowing future calendar values', async () => {
+    const originalOpenedAt = '2026-04-07T09:30:00.000Z';
+    const expectedOpenedAt = new Date(originalOpenedAt);
+    expectedOpenedAt.setFullYear(
+      expectedOpenedAt.getFullYear(),
+      expectedOpenedAt.getMonth(),
+      5,
+    );
+    getFullInventory.mockResolvedValue([
+      inventoryItem('1', 'Jam', '2026-05-01', {
+        isOpened: true,
+        openedAt: originalOpenedAt,
+      }),
+    ]);
+
+    await act(async () => {
+      renderer = ReactTestRenderer.create(<HomeView />);
+    });
+    await act(() => {
+      renderer!.root.findByProps({testID: 'product-card-1'}).props.onPress();
+    });
+    await act(() => {
+      renderer!.root.findByProps({testID: 'product-opening-date-field'}).props.onPress();
+    });
+
+    const openingPicker = renderer!.root.findByProps({testID: 'product-opening-date-picker'});
+    const dayPicker = openingPicker.findByProps({label: 'Dzień'});
+    const monthPicker = openingPicker.findByProps({label: 'Miesiąc'});
+    const yearPicker = openingPicker.findByProps({label: 'Rok'});
+    expect(dayPicker.props.values.at(-1)).toBe(8);
+    expect(monthPicker.props.values.at(-1)).toBe(4);
+    expect(yearPicker.props.values.at(-1)).toBe(2026);
+
+    await act(() => {
+      dayPicker.props.onValueChange(5);
+    });
+    await act(async () => {
+      renderer!.root.findByProps({testID: 'product-details-save'}).props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(updateInventoryItem).toHaveBeenCalledWith('1', {
+      expiryDate: '2026-05-01',
+      openedAt: expectedOpenedAt.toISOString(),
+    });
+  });
+
+  it('preserves the exact opening timestamp when the date is not changed', async () => {
+    const openedAt = '2026-04-07T09:30:45.000Z';
+    getFullInventory.mockResolvedValue([
+      inventoryItem('1', 'Jam', null, {isOpened: true, openedAt}),
+    ]);
+
+    await act(async () => {
+      renderer = ReactTestRenderer.create(<HomeView />);
+    });
+    await act(() => {
+      renderer!.root.findByProps({testID: 'product-card-1'}).props.onPress();
+    });
+    await act(async () => {
+      renderer!.root.findByProps({testID: 'product-details-save'}).props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(updateInventoryItem).toHaveBeenCalledWith('1', {
+      expiryDate: null,
+      openedAt,
+    });
+  });
 });
