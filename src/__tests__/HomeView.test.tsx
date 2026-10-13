@@ -20,6 +20,15 @@ jest.mock('../components/AppToast', () => ({
     showToast: jest.fn(),
   }),
 }));
+jest.mock('../shopping-lists/modals/DraggableBottomSheet', () => ({
+  DraggableBottomSheet: ({
+    visible,
+    children,
+  }: {
+    visible: boolean;
+    children: React.ReactNode;
+  }) => (visible ? children : null),
+}));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({top: 0, right: 0, bottom: 0, left: 0}),
 }));
@@ -38,6 +47,7 @@ const inventoryItem = (
   id: string,
   name: string,
   expiryDate: string | null,
+  overrides: Partial<InventoryItem> = {},
 ): InventoryItem => ({
   id,
   ean: '',
@@ -45,17 +55,20 @@ const inventoryItem = (
   expiryDate,
   isOpened: false,
   createdAt: '2026-04-08T10:00:00.000Z',
+  ...overrides,
 });
 
 describe('UI: HomeView', () => {
   let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
   const getFullInventory = jest.spyOn(ProductRepository.prototype, 'getFullInventory');
+  const updateInventoryItem = jest.spyOn(ProductRepository.prototype, 'updateInventoryItem');
   const addBackHandler = jest.spyOn(BackHandler, 'addEventListener');
 
   beforeEach(() => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date(2026, 3, 8, 12));
     getFullInventory.mockReset();
+    updateInventoryItem.mockReset().mockResolvedValue();
     addBackHandler.mockClear();
   });
 
@@ -191,5 +204,73 @@ describe('UI: HomeView', () => {
     const texts = renderer!.root.findAllByType(Text).map(node => node.props.children);
     expect(texts).toContain('Spiżarnia');
     expect(texts).not.toContain('Pilne terminy');
+  });
+
+  it('opens product details and saves a new expiry and open state', async () => {
+    getFullInventory.mockResolvedValue([
+      inventoryItem('1', 'Tomatoes', null, {
+        ean: '5901234123457',
+        brand: 'Pantry Foods',
+        category: 'Canned food',
+      }),
+    ]);
+
+    await act(async () => {
+      renderer = ReactTestRenderer.create(<HomeView />);
+    });
+
+    await act(() => {
+      renderer!.root.findByProps({testID: 'product-card-1'}).props.onPress();
+    });
+
+    const texts = renderer!.root.findAllByType(Text).map(node => node.props.children);
+    expect(texts).toContain('Szczegóły produktu');
+    expect(texts).toContain('EAN: 5901234123457');
+
+    await act(() => {
+      renderer!.root.findByProps({testID: 'product-expiry-field'}).props.onPress();
+      renderer!.root.findByProps({testID: 'product-state-opened'}).props.onPress();
+    });
+    await act(() => {
+      renderer!.root.findByProps({label: 'Dzień'}).props.onValueChange(15);
+    });
+    await act(async () => {
+      renderer!.root.findByProps({testID: 'product-details-save'}).props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(updateInventoryItem).toHaveBeenCalledWith('1', {
+      expiryDate: '2026-04-15',
+      openedAt: expect.any(String),
+    });
+  });
+
+  it('removes the expiry date and closes an opened product', async () => {
+    getFullInventory.mockResolvedValue([
+      inventoryItem('1', 'Pesto', '2026-04-20', {
+        isOpened: true,
+        openedAt: '2026-04-07T09:00:00.000Z',
+      }),
+    ]);
+
+    await act(async () => {
+      renderer = ReactTestRenderer.create(<HomeView />);
+    });
+    await act(() => {
+      renderer!.root.findByProps({testID: 'product-card-1'}).props.onPress();
+    });
+    await act(() => {
+      renderer!.root.findByProps({testID: 'product-expiry-remove'}).props.onPress();
+      renderer!.root.findByProps({testID: 'product-state-closed'}).props.onPress();
+    });
+    await act(async () => {
+      renderer!.root.findByProps({testID: 'product-details-save'}).props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(updateInventoryItem).toHaveBeenCalledWith('1', {
+      expiryDate: null,
+      openedAt: null,
+    });
   });
 });
