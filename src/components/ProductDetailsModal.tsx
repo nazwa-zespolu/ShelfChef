@@ -1,5 +1,5 @@
 import React, {useEffect, useMemo, useState} from 'react';
-import {Image, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {AppState, Image, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {CalendarDays, Package} from 'lucide-react-native';
 import type {InventoryItem} from '../domain/types';
 import {colors} from '../theme/colors';
@@ -133,6 +133,33 @@ export function ProductDetailsModal({
   const [datePickerVisible, setDatePickerVisible] = useState(false);
   const [openingDatePickerVisible, setOpeningDatePickerVisible] = useState(false);
   const [scrollEnabled, setScrollEnabled] = useState(true);
+  const [today, setToday] = useState(() => new Date());
+
+  useEffect(() => {
+    if (!item) {
+      return;
+    }
+
+    let midnightTimer: ReturnType<typeof setTimeout>;
+    const refreshToday = () => {
+      const now = new Date();
+      setToday(now);
+      const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      clearTimeout(midnightTimer);
+      midnightTimer = setTimeout(refreshToday, nextMidnight.getTime() - now.getTime());
+    };
+
+    refreshToday();
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') {
+        refreshToday();
+      }
+    });
+    return () => {
+      clearTimeout(midnightTimer);
+      subscription.remove();
+    };
+  }, [item]);
 
   useEffect(() => {
     if (!item) {
@@ -148,7 +175,9 @@ export function ProductDetailsModal({
     setScrollEnabled(true);
   }, [item]);
 
-  const currentYear = new Date().getFullYear();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+  const currentDay = today.getDate();
   const selectedYear = expiryDate?.getFullYear() ?? currentYear;
   const years = useMemo(() => {
     const firstYear = Math.min(currentYear - 5, selectedYear);
@@ -156,7 +185,7 @@ export function ProductDetailsModal({
     return Array.from({length: lastYear - firstYear + 1}, (_, index) => firstYear + index);
   }, [currentYear, selectedYear]);
   const months = useMemo(() => Array.from({length: 12}, (_, index) => index + 1), []);
-  const activeMonth = expiryDate?.getMonth() ?? new Date().getMonth();
+  const activeMonth = expiryDate?.getMonth() ?? currentMonth;
   const days = useMemo(
     () =>
       Array.from(
@@ -176,19 +205,18 @@ export function ProductDetailsModal({
   }, [currentYear, openingSelectedYear]);
   const openingMonths = useMemo(() => {
     if (openingSelectedYear === currentYear) {
-      return months.slice(0, new Date().getMonth() + 1);
+      return months.slice(0, currentMonth + 1);
     }
     return months;
-  }, [currentYear, months, openingSelectedYear]);
-  const openingSelectedMonth = openingDate?.getMonth() ?? new Date().getMonth();
+  }, [currentMonth, currentYear, months, openingSelectedYear]);
+  const openingSelectedMonth = openingDate?.getMonth() ?? currentMonth;
   const openingDays = useMemo(() => {
-    const today = new Date();
     const lastDay =
-      openingSelectedYear === today.getFullYear() && openingSelectedMonth === today.getMonth()
-        ? today.getDate()
+      openingSelectedYear === currentYear && openingSelectedMonth === currentMonth
+        ? currentDay
         : getDaysInMonth(openingSelectedYear, openingSelectedMonth + 1);
     return Array.from({length: lastDay}, (_, index) => index + 1);
-  }, [openingSelectedMonth, openingSelectedYear]);
+  }, [currentDay, currentMonth, currentYear, openingSelectedMonth, openingSelectedYear]);
 
   const updateDatePart = (part: DatePart, value: number) => {
     setExpiryDate(current => {
