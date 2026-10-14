@@ -3,11 +3,12 @@
  */
 
 import React from 'react';
-import {BackHandler, Text} from 'react-native';
+import {BackHandler, FlatList, Text} from 'react-native';
 import ReactTestRenderer, {act} from 'react-test-renderer';
 import HomeView from '../HomeView';
 import {InventoryItem} from '../domain/types';
 import {ProductRepository} from '../infrastructure/ProductRepository';
+import {ProductDetailsModal} from '../components/ProductDetailsModal';
 
 jest.mock('../components/SwipeToDeleteCard', () => ({
   SwipeToDeleteCard: ({children}: {children: React.ReactNode}) => children,
@@ -58,6 +59,14 @@ const inventoryItem = (
   ...overrides,
 });
 
+const deferredSave = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>(resolvePromise => {
+    resolve = resolvePromise;
+  });
+  return {promise, resolve};
+};
+
 describe('UI: HomeView', () => {
   let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
   const getFullInventory = jest.spyOn(ProductRepository.prototype, 'getFullInventory');
@@ -79,6 +88,47 @@ describe('UI: HomeView', () => {
     }
     jest.useRealTimers();
   });
+
+  const renderHome = async (items: InventoryItem[]) => {
+    getFullInventory.mockResolvedValue(items);
+    await act(async () => {
+      renderer = ReactTestRenderer.create(<HomeView />);
+    });
+  };
+
+  const press = async (testID: string) => {
+    await act(async () => {
+      renderer!.root.findByProps({testID}).props.onPress();
+      await Promise.resolve();
+    });
+  };
+
+  const changeExpiryDay = async (day: number) => {
+    await press('product-expiry-field');
+    await act(() => {
+      renderer!.root
+        .findByProps({testID: 'product-expiry-picker'})
+        .findByProps({label: 'Dzień'}).props.onValueChange(day);
+    });
+  };
+
+  const displayedItems = () =>
+    renderer!.root.findByType(FlatList).props.data as InventoryItem[];
+
+  const displayedTexts = () =>
+    renderer!.root.findAllByType(Text)
+      .flatMap(node =>
+        Array.isArray(node.props.children) ? node.props.children : [node.props.children],
+      )
+      .filter((child): child is string => typeof child === 'string');
+
+  const selectSort = async (label: string) => {
+    const button = renderer!.root.find(node =>
+      typeof node.props.onPress === 'function' &&
+      node.findAllByType(Text).some(text => text.props.children === label),
+    );
+    await act(() => button.props.onPress());
+  };
 
   it('displays products sorted by expiration date', async () => {
     getFullInventory.mockResolvedValue([
@@ -342,5 +392,196 @@ describe('UI: HomeView', () => {
       expiryDate: null,
       openedAt,
     });
+  });
+
+  it('preserves the draft and inventory after a failed save and allows retrying', async () => {
+    const items = [inventoryItem('1', 'Jam', '2026-04-09')];
+    const openedAt = new Date().toISOString();
+    const retrySave = deferredSave();
+    updateInventoryItem
+      .mockRejectedValueOnce(new Error('Database write failed'))
+      .mockReturnValueOnce(retrySave.promise);
+    await renderHome(items);
+    await press('product-card-1');
+    await changeExpiryDay(15);
+    await press('product-state-opened');
+    await press('product-details-save');
+
+    expect(displayedTexts()).toContain('Nie udało się zapisać zmian. Spróbuj ponownie.');
+    expect(renderer!.root.findByProps({testID: 'product-details-save'}).props.disabled).toBe(false);
+    expect(renderer!.root.findByProps({testID: 'product-details-cancel'}).props.disabled).toBe(false);
+    expect(renderer!.root.findByProps({testID: 'product-expiry-picker'})
+      .findByProps({label: 'Dzień'}).props.selectedValue).toBe(15);
+    expect(displayedItems()).toEqual(items);
+
+    await press('product-details-save');
+
+    expect(displayedTexts()).not.toContain('Nie udało się zapisać zmian. Spróbuj ponownie.');
+    expect(renderer!.root.findByProps({testID: 'product-details-save'}).props.disabled).toBe(true);
+    expect(displayedItems()).toEqual(items);
+    await act(async () => {
+      retrySave.resolve();
+      await retrySave.promise;
+    });
+
+    const changes = {expiryDate: '2026-04-15', openedAt};
+    expect(updateInventoryItem).toHaveBeenCalledTimes(2);
+    expect(updateInventoryItem).toHaveBeenNthCalledWith(1, '1', changes);
+    expect(updateInventoryItem).toHaveBeenNthCalledWith(2, '1', changes);
+    expect(renderer!.root.findAllByProps({testID: 'product-details-save'})).toHaveLength(0);
+    expect(displayedTexts()).not.toContain('Nie udało się zapisać zmian. Spróbuj ponownie.');
+    expect(displayedItems()).toEqual([
+      {...items[0], ...changes, isOpened: true},
+    ]);
+  });
+
+  it('blocks dismissal and duplicate saves until the pending write completes', async () => {
+    const pendingSave = deferredSave();
+    const items = [inventoryItem('1', 'Jam', '2026-04-09')];
+    updateInventoryItem.mockReturnValueOnce(pendingSave.promise);
+    await renderHome(items);
+    await press('product-card-1');
+    await changeExpiryDay(15);
+    await press('product-details-save');
+
+    expect(displayedTexts()).toContain('Zapisuję…');
+    expect(renderer!.root.findByProps({testID: 'product-details-save'}).props.disabled).toBe(true);
+    expect(renderer!.root.findByProps({testID: 'product-details-cancel'}).props.disabled).toBe(true);
+    expect(displayedItems()).toEqual(items);
+
+    await press('product-details-save');
+    await press('product-details-cancel');
+    await act(() => renderer!.root.findByType(ProductDetailsModal).props.onClose());
+
+    expect(updateInventoryItem).toHaveBeenCalledTimes(1);
+    expect(renderer!.root.findByProps({testID: 'product-details-save'}).props.disabled).toBe(true);
+
+    await act(async () => {
+      pendingSave.resolve();
+      await pendingSave.promise;
+    });
+
+    expect(renderer!.root.findAllByProps({testID: 'product-details-save'})).toHaveLength(0);
+    expect(displayedItems()[0]).toMatchObject({expiryDate: '2026-04-15', isOpened: false});
+  });
+
+  it.each([false, true])('reorders products by expiry date after saving with the urgent filter set to %s', async urgentOnly => {
+    await renderHome([
+      inventoryItem('1', 'Jam', '2026-04-08'),
+      inventoryItem('2', 'Milk', '2026-04-09'),
+    ]);
+    await selectSort('Ważność');
+    if (urgentOnly) {
+      await press('expiry-filter-button');
+    }
+    expect(displayedItems().map(item => item.id)).toEqual(['1', '2']);
+
+    await press('product-card-1');
+    await changeExpiryDay(10);
+    await press('product-details-save');
+
+    expect(displayedItems().map(item => item.id)).toEqual(['2', '1']);
+    expect(displayedItems()[1].expiryDate).toBe('2026-04-10');
+  });
+
+  it.each([false, true])('reorders products and updates the opened count when the initial open state is %s', async isOpened => {
+    await renderHome([
+      inventoryItem('1', 'Jam', '2026-04-09'),
+      inventoryItem('2', 'Milk', '2026-04-10', {
+        isOpened,
+        openedAt: isOpened ? '2026-04-07T09:30:00.000Z' : null,
+      }),
+    ]);
+    await selectSort('Otwarte');
+    expect(displayedItems().map(item => item.id)).toEqual(isOpened ? ['2', '1'] : ['1', '2']);
+
+    await press('product-card-2');
+    await press(isOpened ? 'product-state-closed' : 'product-state-opened');
+    await press('product-details-save');
+
+    expect(displayedItems().map(item => item.id)).toEqual(isOpened ? ['1', '2'] : ['2', '1']);
+    expect(displayedTexts()).toContain(isOpened ? '2 produkty · 0 otwarte' : '2 produkty · 1 otwarty');
+    const updatedItem = displayedItems().find(item => item.id === '2');
+    expect(updatedItem).toMatchObject({
+      isOpened: !isOpened,
+      openedAt: isOpened ? null : new Date().toISOString(),
+    });
+    await selectSort('Ważność');
+  });
+
+  it('updates the urgent count and includes a product after adding an urgent expiry date', async () => {
+    await renderHome([
+      inventoryItem('1', 'Jam', null),
+      inventoryItem('2', 'Milk', '2026-04-20'),
+    ]);
+    expect(renderer!.root.findByProps({testID: 'expiry-filter-button'}).props.accessibilityLabel)
+      .toBe('Pilne terminy, brak produktów wymagających uwagi');
+
+    await press('product-card-1');
+    await changeExpiryDay(9);
+    await press('product-details-save');
+
+    expect(renderer!.root.findByProps({testID: 'expiry-filter-button'}).props.accessibilityLabel)
+      .toBe('Pilne terminy, 1 produkt');
+    await press('expiry-filter-button');
+    expect(displayedItems().map(item => item.id)).toEqual(['1']);
+    expect(displayedTexts()).toContain('Termin jutro');
+  });
+
+  it.each(['remove', 'postpone'])('removes a product from the active urgent view after choosing to %s its expiry date', async action => {
+    await renderHome([
+      inventoryItem('1', 'Jam', '2026-04-09'),
+      inventoryItem('2', 'Milk', '2026-04-20'),
+    ]);
+    await press('expiry-filter-button');
+    expect(displayedItems().map(item => item.id)).toEqual(['1']);
+    await press('product-card-1');
+    if (action === 'remove') {
+      await press('product-expiry-remove');
+    } else {
+      await changeExpiryDay(15);
+    }
+    await press('product-details-save');
+
+    expect(displayedItems()).toEqual([]);
+    expect(displayedTexts()).toContain('Pilne terminy');
+    expect(displayedTexts()).toContain('Brak pilnych terminów');
+    expect(displayedTexts()).toContain('0 produktów do sprawdzenia');
+
+    await press('expiry-filter-button');
+    expect(renderer!.root.findByProps({testID: 'expiry-filter-button'}).props.accessibilityLabel)
+      .toBe('Pilne terminy, brak produktów wymagających uwagi');
+    expect(displayedItems()).toHaveLength(2);
+    expect(displayedItems().find(item => item.id === '1')?.expiryDate)
+      .toBe(action === 'remove' ? null : '2026-04-15');
+  });
+
+  it('updates only the selected inventory item when two copies share an EAN', async () => {
+    const ean = '5901234123457';
+    const otherCopy = inventoryItem('2', 'Jam', '2026-04-20', {
+      ean,
+      isOpened: true,
+      openedAt: '2026-04-07T09:30:45.123Z',
+    });
+    await renderHome([
+      inventoryItem('1', 'Jam', '2026-04-09', {ean}),
+      otherCopy,
+    ]);
+    await press('product-card-1');
+    await changeExpiryDay(15);
+    await press('product-state-opened');
+    await press('product-details-save');
+
+    expect(updateInventoryItem).toHaveBeenCalledWith('1', {
+      expiryDate: '2026-04-15',
+      openedAt: new Date().toISOString(),
+    });
+    expect(displayedItems()).toHaveLength(2);
+    expect(displayedItems().find(item => item.id === '1')).toMatchObject({
+      expiryDate: '2026-04-15',
+      isOpened: true,
+      openedAt: new Date().toISOString(),
+    });
+    expect(displayedItems().find(item => item.id === '2')).toEqual(otherCopy);
   });
 });

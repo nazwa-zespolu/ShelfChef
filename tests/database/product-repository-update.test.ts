@@ -81,4 +81,28 @@ describe('ProductRepository inventory updates', () => {
       }),
     ]);
   });
+
+  it.each([
+    ['opening', {expiryDate: '2026-11-10', openedAt: '2026-10-13T09:30:45.123Z'}],
+    ['closing', {expiryDate: null, openedAt: null}],
+  ])('updates only one of two inventory items with the same EAN when %s it', async (_, changes) => {
+    const ean = '5901234123457';
+    await repository.saveDefinition({ean, name: 'Jam'});
+    await repository.addToInventory('selected-copy', ean, null, '2026-11-01');
+    await repository.addToInventory('other-copy', ean, null, '2026-12-01');
+    await repository.markAsOpened('selected-copy', '2026-10-11T10:00:00.000Z');
+    await repository.markAsOpened('other-copy', '2026-10-12T11:00:00.000Z');
+    const otherCopy = (await repository.getFullInventory()).find(item => item.id === 'other-copy');
+
+    await repository.updateInventoryItem('selected-copy', changes);
+
+    const items = await repository.getFullInventory();
+    expect(items).toHaveLength(2);
+    expect(items.find(item => item.id === 'selected-copy')).toMatchObject({
+      ean,
+      ...changes,
+      isOpened: changes.openedAt !== null,
+    });
+    expect(items.find(item => item.id === 'other-copy')).toEqual(otherCopy);
+  });
 });
