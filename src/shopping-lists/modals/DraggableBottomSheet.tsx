@@ -17,6 +17,7 @@ export function DraggableBottomSheet({
   onClose,
   sheetStyle,
   handleStyle,
+  handleContent,
   overlay,
   children,
 }: {
@@ -25,6 +26,7 @@ export function DraggableBottomSheet({
   onClose: () => void;
   sheetStyle?: StyleProp<ViewStyle>;
   handleStyle?: StyleProp<ViewStyle>;
+  handleContent?: React.ReactNode;
   overlay?: React.ReactNode;
   children: React.ReactNode;
 }) {
@@ -88,6 +90,7 @@ export function DraggableBottomSheet({
         <Animated.View style={[styles.sheet, sheetStyle, {transform: [{translateY}]}]}>
           <View style={[styles.handleTouch, handleStyle]} {...dragResponder.panHandlers}>
             <View style={styles.handle} />
+            {handleContent}
           </View>
           {children}
         </Animated.View>

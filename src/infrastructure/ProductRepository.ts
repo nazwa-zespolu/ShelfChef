@@ -31,6 +31,11 @@ export interface ProductRepositoryDebugSnapshot {
   appSettings: Record<string, unknown>[];
 }
 
+export interface UpdateInventoryItemInput {
+  expiryDate: string | null;
+  openedAt: string | null;
+}
+
 export class ProductRepository {
   private static readonly RECIPE_MODEL_CONSENT_KEY = 'recipe_model_download_consent';
 
@@ -542,6 +547,15 @@ export class ProductRepository {
 
   async markAsClosed(id: string): Promise<void> {
     db.execute('UPDATE inventory SET is_opened = 0, opened_at = NULL WHERE id = ?', [id]);
+  }
+
+  async updateInventoryItem(id: string, input: UpdateInventoryItemInput): Promise<void> {
+    db.execute(
+      `UPDATE inventory
+       SET expiry_date = ?, is_opened = ?, opened_at = ?
+       WHERE id = ?`,
+      [input.expiryDate, input.openedAt === null ? 0 : 1, input.openedAt, id],
+    );
   }
 
   async removeFromInventory(id: string): Promise<void> {
