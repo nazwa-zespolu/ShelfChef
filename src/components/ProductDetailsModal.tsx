@@ -277,11 +277,10 @@ export function ProductDetailsModal({
       accessibilityLabel="Zamknij szczegóły produktu"
       onClose={close}
       sheetStyle={styles.sheet}
-      handleStyle={styles.handleTouch}>
+      handleStyle={styles.handleTouch}
+      handleContent={<Text style={styles.title}>Szczegóły produktu</Text>}>
       {item ? (
         <View style={styles.content}>
-          <Text style={styles.title}>Szczegóły produktu</Text>
-
           <ScrollView
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
@@ -471,13 +470,14 @@ const styles = StyleSheet.create({
   handleTouch: {
     alignSelf: 'stretch',
     width: 'auto',
-    minHeight: 44,
+    minHeight: 64,
     marginHorizontal: -16,
     marginTop: -4,
-    marginBottom: -8,
+    marginBottom: 0,
     paddingHorizontal: 16,
     justifyContent: 'flex-start',
     paddingTop: 10,
+    paddingBottom: 12,
   },
   content: {
     flexShrink: 1,
@@ -487,7 +487,7 @@ const styles = StyleSheet.create({
     fontSize: 23,
     fontWeight: '900',
     textAlign: 'center',
-    marginBottom: 14,
+    marginTop: 8,
   },
   scroll: {
     flexShrink: 1,

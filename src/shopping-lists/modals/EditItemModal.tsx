@@ -43,8 +43,8 @@ export function EditItemModal({
       accessibilityLabel="Zamknij edycję produktu"
       onClose={onClose}
       sheetStyle={styles.sheet}
-      handleStyle={styles.handleTouch}>
-      <Text style={styles.title}>Edytuj produkt</Text>
+      handleStyle={styles.handleTouch}
+      handleContent={<Text style={styles.title}>Edytuj produkt</Text>}>
       <Text style={styles.subtitle}>Zmień nazwę, ikonę lub kolor produktu tekstowego</Text>
       <InlineFeedback feedback={feedback} />
 
@@ -104,17 +104,18 @@ const styles = StyleSheet.create({
     minHeight: 44,
     marginHorizontal: -16,
     marginTop: -4,
-    marginBottom: -8,
+    marginBottom: 0,
     paddingHorizontal: 16,
     justifyContent: 'flex-start',
     paddingTop: 10,
   },
   title: {
+    alignSelf: 'stretch',
     color: colors.textPrimary,
     fontSize: 23,
     fontWeight: '900',
     textAlign: 'center',
-    marginTop: 0,
+    marginTop: 8,
     marginBottom: 4,
   },
   subtitle: {

@@ -25,10 +25,15 @@ jest.mock('../shopping-lists/modals/DraggableBottomSheet', () => ({
   DraggableBottomSheet: ({
     visible,
     children,
+    handleContent,
   }: {
     visible: boolean;
     children: React.ReactNode;
-  }) => (visible ? children : null),
+    handleContent?: React.ReactNode;
+  }) => {
+    const {createElement, Fragment} = require('react');
+    return visible ? createElement(Fragment, null, handleContent, children) : null;
+  },
 }));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({top: 0, right: 0, bottom: 0, left: 0}),

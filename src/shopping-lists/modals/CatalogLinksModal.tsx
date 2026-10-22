@@ -41,10 +41,12 @@ export function CatalogLinksModal({
       accessibilityLabel="Zamknij okno powiązań"
       onClose={onClose}
       sheetStyle={[styles.sheet, keyboardVisible && styles.sheetKeyboard]}
-      handleStyle={styles.handleTouch}>
-      <Text style={styles.title} numberOfLines={2}>
-        Produkty pasujące do: {item?.label}
-      </Text>
+      handleStyle={styles.handleTouch}
+      handleContent={
+        <Text style={styles.title} numberOfLines={2}>
+          Produkty pasujące do: {item?.label}
+        </Text>
+      }>
       <Text style={styles.subtitle}>
         Te produkty będą liczone jako ta pozycja
       </Text>
@@ -154,7 +156,7 @@ function EmptyResults({label}: {label: string}) {
 
 const styles = StyleSheet.create({
   sheet: {
-    paddingTop: 6,
+    paddingTop: 4,
     maxHeight: '78%',
   },
   sheetKeyboard: {
@@ -164,20 +166,21 @@ const styles = StyleSheet.create({
   handleTouch: {
     alignSelf: 'stretch',
     width: 'auto',
-    minHeight: 58,
+    minHeight: 44,
     marginHorizontal: -16,
-    marginTop: -10,
-    marginBottom: -18,
+    marginTop: -4,
+    marginBottom: 0,
     paddingHorizontal: 16,
     justifyContent: 'flex-start',
-    paddingTop: 8,
+    paddingTop: 10,
   },
   title: {
+    alignSelf: 'stretch',
     color: colors.textPrimary,
     fontSize: 22,
     fontWeight: '900',
     textAlign: 'center',
-    marginTop: 0,
+    marginTop: 8,
     marginBottom: 4,
   },
   subtitle: {

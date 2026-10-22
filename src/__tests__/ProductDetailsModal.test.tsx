@@ -8,10 +8,15 @@ jest.mock('../shopping-lists/modals/DraggableBottomSheet', () => ({
   DraggableBottomSheet: ({
     visible,
     children,
+    handleContent,
   }: {
     visible: boolean;
     children: React.ReactNode;
-  }) => (visible ? children : null),
+    handleContent?: React.ReactNode;
+  }) => {
+    const {createElement, Fragment} = require('react');
+    return visible ? createElement(Fragment, null, handleContent, children) : null;
+  },
 }));
 jest.mock('lucide-react-native', () => {
   const {View: MockIcon} = require('react-native');
