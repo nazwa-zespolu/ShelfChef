@@ -13,6 +13,7 @@ const inventoryItem = (
   expiryDate: string | null,
 ): InventoryItem => ({
   id,
+  catalogProductId: null,
   ean: '',
   name,
   expiryDate,

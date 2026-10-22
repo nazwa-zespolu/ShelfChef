@@ -25,6 +25,7 @@ jest.mock('lucide-react-native', () => {
 
 const inventoryItem = (openedAt: string): InventoryItem => ({
   id: '1',
+  catalogProductId: null,
   ean: '',
   name: 'Jam',
   expiryDate: '2026-05-20',

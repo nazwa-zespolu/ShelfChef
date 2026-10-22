@@ -269,10 +269,11 @@ export class ProductRepository {
     const result = db.execute(
       `
         SELECT COUNT(*) AS count
-        FROM inventory
-        WHERE product_ean IS NULL
-          AND lower(trim(custom_name)) = ?
-          AND (expiry_date IS NULL OR expiry_date >= ?)
+        FROM inventory i
+        LEFT JOIN product_catalog catalog ON i.catalog_product_id = catalog.id
+        WHERE i.product_ean IS NULL
+          AND COALESCE(catalog.normalized_name, lower(trim(i.custom_name))) = ?
+          AND (i.expiry_date IS NULL OR i.expiry_date >= ?)
       `,
       [normalizeProductName(name), todayIso],
     );
@@ -287,16 +288,37 @@ export class ProductRepository {
     ean: string | null,
     customName: string | null,
     expiryDate: string | null,
+    catalogProductId?: string,
   ): Promise<void> {
+    let resolvedCatalogId: string | null = null;
+    if (catalogProductId !== undefined) {
+      const result = db.execute('SELECT id, product_ean FROM product_catalog WHERE id = ?', [catalogProductId]);
+      const catalog = result.rows?.length ? result.rows.item(0) : null;
+      if (!catalog) {
+        throw new Error(`Catalog product not found: ${catalogProductId}`);
+      }
+      if ((catalog.product_ean ?? null) !== ean) {
+        throw new Error('Inventory EAN does not match the catalog product');
+      }
+      resolvedCatalogId = catalog.id;
+    } else if (ean) {
+      resolvedCatalogId = (await this.findCatalogProductByEan(ean))?.id ?? null;
+    } else if (customName) {
+      resolvedCatalogId = (await this.findCatalogProductByNormalizedName(
+        'generic', normalizeProductName(customName),
+      ))?.id ?? null;
+    }
+
     db.execute(
       `INSERT INTO inventory (
         id,
+        catalog_product_id,
         product_ean,
         custom_name,
         expiry_date,
         created_at
-      ) VALUES (?, ?, ?, ?, ?)`,
-      [id, ean, customName, expiryDate, new Date().toISOString()],
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, resolvedCatalogId, ean, customName, expiryDate, new Date().toISOString()],
     );
   }
 
@@ -305,13 +327,14 @@ export class ProductRepository {
       `SELECT COUNT(*) AS count
        FROM inventory i
        LEFT JOIN product_definitions d ON i.product_ean = d.ean
+       LEFT JOIN product_catalog catalog ON i.catalog_product_id = catalog.id
        WHERE (
          i.product_ean IS NOT NULL
          AND TRIM(COALESCE(d.name, '')) <> ''
          AND d.is_vegetarian IS NULL
        ) OR (
          i.product_ean IS NULL
-         AND TRIM(COALESCE(i.custom_name, '')) <> ''
+         AND TRIM(COALESCE(catalog.name, i.custom_name, '')) <> ''
          AND i.is_vegetarian IS NULL
        )`,
     );
@@ -330,16 +353,18 @@ export class ProductRepository {
   ): Promise<DietaryCategorizationCandidate[]> {
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 50;
     const result = db.execute(
-      `SELECT i.id AS inventory_id, i.product_ean, i.custom_name, d.name AS definition_name
+      `SELECT i.id AS inventory_id, i.product_ean,
+              COALESCE(catalog.name, i.custom_name) AS custom_name, d.name AS definition_name
        FROM inventory i
        LEFT JOIN product_definitions d ON i.product_ean = d.ean
+       LEFT JOIN product_catalog catalog ON i.catalog_product_id = catalog.id
        WHERE (
          i.product_ean IS NOT NULL
          AND TRIM(COALESCE(d.name, '')) <> ''
          AND d.is_vegetarian IS NULL
        ) OR (
          i.product_ean IS NULL
-         AND TRIM(COALESCE(i.custom_name, '')) <> ''
+         AND TRIM(COALESCE(catalog.name, i.custom_name, '')) <> ''
          AND i.is_vegetarian IS NULL
        )
        ORDER BY i.id
@@ -446,7 +471,7 @@ export class ProductRepository {
   async getRecipeIngredientNames(diet: DietPreference = 'none'): Promise<string[]> {
     const result = db.execute(
       `SELECT
-         i.custom_name,
+         COALESCE(catalog.name, i.custom_name) AS custom_name,
          d.name AS definition_name,
          COALESCE(i.is_vegetarian, d.is_vegetarian) AS is_vegetarian,
          COALESCE(i.is_vegan, d.is_vegan) AS is_vegan,
@@ -454,6 +479,7 @@ export class ProductRepository {
          COALESCE(i.is_lactose_free, d.is_lactose_free) AS is_lactose_free
        FROM inventory i
        LEFT JOIN product_definitions d ON i.product_ean = d.ean
+       LEFT JOIN product_catalog catalog ON i.catalog_product_id = catalog.id
        ORDER BY i.expiry_date ASC`,
     );
 
@@ -499,7 +525,7 @@ export class ProductRepository {
     );
     const inventory = this.rowsToArray(
       db.execute(
-        `SELECT id, product_ean, custom_name, expiry_date, is_opened, opened_at,
+        `SELECT id, catalog_product_id, product_ean, custom_name, expiry_date, is_opened, opened_at,
                 is_vegetarian, is_vegan, is_gluten_free, is_lactose_free
          FROM inventory
          ORDER BY expiry_date ASC
@@ -527,19 +553,15 @@ export class ProductRepository {
   async getFullInventory(): Promise<InventoryItem[]> {
     const query = `
       SELECT 
-        i.id, i.expiry_date, i.opened_at, i.is_opened, i.custom_name, i.created_at,
+        i.id, i.catalog_product_id, i.expiry_date, i.opened_at, i.is_opened, i.custom_name, i.created_at,
         COALESCE(d.ean, i.product_ean) AS ean,
-        d.name,
-        COALESCE(d.brand, generic_catalog.brand) AS brand,
-        COALESCE(specific_catalog.image_url, generic_catalog.image_url, d.image_url) AS image_url,
-        COALESCE(d.category, generic_catalog.category) AS category
+        COALESCE(d.name, catalog.name, i.custom_name) AS name,
+        COALESCE(d.brand, catalog.brand) AS brand,
+        COALESCE(catalog.image_url, d.image_url) AS image_url,
+        COALESCE(d.category, catalog.category) AS category
       FROM inventory i
       LEFT JOIN product_definitions d ON i.product_ean = d.ean
-      LEFT JOIN product_catalog specific_catalog ON i.product_ean = specific_catalog.product_ean
-      LEFT JOIN product_catalog generic_catalog
-        ON i.product_ean IS NULL
-       AND generic_catalog.kind = 'generic'
-       AND generic_catalog.normalized_name = lower(trim(i.custom_name))
+      LEFT JOIN product_catalog catalog ON i.catalog_product_id = catalog.id
       ORDER BY i.expiry_date ASC
     `;
 
@@ -551,6 +573,7 @@ export class ProductRepository {
         const row = result.rows.item(i);
         items.push({
           id: row.id,
+          catalogProductId: row.catalog_product_id ?? null,
           ean: row.ean || '',
           name: row.name || row.custom_name,
           brand: row.brand,

@@ -18,6 +18,7 @@ erDiagram
 
     INVENTORY {
         TEXT id PK
+        TEXT catalog_product_id FK
         TEXT product_ean FK
         TEXT custom_name
         TEXT expiry_date
@@ -86,6 +87,7 @@ erDiagram
 
     PRODUCT_DEFINITIONS ||--o{ INVENTORY : "defines scanned product"
     PRODUCT_DEFINITIONS ||--o| PRODUCT_CATALOG : "backs specific catalog product"
+    PRODUCT_CATALOG ||--o{ INVENTORY : "identifies inventory product"
 
     PRODUCT_CATALOG ||--o{ SHOPPING_LIST_ITEMS : "used by"
     PRODUCT_CATALOG ||--o{ PRODUCT_CATALOG : "generic parent of specific"
@@ -99,6 +101,10 @@ erDiagram
 
 - Schemat jest tworzony w jednej transakcji, bez migracji i bez danych demonstracyjnych. Po zmianie schematu należy ręcznie wyczyścić dane instalacji deweloperskiej; zwykły restart zachowuje dane.
 - `inventory.created_at` jest wymagane i zapisywane zarówno przy dodawaniu produktu, jak i finalizacji zakupów. Jedna sztuka odpowiada jednemu rekordowi.
+- `inventory.catalog_product_id` wskazuje stabilne `product_catalog.id` dla produktów z EAN i bez EAN. Powiązanie jest zapisywane przy dodawaniu egzemplarza; późniejszy odczyt nie dopasowuje go po nazwie.
+- Dla produktów bez EAN wspólna nazwa i metadane pochodzą z katalogu. `inventory.custom_name` pozostaje nazwą pozycji tekstowej lub kopią nazwy z momentu dodania, bez roli identyfikatora produktu.
+- Finalizacja zakupów zapisuje identyfikator produktu wybranego bezpośrednio albo przez jednoznaczne powiązanie. Przy wielu alternatywach zachowuje dotychczasowy wybór jednego produktu z EAN, jeżeli taki jest jedyny; pozostałe niejednoznaczne pozycje pozostają tekstowe, z pustym `catalog_product_id`.
+- Pozycje zakupowe wskazujące produkt katalogowy pokazują jego aktualną nazwę. Własne etykiety pozycji tekstowych pozostają niezależne od nazw ich alternatyw.
 - Pola dietetyczne i ustawienia modelu zachowują dotychczasowe znaczenie. Początkowe `NULL` w polach dietetycznych oznacza brak klasyfikacji.
 - `inventory.product_ean` wskazuje na `product_definitions.ean`, jesli produkt pochodzi ze skanu.
 - `product_catalog.product_ean` wskazuje na `product_definitions.ean` dla produktow konkretnych (`specific`).
@@ -119,6 +125,9 @@ erDiagram
 ## Indeksy
 
 ```sql
+CREATE INDEX IF NOT EXISTS idx_inventory_catalog_product
+ON inventory(catalog_product_id);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_product_catalog_ean
 ON product_catalog(product_ean)
 WHERE product_ean IS NOT NULL;

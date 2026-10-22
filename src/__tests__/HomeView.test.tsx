@@ -56,6 +56,7 @@ const inventoryItem = (
   overrides: Partial<InventoryItem> = {},
 ): InventoryItem => ({
   id,
+  catalogProductId: null,
   ean: '',
   name,
   expiryDate,

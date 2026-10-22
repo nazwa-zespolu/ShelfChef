@@ -109,7 +109,7 @@ describe('UI: ProductScannerView manual products without EAN', () => {
       category: 'Przetwory warzywne',
       imageUrl: `file://${photoDestination}`,
     });
-    expect(addToInventory).toHaveBeenCalledWith(expect.any(String), null, 'Domowy sos', null);
+    expect(addToInventory).toHaveBeenCalledWith(expect.any(String), null, 'Domowy sos', null, 'catalog-sauce');
     expect(saveDefinition).not.toHaveBeenCalled();
     expect(onProductAdded).toHaveBeenCalledTimes(1);
   });

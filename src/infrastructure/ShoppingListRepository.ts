@@ -259,6 +259,7 @@ export class ShoppingListRepository {
       `
         SELECT
           item.*,
+          COALESCE(definition.name, catalog.name, item.label) AS label,
           COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM shopping_list_items item
         LEFT JOIN product_catalog catalog ON item.catalog_product_id = catalog.id
@@ -730,25 +731,25 @@ export class ShoppingListRepository {
             i.id,
             i.label,
             i.quantity,
-            i.catalog_product_id,
-            d.ean AS product_ean,
-            linked.linked_product_ean
+            COALESCE(c.id, linked_catalog.id) AS inventory_catalog_product_id,
+            COALESCE(c.product_ean, linked_catalog.product_ean) AS product_ean,
+            COALESCE(c.name, linked_catalog.name, i.label) AS inventory_name
           FROM shopping_list_items i
           LEFT JOIN product_catalog c ON i.catalog_product_id = c.id
-          LEFT JOIN product_definitions d ON c.product_ean = d.ean
           LEFT JOIN (
             SELECT
               link.item_id,
               CASE
-                WHEN COUNT(catalog.product_ean) = 1 THEN MAX(catalog.product_ean)
+                WHEN COUNT(catalog.product_ean) = 1 THEN
+                  MAX(CASE WHEN catalog.product_ean IS NOT NULL THEN catalog.id END)
+                WHEN COUNT(*) = 1 THEN MAX(catalog.id)
                 ELSE NULL
-              END AS linked_product_ean
+              END AS catalog_product_id
             FROM shopping_list_item_catalog_products link
             INNER JOIN product_catalog catalog ON catalog.id = link.catalog_product_id
-            WHERE catalog.kind = 'specific'
-              AND catalog.product_ean IS NOT NULL
             GROUP BY link.item_id
-          ) linked ON linked.item_id = i.id
+          ) linked ON linked.item_id = i.id AND i.catalog_product_id IS NULL
+          LEFT JOIN product_catalog linked_catalog ON linked.catalog_product_id = linked_catalog.id
           WHERE i.list_id = ?
             AND i.status = 'purchased'
         `,
@@ -763,11 +764,13 @@ export class ShoppingListRepository {
             const inventoryId = generateId('inv');
             inventoryIds.push(inventoryId);
             db.execute(
-              'INSERT INTO inventory (id, product_ean, custom_name, expiry_date, created_at) VALUES (?, ?, ?, ?, ?)',
+              `INSERT INTO inventory (id, catalog_product_id, product_ean, custom_name, expiry_date, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)`,
               [
                 inventoryId,
-                row.product_ean ?? row.linked_product_ean ?? null,
-                row.label,
+                row.inventory_catalog_product_id ?? null,
+                row.product_ean ?? null,
+                row.inventory_name,
                 expiryDateByItemId[row.id] ?? null,
                 nowIso(),
               ],

@@ -32,7 +32,7 @@ describe('ProductRepository + database integration', () => {
       'normalized_name', 'is_vegetarian', 'is_vegan', 'is_gluten_free', 'is_lactose_free',
     ]));
     expect(columns('inventory')).toEqual(expect.arrayContaining([
-      'created_at', 'opened_at', 'is_vegetarian', 'is_vegan', 'is_gluten_free', 'is_lactose_free',
+      'catalog_product_id', 'created_at', 'opened_at', 'is_vegetarian', 'is_vegan', 'is_gluten_free', 'is_lactose_free',
     ]));
     expect(columns('product_catalog')).toEqual(expect.arrayContaining([
       'brand', 'category', 'image_url',

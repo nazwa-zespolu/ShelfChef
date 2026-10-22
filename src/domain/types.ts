@@ -16,6 +16,7 @@ export interface ProductDefinition {
   
   export interface InventoryItem extends ProductDefinition {
     id: string; // UUID
+    catalogProductId: string | null;
     expiryDate: string | null; // ISO 8601 (YYYY-MM-DD) or null when unknown
     openedAt?: string | null;
     isOpened: boolean;
