@@ -171,7 +171,7 @@ describe('ProductRepository + database integration', () => {
     });
   });
 
-  it('nie nadpisuje flag dietetycznych przy zwyklym update definicji', async () => {
+  it('preserves dietary flags and shared metadata when saving an existing EAN', async () => {
     await repository.saveDefinition({
       ean: '5901234123457',
       name: 'Mleko',
@@ -196,6 +196,7 @@ describe('ProductRepository + database integration', () => {
 
     const found = await repository.findDefinitionByEan('5901234123457');
 
+    expect(found).toMatchObject({name: 'Mleko', imageUrl: 'https://img/mleko.jpg'});
     expect(found?.dietary).toEqual({
       isVegetarian: true,
       isVegan: false,

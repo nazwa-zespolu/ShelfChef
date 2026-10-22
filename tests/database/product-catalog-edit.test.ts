@@ -220,7 +220,7 @@ describe('Local product catalog queries and editing', () => {
   });
 
   it.each(['INSERT', 'UPDATE'])(
-    'rolls back definition saves if the catalog %s fails and supports retry',
+    'keeps definition saves consistent when catalog %s is rejected',
     async operation => {
       if (operation === 'UPDATE') {
         await createProduct('specific');
@@ -231,14 +231,20 @@ describe('Local product catalog queries and editing', () => {
         BEGIN SELECT RAISE(ABORT, 'test catalog save failure'); END`);
       const definition = {...original, ean: '5901234123457', name: 'Żurek domowy'};
 
-      await expect(products.saveDefinition(definition)).rejects.toThrow('test catalog save failure');
+      if (operation === 'INSERT') {
+        await expect(products.saveDefinition(definition)).rejects.toThrow('test catalog save failure');
+      } else {
+        // Repeated adds must not execute any shared catalog update.
+        await products.saveDefinition(definition);
+      }
 
       expect(tableRows('product_definitions')).toEqual(definitionsBefore);
       expect(tableRows('product_catalog')).toEqual(catalogBefore);
       db.execute('DROP TRIGGER fail_catalog_save');
       await products.saveDefinition(definition);
-      expect(await products.findDefinitionByEan(definition.ean)).toMatchObject(definition);
-      expect(await products.findCatalogProductByEan(definition.ean)).toMatchObject({name: definition.name});
+      const expected = operation === 'INSERT' ? definition : {...original, ean: definition.ean};
+      expect(await products.findDefinitionByEan(definition.ean)).toMatchObject(expected);
+      expect(await products.findCatalogProductByEan(definition.ean)).toMatchObject({name: expected.name});
     },
   );
 });

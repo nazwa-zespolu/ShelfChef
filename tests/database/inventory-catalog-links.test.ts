@@ -84,10 +84,10 @@ describe('Inventory catalog links', () => {
       .toMatchObject({name: 'Żurek domowy', catalogProductId: product.id});
   });
 
-  it('resolves an EAN to a stable catalog ID and preserves it on subsequent definition saves', async () => {
+  it('resolves an EAN to a stable catalog ID and preserves it after catalog editing', async () => {
     const product = await createProduct('specific');
     await products.addToInventory('ean-copy', product.productEan, null, '2999-01-01');
-    await products.saveDefinition({...metadata, ean: product.productEan!, name: 'Żurek na zakwasie'});
+    await products.updateCatalogProduct(product.id, {...metadata, name: 'Żurek na zakwasie'});
 
     sqlite.reopen();
     setupDatabase();

@@ -83,6 +83,12 @@ export class ProductRepository {
 
   async saveDefinition(def: ProductDefinition): Promise<void> {
     runInTransaction(() => {
+      // Adding another copy must never edit the shared product definition.
+      // Existing products are edited explicitly through updateCatalogProduct.
+      const existing = db.execute('SELECT ean FROM product_definitions WHERE ean = ?', [def.ean]);
+      if (existing.rows?.length) {
+        return;
+      }
       const dietary = def.dietary;
       db.execute(
         `INSERT INTO product_definitions (
@@ -90,15 +96,7 @@ export class ProductRepository {
            is_vegetarian, is_vegan, is_gluten_free, is_lactose_free
          )
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(ean) DO UPDATE SET
-           name = excluded.name,
-           brand = excluded.brand,
-           image_url = COALESCE(excluded.image_url, product_definitions.image_url),
-           category = excluded.category,
-           is_vegetarian = COALESCE(excluded.is_vegetarian, product_definitions.is_vegetarian),
-           is_vegan = COALESCE(excluded.is_vegan, product_definitions.is_vegan),
-           is_gluten_free = COALESCE(excluded.is_gluten_free, product_definitions.is_gluten_free),
-           is_lactose_free = COALESCE(excluded.is_lactose_free, product_definitions.is_lactose_free)`,
+         ON CONFLICT(ean) DO NOTHING`,
         [
           def.ean,
           def.name,
@@ -117,11 +115,7 @@ export class ProductRepository {
            parent_catalog_product_id, created_at, updated_at
          )
          VALUES (?, ?, ?, 'specific', ?, ?, NULL, datetime('now'), datetime('now'))
-         ON CONFLICT(product_ean) WHERE product_ean IS NOT NULL DO UPDATE SET
-           name = excluded.name,
-           normalized_name = excluded.normalized_name,
-           image_url = COALESCE(excluded.image_url, product_catalog.image_url),
-           updated_at = datetime('now')`,
+         ON CONFLICT(product_ean) WHERE product_ean IS NOT NULL DO NOTHING`,
         [
           `catalog-specific-${def.ean}`,
           def.name,

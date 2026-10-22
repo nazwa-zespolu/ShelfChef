@@ -472,10 +472,27 @@ function ProductScannerVisionContent({
   const [resolving, setResolving] = useState(false);
   const [adding, setAdding] = useState(false);
   const [photoPicking, setPhotoPicking] = useState(false);
+  const [manualLookup, setManualLookup] = useState<{
+    ean: string;
+    status: 'loading' | 'ready' | 'error';
+    product: ProductDefinition | null;
+  } | null>(null);
+  const [manualLookupAttempt, setManualLookupAttempt] = useState(0);
+  const manualLookupRequestRef = useRef(0);
+  const addingRef = useRef(false);
   const lastAcceptedScanRef = useRef<{code: string; scannedAt: number} | null>(null);
   const resolveRequestIdRef = useRef(0);
   const scanToAdd = useMemo(() => getScanToAdd(), []);
   const repo = useMemo(() => getProductRepository(), []);
+  const manualFormOpen = sheetMode === 'manualNoEan' || sheetMode === 'manualWithEan';
+  const normalizedManualEan = manualEan.trim();
+  const shouldLookupManualEan = manualFormOpen && isValidEAN(normalizedManualEan);
+  const currentManualLookup = manualLookup?.ean === normalizedManualEan ? manualLookup : null;
+  const manualLookupPending = shouldLookupManualEan && (!currentManualLookup || currentManualLookup.status === 'loading');
+  const manualLookupFailed = shouldLookupManualEan && currentManualLookup?.status === 'error';
+  const existingManualProduct = shouldLookupManualEan && currentManualLookup?.status === 'ready'
+    ? currentManualLookup.product : null;
+  const manualSharedFieldsLocked = adding || resolving || photoPicking || manualLookupPending || manualLookupFailed || !!existingManualProduct;
   const {toast, toastAnim, showToast} = useAppToast();
   const toastTop = useMemo(() => insets.top + 12, [insets.top]);
   const currentYear = useMemo(() => new Date().getFullYear(), []);
@@ -493,6 +510,26 @@ function ProductScannerVisionContent({
       ),
     [activeDate],
   );
+
+  useEffect(() => {
+    const requestId = ++manualLookupRequestRef.current;
+    if (!shouldLookupManualEan) {
+      setManualLookup(null);
+      return;
+    }
+    let active = true;
+    setManualLookup({ean: normalizedManualEan, status: 'loading', product: null});
+    repo.findDefinitionByEan(normalizedManualEan).then(product => {
+      if (active && requestId === manualLookupRequestRef.current) {
+        setManualLookup({ean: normalizedManualEan, status: 'ready', product});
+      }
+    }).catch(() => {
+      if (active && requestId === manualLookupRequestRef.current) {
+        setManualLookup({ean: normalizedManualEan, status: 'error', product: null});
+      }
+    });
+    return () => { active = false; };
+  }, [repo, shouldLookupManualEan, normalizedManualEan, manualLookupAttempt]);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -541,8 +578,21 @@ function ProductScannerVisionContent({
   };
 
   const closeBottomSheet = () => {
+    if (addingRef.current || photoPicking) {
+      return;
+    }
+    manualLookupRequestRef.current += 1;
+    setManualLookup(null);
     setSheetMode('none');
     setScannedProduct(null);
+  };
+
+  const changeManualEan = (value: string) => {
+    if (value.trim() !== normalizedManualEan) {
+      manualLookupRequestRef.current += 1;
+      setManualLookup(null);
+    }
+    setManualEan(value);
   };
 
   const pickProductPhoto = async (source: ProductPhotoSource) => {
@@ -688,65 +738,40 @@ function ProductScannerVisionContent({
   }
 
   const handleAddProduct = async () => {
-    if (!scannedProduct) {
+    if (!scannedProduct || addingRef.current) {
       return;
     }
+    addingRef.current = true;
     setAdding(true);
     try {
       const expiryDate = expirationDate ? formatExpiryForDb(expirationDate) : null;
       for (let i = 0; i < amount; i += 1) {
         await repo.addToInventory(generateInventoryId(i), scannedProduct.ean, null, expiryDate);
       }
+      addingRef.current = false;
       closeBottomSheet();
       onProductAdded?.();
       showToast(formatAddSuccessMessage(scannedProduct.name, amount));
     } catch {
       showToast('Nie udało się dodać produktu', 'error');
     } finally {
+      addingRef.current = false;
       setAdding(false);
     }
   };
 
-  const handleSaveManualWithEan = async () => {
-    const normalizedName = manualName.trim();
-    const normalizedEan = manualEan.trim();
+  const handleSaveManualProduct = async () => {
+    if (addingRef.current || resolving || photoPicking || manualLookupPending || manualLookupFailed) {
+      return;
+    }
+    const normalizedName = (existingManualProduct?.name ?? manualName).trim();
+    const normalizedEan = normalizedManualEan;
     if (!normalizedName) {
       showToast('Podaj nazwę produktu', 'error');
       return;
     }
-    if (!isValidEAN(normalizedEan)) {
+    if (sheetMode === 'manualWithEan' && !isValidEAN(normalizedEan)) {
       showToast('Nie udało się zapisać bez poprawnego EAN', 'error');
-      return;
-    }
-
-    setAdding(true);
-    try {
-      await repo.saveDefinition({
-        ean: normalizedEan,
-        name: normalizedName,
-        brand: manualBrand.trim() || undefined,
-        category: manualCategory.trim() || undefined,
-        imageUrl: manualPhotoUri ?? undefined,
-      });
-      const expiryDate = expirationDate ? formatExpiryForDb(expirationDate) : null;
-      for (let i = 0; i < amount; i += 1) {
-        await repo.addToInventory(generateInventoryId(i), normalizedEan, null, expiryDate);
-      }
-      closeBottomSheet();
-      onProductAdded?.();
-      showToast(formatAddSuccessMessage(normalizedName, amount));
-    } catch {
-      showToast('Nie udało się zapisać produktu', 'error');
-    } finally {
-      setAdding(false);
-    }
-  };
-
-  const handleSaveManualNoEan = async () => {
-    const normalizedName = manualName.trim();
-    const normalizedEan = manualEan.trim();
-    if (!normalizedName) {
-      showToast('Podaj nazwę produktu', 'error');
       return;
     }
     if (normalizedEan && !isValidEAN(normalizedEan)) {
@@ -754,17 +779,27 @@ function ProductScannerVisionContent({
       return;
     }
 
+    addingRef.current = true;
     setAdding(true);
     try {
       const expiryDate = expirationDate ? formatExpiryForDb(expirationDate) : null;
+      let savedName = normalizedName;
       if (normalizedEan) {
-        await repo.saveDefinition({
-          ean: normalizedEan,
-          name: normalizedName,
-          brand: manualBrand.trim() || undefined,
-          category: manualCategory.trim() || undefined,
-          imageUrl: manualPhotoUri ?? undefined,
-        });
+        let definition = await repo.findDefinitionByEan(normalizedEan);
+        if (!definition) {
+          await repo.saveDefinition({
+            ean: normalizedEan,
+            name: normalizedName,
+            brand: manualBrand.trim() || undefined,
+            category: manualCategory.trim() || undefined,
+            imageUrl: manualPhotoUri ?? undefined,
+          });
+          definition = await repo.findDefinitionByEan(normalizedEan);
+        }
+        if (!definition) {
+          throw new Error('Product definition not found after save');
+        }
+        savedName = definition.name;
         for (let i = 0; i < amount; i += 1) {
           await repo.addToInventory(generateInventoryId(i), normalizedEan, null, expiryDate);
         }
@@ -779,15 +814,33 @@ function ProductScannerVisionContent({
           await repo.addToInventory(generateInventoryId(i), null, normalizedName, expiryDate, catalog.id);
         }
       }
+      addingRef.current = false;
       closeBottomSheet();
       onProductAdded?.();
-      showToast(formatAddSuccessMessage(normalizedName, amount));
+      showToast(formatAddSuccessMessage(savedName, amount));
     } catch {
       showToast('Nie udało się dodać produktu', 'error');
     } finally {
+      addingRef.current = false;
       setAdding(false);
     }
   };
+
+  const manualLookupNotice = manualLookupPending ? (
+    <Text style={styles.info}>Sprawdzam EAN w lokalnym katalogu…</Text>
+  ) : manualLookupFailed ? (
+    <View>
+      <Text style={styles.info}>Nie udało się sprawdzić EAN. Ponów sprawdzenie przed dodaniem produktu.</Text>
+      <Pressable accessibilityRole="button" onPress={() => {
+        setManualLookup(null);
+        setManualLookupAttempt(attempt => attempt + 1);
+      }}>
+        <Text style={styles.backText}>Ponów sprawdzenie EAN</Text>
+      </Pressable>
+    </View>
+  ) : existingManualProduct ? (
+    <Text style={styles.info}>Produkt jest już w katalogu</Text>
+  ) : null;
 
   const sheetHeader = sheetMode === 'details' && scannedProduct ? (
     <View style={[styles.productRow, styles.sheetHeader]}>
@@ -953,38 +1006,41 @@ function ProductScannerVisionContent({
             <Text style={styles.inputLabel}>EAN</Text>
             <TextInput
               value={manualEan}
-              onChangeText={setManualEan}
               style={styles.textInput}
               editable={false}
               selectTextOnFocus={false}
             />
+            {manualLookupNotice}
             <Text style={styles.inputLabel}>Nazwa produktu</Text>
             <TextInput
-              value={manualName}
+              value={existingManualProduct ? existingManualProduct.name : manualName}
               onChangeText={setManualName}
+              editable={!manualSharedFieldsLocked}
               style={styles.textInput}
               placeholder="Np. Makaron pełnoziarnisty"
               placeholderTextColor={colors.textMuted}
             />
             <Text style={styles.inputLabel}>Marka (opcjonalnie)</Text>
             <TextInput
-              value={manualBrand}
+              value={existingManualProduct ? existingManualProduct.brand ?? '' : manualBrand}
               onChangeText={setManualBrand}
+              editable={!manualSharedFieldsLocked}
               style={styles.textInput}
               placeholder="Np. Barilla"
               placeholderTextColor={colors.textMuted}
             />
             <Text style={styles.inputLabel}>Kategoria (opcjonalnie)</Text>
             <TextInput
-              value={manualCategory}
+              value={existingManualProduct ? existingManualProduct.category ?? '' : manualCategory}
               onChangeText={setManualCategory}
+              editable={!manualSharedFieldsLocked}
               style={styles.textInput}
               placeholder="Np. Produkty suche"
               placeholderTextColor={colors.textMuted}
             />
             <ProductPhotoPicker
-              imageUri={manualPhotoUri}
-              disabled={adding || resolving || photoPicking}
+              imageUri={existingManualProduct ? existingManualProduct.imageUrl ?? null : manualPhotoUri}
+              disabled={manualSharedFieldsLocked}
               picking={photoPicking}
               onTakePhoto={() => {
                 pickProductPhoto('camera').catch(() => {});
@@ -1044,10 +1100,10 @@ function ProductScannerVisionContent({
               amount={amount}
               setAmount={setAmount}
               adding={adding}
-              resolving={resolving || photoPicking}
+              resolving={resolving || photoPicking || manualLookupPending || manualLookupFailed}
               onClose={closeBottomSheet}
               onSave={() => {
-                handleSaveManualWithEan().catch(() => {});
+                handleSaveManualProduct().catch(() => {});
               }}
               saveLabel="Zapisz i dodaj"
               savingLabel="Zapisuję…"
@@ -1062,39 +1118,44 @@ function ProductScannerVisionContent({
             <Text style={styles.inputLabel}>EAN (opcjonalnie)</Text>
             <TextInput
               value={manualEan}
-              onChangeText={setManualEan}
+              onChangeText={changeManualEan}
+              editable={!adding && !photoPicking}
               style={styles.textInput}
               placeholder="Np. 5901234123457"
               placeholderTextColor={colors.textMuted}
               keyboardType="number-pad"
             />
+            {manualLookupNotice}
             <Text style={styles.inputLabel}>Nazwa produktu</Text>
             <TextInput
-              value={manualName}
+              value={existingManualProduct ? existingManualProduct.name : manualName}
               onChangeText={setManualName}
+              editable={!manualSharedFieldsLocked}
               style={styles.textInput}
               placeholder="Np. Domowy zakwas"
               placeholderTextColor={colors.textMuted}
             />
             <Text style={styles.inputLabel}>Marka (opcjonalnie)</Text>
             <TextInput
-              value={manualBrand}
+              value={existingManualProduct ? existingManualProduct.brand ?? '' : manualBrand}
               onChangeText={setManualBrand}
+              editable={!manualSharedFieldsLocked}
               style={styles.textInput}
               placeholder="Np. Barilla"
               placeholderTextColor={colors.textMuted}
             />
             <Text style={styles.inputLabel}>Kategoria (opcjonalnie)</Text>
             <TextInput
-              value={manualCategory}
+              value={existingManualProduct ? existingManualProduct.category ?? '' : manualCategory}
               onChangeText={setManualCategory}
+              editable={!manualSharedFieldsLocked}
               style={styles.textInput}
               placeholder="Np. Produkty suche"
               placeholderTextColor={colors.textMuted}
             />
             <ProductPhotoPicker
-              imageUri={manualPhotoUri}
-              disabled={adding || resolving || photoPicking}
+              imageUri={existingManualProduct ? existingManualProduct.imageUrl ?? null : manualPhotoUri}
+              disabled={manualSharedFieldsLocked}
               picking={photoPicking}
               onTakePhoto={() => {
                 pickProductPhoto('camera').catch(() => {});
@@ -1154,10 +1215,10 @@ function ProductScannerVisionContent({
               amount={amount}
               setAmount={setAmount}
               adding={adding}
-              resolving={resolving || photoPicking}
+              resolving={resolving || photoPicking || manualLookupPending || manualLookupFailed}
               onClose={closeBottomSheet}
               onSave={() => {
-                handleSaveManualNoEan().catch(() => {});
+                handleSaveManualProduct().catch(() => {});
               }}
               saveLabel="Zapisz i dodaj"
               savingLabel="Dodaję…"
