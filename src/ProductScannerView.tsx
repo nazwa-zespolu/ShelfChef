@@ -767,7 +767,12 @@ function ProductScannerVisionContent({
           await repo.addToInventory(generateInventoryId(i), normalizedEan, null, expiryDate);
         }
       } else {
-        await repo.saveGenericCatalogProduct(normalizedName, manualPhotoUri);
+        await repo.saveGenericCatalogProduct({
+          name: normalizedName,
+          brand: manualBrand.trim() || undefined,
+          category: manualCategory.trim() || undefined,
+          imageUrl: manualPhotoUri,
+        });
         for (let i = 0; i < amount; i += 1) {
           await repo.addToInventory(generateInventoryId(i), null, normalizedName, expiryDate);
         }

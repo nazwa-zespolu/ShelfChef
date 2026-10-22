@@ -22,6 +22,8 @@ function setupShoppingListsSchema() {
         normalized_name TEXT NOT NULL,
         kind TEXT NOT NULL CHECK(kind IN ('generic', 'specific')),
         product_ean TEXT,
+        brand TEXT,
+        category TEXT,
         image_url TEXT,
         parent_catalog_product_id TEXT,
         created_at TEXT NOT NULL,

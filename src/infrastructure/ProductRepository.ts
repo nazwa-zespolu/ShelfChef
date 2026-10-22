@@ -18,6 +18,8 @@ function mapCatalogProduct(row: Record<string, any>): CatalogProduct {
     normalizedName: row.normalized_name,
     kind: row.kind,
     productEan: row.product_ean ?? null,
+    brand: row.brand ?? null,
+    category: row.category ?? null,
     imageUrl: row.image_url ?? null,
     parentCatalogProductId: row.parent_catalog_product_id ?? null,
     createdAt: row.created_at,
@@ -34,6 +36,13 @@ export interface ProductRepositoryDebugSnapshot {
 export interface UpdateInventoryItemInput {
   expiryDate: string | null;
   openedAt: string | null;
+}
+
+export interface SaveGenericCatalogProductInput {
+  name: string;
+  brand?: string | null;
+  category?: string | null;
+  imageUrl?: string | null;
 }
 
 export class ProductRepository {
@@ -124,8 +133,8 @@ export class ProductRepository {
     );
   }
 
-  async saveGenericCatalogProduct(name: string, imageUrl?: string | null): Promise<CatalogProduct> {
-    const trimmedName = name.trim();
+  async saveGenericCatalogProduct(input: SaveGenericCatalogProductInput): Promise<CatalogProduct> {
+    const trimmedName = input.name.trim();
     const normalizedName = normalizeProductName(trimmedName);
     const id = `catalog-generic-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
     db.execute(
@@ -136,18 +145,29 @@ export class ProductRepository {
           normalized_name,
           kind,
           product_ean,
+          brand,
+          category,
           image_url,
           parent_catalog_product_id,
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, 'generic', NULL, ?, NULL, datetime('now'), datetime('now'))
+        VALUES (?, ?, ?, 'generic', NULL, ?, ?, ?, NULL, datetime('now'), datetime('now'))
         ON CONFLICT(kind, normalized_name) WHERE kind = 'generic' DO UPDATE SET
           name = excluded.name,
+          brand = COALESCE(excluded.brand, product_catalog.brand),
+          category = COALESCE(excluded.category, product_catalog.category),
           image_url = COALESCE(excluded.image_url, product_catalog.image_url),
           updated_at = datetime('now')
       `,
-      [id, trimmedName, normalizedName, imageUrl ?? null],
+      [
+        id,
+        trimmedName,
+        normalizedName,
+        input.brand?.trim() || null,
+        input.category?.trim() || null,
+        input.imageUrl ?? null,
+      ],
     );
 
     const found = await this.findCatalogProductByNormalizedName('generic', normalizedName);
@@ -165,6 +185,8 @@ export class ProductRepository {
       `
         SELECT
           catalog.*,
+          COALESCE(definition.brand, catalog.brand) AS brand,
+          COALESCE(definition.category, catalog.category) AS category,
           COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM product_catalog catalog
         LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
@@ -184,6 +206,8 @@ export class ProductRepository {
       `
         SELECT
           catalog.*,
+          COALESCE(definition.brand, catalog.brand) AS brand,
+          COALESCE(definition.category, catalog.category) AS category,
           COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM product_catalog catalog
         LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
@@ -505,9 +529,10 @@ export class ProductRepository {
       SELECT 
         i.id, i.expiry_date, i.opened_at, i.is_opened, i.custom_name, i.created_at,
         COALESCE(d.ean, i.product_ean) AS ean,
-        d.name, d.brand,
+        d.name,
+        COALESCE(d.brand, generic_catalog.brand) AS brand,
         COALESCE(specific_catalog.image_url, generic_catalog.image_url, d.image_url) AS image_url,
-        d.category
+        COALESCE(d.category, generic_catalog.category) AS category
       FROM inventory i
       LEFT JOIN product_definitions d ON i.product_ean = d.ean
       LEFT JOIN product_catalog specific_catalog ON i.product_ean = specific_catalog.product_ean

@@ -65,6 +65,8 @@ function mapCatalogProduct(row: Record<string, any>): CatalogProduct {
     normalizedName: row.normalized_name,
     kind: row.kind,
     productEan: row.product_ean ?? null,
+    brand: row.brand ?? null,
+    category: row.category ?? null,
     imageUrl: row.image_url ?? null,
     parentCatalogProductId: row.parent_catalog_product_id ?? null,
     createdAt: row.created_at,
@@ -280,6 +282,8 @@ export class ShoppingListRepository {
       `
         SELECT
           catalog.*,
+          COALESCE(definition.brand, catalog.brand) AS brand,
+          COALESCE(definition.category, catalog.category) AS category,
           COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM product_catalog catalog
         LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
@@ -528,6 +532,8 @@ export class ShoppingListRepository {
       normalizedName,
       kind: 'generic',
       productEan: null,
+      brand: null,
+      category: null,
       parentCatalogProductId: null,
       imageUrl: null,
       createdAt: timestamp,
@@ -540,6 +546,8 @@ export class ShoppingListRepository {
       `
         SELECT
           catalog.*,
+          COALESCE(definition.brand, catalog.brand) AS brand,
+          COALESCE(definition.category, catalog.category) AS category,
           COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM product_catalog catalog
         LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
@@ -561,6 +569,8 @@ export class ShoppingListRepository {
       `
         SELECT
           catalog.*,
+          COALESCE(definition.brand, catalog.brand) AS brand,
+          COALESCE(definition.category, catalog.category) AS category,
           COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM product_catalog catalog
         LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
@@ -581,6 +591,8 @@ export class ShoppingListRepository {
       `
         SELECT
           catalog.*,
+          COALESCE(definition.brand, catalog.brand) AS brand,
+          COALESCE(definition.category, catalog.category) AS category,
           COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM product_catalog catalog
         LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
@@ -847,6 +859,8 @@ export class ShoppingListRepository {
           catalog.normalized_name,
           catalog.kind,
           catalog.product_ean,
+          COALESCE(definition.brand, catalog.brand) AS brand,
+          COALESCE(definition.category, catalog.category) AS category,
           COALESCE(catalog.image_url, definition.image_url) AS image_url,
           catalog.parent_catalog_product_id,
           catalog.created_at,
