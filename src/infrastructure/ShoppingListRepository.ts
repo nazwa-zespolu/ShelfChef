@@ -10,7 +10,7 @@ import {
   ShoppingListType,
   ShoppingSuggestion,
 } from '../domain/types';
-import {normalizeProductName} from './ProductRepository';
+import {normalizeProductName, ProductRepository} from './ProductRepository';
 import {db, runInTransaction} from './db/init';
 
 export type AddShoppingItemInput = {
@@ -110,6 +110,8 @@ function mapShoppingItem(row: Record<string, any>): ShoppingListItem {
 }
 
 export class ShoppingListRepository {
+  private readonly products = new ProductRepository();
+
   async createList(
     name: string,
     type: ShoppingListType,
@@ -279,25 +281,7 @@ export class ShoppingListRepository {
   }
 
   async getCatalogProducts(): Promise<CatalogProduct[]> {
-    const result = db.execute(
-      `
-        SELECT
-          catalog.*,
-          COALESCE(definition.brand, catalog.brand) AS brand,
-          COALESCE(definition.category, catalog.category) AS category,
-          COALESCE(catalog.image_url, definition.image_url) AS image_url
-        FROM product_catalog catalog
-        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
-        ORDER BY catalog.kind ASC, catalog.name ASC
-      `,
-    );
-    const products: CatalogProduct[] = [];
-    if (result.rows) {
-      for (let i = 0; i < result.rows.length; i++) {
-        products.push(mapCatalogProduct(result.rows.item(i)));
-      }
-    }
-    return products;
+    return this.products.getCatalogProducts();
   }
 
   async addItem(listId: string, input: AddShoppingItemInput): Promise<ShoppingListItem> {
@@ -543,73 +527,18 @@ export class ShoppingListRepository {
   }
 
   async findCatalogProductById(id: string): Promise<CatalogProduct | null> {
-    const result = db.execute(
-      `
-        SELECT
-          catalog.*,
-          COALESCE(definition.brand, catalog.brand) AS brand,
-          COALESCE(definition.category, catalog.category) AS category,
-          COALESCE(catalog.image_url, definition.image_url) AS image_url
-        FROM product_catalog catalog
-        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
-        WHERE catalog.id = ?
-      `,
-      [id],
-    );
-    if (!result.rows || result.rows.length === 0) {
-      return null;
-    }
-    return mapCatalogProduct(result.rows.item(0));
+    return this.products.findCatalogProductById(id);
   }
 
   async findCatalogProductByNormalizedName(
     kind: CatalogProductKind,
     normalizedName: string,
   ): Promise<CatalogProduct | null> {
-    const result = db.execute(
-      `
-        SELECT
-          catalog.*,
-          COALESCE(definition.brand, catalog.brand) AS brand,
-          COALESCE(definition.category, catalog.category) AS category,
-          COALESCE(catalog.image_url, definition.image_url) AS image_url
-        FROM product_catalog catalog
-        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
-        WHERE catalog.kind = ?
-          AND catalog.normalized_name = ?
-      `,
-      [kind, normalizedName],
-    );
-    if (!result.rows || result.rows.length === 0) {
-      return null;
-    }
-    return mapCatalogProduct(result.rows.item(0));
+    return this.products.findCatalogProductByNormalizedName(kind, normalizedName);
   }
 
   async searchCatalogProducts(query: string): Promise<CatalogProduct[]> {
-    const q = `%${normalizeProductName(query)}%`;
-    const result = db.execute(
-      `
-        SELECT
-          catalog.*,
-          COALESCE(definition.brand, catalog.brand) AS brand,
-          COALESCE(definition.category, catalog.category) AS category,
-          COALESCE(catalog.image_url, definition.image_url) AS image_url
-        FROM product_catalog catalog
-        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
-        WHERE catalog.normalized_name LIKE ?
-        ORDER BY catalog.kind ASC, catalog.name ASC
-        LIMIT 20
-      `,
-      [q],
-    );
-    const products: CatalogProduct[] = [];
-    if (result.rows) {
-      for (let i = 0; i < result.rows.length; i++) {
-        products.push(mapCatalogProduct(result.rows.item(i)));
-      }
-    }
-    return products;
+    return this.products.searchCatalogProducts(query, 20);
   }
 
   async addAllSuggestionsToManualList(

@@ -110,6 +110,9 @@ erDiagram
 - `product_catalog.product_ean` wskazuje na `product_definitions.ean` dla produktow konkretnych (`specific`).
 - Dla produktów bez EAN (`generic`) marka i kategoria są zapisywane w `product_catalog.brand` i `product_catalog.category`. Dla produktów `specific` odczyty katalogowe pobierają te pola z `product_definitions`.
 - Ponowny zapis produktu `generic` bez marki, kategorii lub nowego zdjęcia zachowuje wcześniej zapisane wartości tych pól.
+- Świadoma edycja katalogu korzysta z `ProductRepository.updateCatalogProduct(id, input)` i obejmuje wyłącznie nazwę, markę i kategorię. Pusta nazwa jest odrzucana; pustą markę i kategorię zapisujemy jako `NULL`. EAN, zdjęcia, flagi dietetyczne, identyfikatory i stan egzemplarzy pozostają zachowane.
+- Edycja produktu `specific` aktualizuje definicję i nazwę katalogową w jednej transakcji. Również `saveDefinition` zapisuje definicję i katalog atomowo, aktualizując istniejący wiersz katalogu bez `REPLACE`.
+- Kolizja znormalizowanych nazw dwóch produktów `generic` daje błąd `duplicate_name`, bez scalania ich rekordów. Pusta nazwa daje `empty_name`, a brak edytowanego produktu lub definicji — `not_found`.
 - `product_catalog.image_url` przechowuje zdjecie katalogowe uzywane m.in. w listach zakupowych.
 - `product_catalog.parent_catalog_product_id` laczy produkt konkretny z produktem ogolnym (`generic`).
 - `shopping_list_items.list_id` wskazuje liste zakupow.
@@ -121,6 +124,13 @@ erDiagram
 - `shopping_lists.icon_key` i `shopping_lists.icon_color_key` przechowuja wybrany wyglad ikony listy.
 - `shopping_lists.sort_order` zapisuje reczna kolejnosc list na ekranie list zakupow.
 - `app_settings` jest tabela konfiguracyjna i nie ma relacji z pozostalymi tabelami.
+
+## Odczyt katalogu
+
+- `ProductRepository.getCatalogProducts()` zwraca wszystkie produkty lokalnego katalogu, niezależnie od obecności w spiżarni.
+- `findCatalogProductById(id)` odczytuje produkt przeznaczony do edycji po stabilnym identyfikatorze.
+- `searchCatalogProducts(query, limit?)` wyszukuje fragment nazwy lub EAN. Domyślnie zwraca wszystkie dopasowania; pusty tekst zwraca cały katalog. Znaki `%`, `_` i `\` są traktowane dosłownie.
+- Metody odczytu katalogu w `ShoppingListRepository` korzystają z tego samego API. Wyszukiwanie podpowiedzi zakupowych zachowuje limit 20 wyników.
 
 ## Indeksy
 

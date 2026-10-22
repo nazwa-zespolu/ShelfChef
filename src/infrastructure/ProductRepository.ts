@@ -1,4 +1,4 @@
-import { db } from './db/init';
+import { db, runInTransaction } from './db/init';
 import { CatalogProduct, DietaryFlags, ProductDefinition, InventoryItem } from '../domain/types';
 import { DietPreference } from '../features/recipe-generator/domain/recipeGenerationTypes';
 import {
@@ -45,6 +45,22 @@ export interface SaveGenericCatalogProductInput {
   imageUrl?: string | null;
 }
 
+export interface UpdateCatalogProductInput {
+  name: string;
+  brand: string | null;
+  category: string | null;
+}
+
+export class CatalogProductUpdateError extends Error {
+  constructor(
+    readonly code: 'empty_name' | 'duplicate_name' | 'not_found',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'CatalogProductUpdateError';
+  }
+}
+
 export class ProductRepository {
   private static readonly RECIPE_MODEL_CONSENT_KEY = 'recipe_model_download_consent';
 
@@ -66,71 +82,55 @@ export class ProductRepository {
   }
 
   async saveDefinition(def: ProductDefinition): Promise<void> {
-    const dietary = def.dietary;
-    db.execute(
-      `INSERT INTO product_definitions (
-         ean, name, brand, image_url, category,
-         is_vegetarian, is_vegan, is_gluten_free, is_lactose_free
-       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(ean) DO UPDATE SET
-         name = excluded.name,
-         brand = excluded.brand,
-         image_url = COALESCE(excluded.image_url, product_definitions.image_url),
-         category = excluded.category,
-         is_vegetarian = COALESCE(excluded.is_vegetarian, product_definitions.is_vegetarian),
-         is_vegan = COALESCE(excluded.is_vegan, product_definitions.is_vegan),
-         is_gluten_free = COALESCE(excluded.is_gluten_free, product_definitions.is_gluten_free),
-         is_lactose_free = COALESCE(excluded.is_lactose_free, product_definitions.is_lactose_free)`,
-      [
-        def.ean,
-        def.name,
-        def.brand,
-        def.imageUrl,
-        def.category,
-        dietary?.isVegetarian ?? null,
-        dietary?.isVegan ?? null,
-        dietary?.isGlutenFree ?? null,
-        dietary?.isLactoseFree ?? null,
-      ],
-    );
-    db.execute(
-      `
-        INSERT OR REPLACE INTO product_catalog (
-          id,
-          name,
-          normalized_name,
-          kind,
-          product_ean,
-          image_url,
-          parent_catalog_product_id,
-          created_at,
-          updated_at
-        )
-        VALUES (
-          COALESCE((SELECT id FROM product_catalog WHERE product_ean = ?), ?),
-          ?,
-          ?,
-          'specific',
-          ?,
-          COALESCE(?, (SELECT image_url FROM product_catalog WHERE product_ean = ?)),
-          COALESCE((SELECT parent_catalog_product_id FROM product_catalog WHERE product_ean = ?), NULL),
-          COALESCE((SELECT created_at FROM product_catalog WHERE product_ean = ?), datetime('now')),
-          datetime('now')
-        )
-      `,
-      [
-        def.ean,
-        `catalog-specific-${def.ean}`,
-        def.name,
-        normalizeProductName(def.name),
-        def.ean,
-        def.imageUrl ?? null,
-        def.ean,
-        def.ean,
-        def.ean,
-      ],
-    );
+    runInTransaction(() => {
+      const dietary = def.dietary;
+      db.execute(
+        `INSERT INTO product_definitions (
+           ean, name, brand, image_url, category,
+           is_vegetarian, is_vegan, is_gluten_free, is_lactose_free
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(ean) DO UPDATE SET
+           name = excluded.name,
+           brand = excluded.brand,
+           image_url = COALESCE(excluded.image_url, product_definitions.image_url),
+           category = excluded.category,
+           is_vegetarian = COALESCE(excluded.is_vegetarian, product_definitions.is_vegetarian),
+           is_vegan = COALESCE(excluded.is_vegan, product_definitions.is_vegan),
+           is_gluten_free = COALESCE(excluded.is_gluten_free, product_definitions.is_gluten_free),
+           is_lactose_free = COALESCE(excluded.is_lactose_free, product_definitions.is_lactose_free)`,
+        [
+          def.ean,
+          def.name,
+          def.brand,
+          def.imageUrl,
+          def.category,
+          dietary?.isVegetarian ?? null,
+          dietary?.isVegan ?? null,
+          dietary?.isGlutenFree ?? null,
+          dietary?.isLactoseFree ?? null,
+        ],
+      );
+      db.execute(
+        `INSERT INTO product_catalog (
+           id, name, normalized_name, kind, product_ean, image_url,
+           parent_catalog_product_id, created_at, updated_at
+         )
+         VALUES (?, ?, ?, 'specific', ?, ?, NULL, datetime('now'), datetime('now'))
+         ON CONFLICT(product_ean) WHERE product_ean IS NOT NULL DO UPDATE SET
+           name = excluded.name,
+           normalized_name = excluded.normalized_name,
+           image_url = COALESCE(excluded.image_url, product_catalog.image_url),
+           updated_at = datetime('now')`,
+        [
+          `catalog-specific-${def.ean}`,
+          def.name,
+          normalizeProductName(def.name),
+          def.ean,
+          def.imageUrl ?? null,
+        ],
+      );
+    });
   }
 
   async saveGenericCatalogProduct(input: SaveGenericCatalogProductInput): Promise<CatalogProduct> {
@@ -181,44 +181,78 @@ export class ProductRepository {
     kind: CatalogProduct['kind'],
     normalizedName: string,
   ): Promise<CatalogProduct | null> {
-    const result = db.execute(
-      `
-        SELECT
-          catalog.*,
-          COALESCE(definition.brand, catalog.brand) AS brand,
-          COALESCE(definition.category, catalog.category) AS category,
-          COALESCE(catalog.image_url, definition.image_url) AS image_url
-        FROM product_catalog catalog
-        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
-        WHERE catalog.kind = ?
-          AND catalog.normalized_name = ?
-      `,
-      [kind, normalizedName],
-    );
-    if (!result.rows || result.rows.length === 0) {
-      return null;
-    }
-    return mapCatalogProduct(result.rows.item(0));
+    return this.readCatalogProducts('catalog.kind = ? AND catalog.normalized_name = ?', [kind, normalizedName])[0] ?? null;
   }
 
   async findCatalogProductByEan(ean: string): Promise<CatalogProduct | null> {
-    const result = db.execute(
-      `
-        SELECT
-          catalog.*,
-          COALESCE(definition.brand, catalog.brand) AS brand,
-          COALESCE(definition.category, catalog.category) AS category,
-          COALESCE(catalog.image_url, definition.image_url) AS image_url
-        FROM product_catalog catalog
-        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
-        WHERE catalog.product_ean = ?
-      `,
-      [ean],
-    );
-    if (!result.rows || result.rows.length === 0) {
-      return null;
+    return this.readCatalogProducts('catalog.product_ean = ?', [ean])[0] ?? null;
+  }
+
+  async findCatalogProductById(id: string): Promise<CatalogProduct | null> {
+    return this.readCatalogProducts('catalog.id = ?', [id])[0] ?? null;
+  }
+
+  async getCatalogProducts(): Promise<CatalogProduct[]> {
+    return this.readCatalogProducts('1 = 1');
+  }
+
+  async searchCatalogProducts(query: string, limit?: number): Promise<CatalogProduct[]> {
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+      throw new Error('Catalog search limit must be a positive integer');
     }
-    return mapCatalogProduct(result.rows.item(0));
+    const escapedQuery = normalizeProductName(query).replace(/[\\%_]/g, character => `\\${character}`);
+    const pattern = `%${escapedQuery}%`;
+    return this.readCatalogProducts(
+      "catalog.normalized_name LIKE ? ESCAPE '\\' OR catalog.product_ean LIKE ? ESCAPE '\\'",
+      [pattern, pattern],
+      limit,
+    );
+  }
+
+  async updateCatalogProduct(id: string, input: UpdateCatalogProductInput): Promise<CatalogProduct> {
+    const name = input.name.trim();
+    if (!name) {
+      throw new CatalogProductUpdateError('empty_name', 'Product name cannot be empty');
+    }
+    const normalizedName = normalizeProductName(name);
+    const brand = input.brand?.trim() || null;
+    const category = input.category?.trim() || null;
+
+    return runInTransaction(() => {
+      const product = this.readCatalogProducts('catalog.id = ?', [id])[0];
+      if (!product) {
+        throw new CatalogProductUpdateError('not_found', `Catalog product not found: ${id}`);
+      }
+      if (product.kind === 'generic') {
+        const duplicate = this.readCatalogProducts(
+          "catalog.kind = 'generic' AND catalog.normalized_name = ? AND catalog.id <> ?",
+          [normalizedName, id],
+        )[0];
+        if (duplicate) {
+          throw new CatalogProductUpdateError('duplicate_name', 'A generic product with this name already exists');
+        }
+        db.execute(
+          `UPDATE product_catalog
+           SET name = ?, normalized_name = ?, brand = ?, category = ?, updated_at = datetime('now')
+           WHERE id = ?`,
+          [name, normalizedName, brand, category, id],
+        );
+      } else {
+        const definition = db.execute('SELECT ean FROM product_definitions WHERE ean = ?', [product.productEan]);
+        if (!definition.rows?.length) {
+          throw new CatalogProductUpdateError('not_found', `Product definition not found: ${product.productEan}`);
+        }
+        db.execute(
+          'UPDATE product_definitions SET name = ?, brand = ?, category = ? WHERE ean = ?',
+          [name, brand, category, product.productEan],
+        );
+        db.execute(
+          `UPDATE product_catalog SET name = ?, normalized_name = ?, updated_at = datetime('now') WHERE id = ?`,
+          [name, normalizedName, id],
+        );
+      }
+      return this.readCatalogProducts('catalog.id = ?', [id])[0];
+    });
   }
 
   async searchDefinitions(query: string): Promise<ProductDefinition[]> {
@@ -631,6 +665,32 @@ export class ProductRepository {
       'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
       [ProductRepository.RECIPE_MODEL_CONSENT_KEY, granted ? '1' : '0'],
     );
+  }
+
+  private readCatalogProducts(
+    condition: string,
+    params: (string | number)[] = [],
+    limit?: number,
+  ): CatalogProduct[] {
+    const result = db.execute(
+      `SELECT catalog.*,
+              COALESCE(definition.brand, catalog.brand) AS brand,
+              COALESCE(definition.category, catalog.category) AS category,
+              COALESCE(catalog.image_url, definition.image_url) AS image_url
+       FROM product_catalog catalog
+       LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
+       WHERE ${condition}
+       ORDER BY catalog.kind ASC, catalog.name ASC, catalog.id ASC
+       ${limit === undefined ? '' : 'LIMIT ?'}`,
+      limit === undefined ? params : [...params, limit],
+    );
+    const products: CatalogProduct[] = [];
+    if (result.rows) {
+      for (let index = 0; index < result.rows.length; index++) {
+        products.push(mapCatalogProduct(result.rows.item(index)));
+      }
+    }
+    return products;
   }
 
   private readDietaryFlagsFromRow(
