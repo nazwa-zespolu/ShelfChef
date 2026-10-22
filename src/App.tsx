@@ -100,6 +100,7 @@ function App() {
           ) : null}
           {activeTab === 'scan' ? (
             <ProductScannerView
+              onCatalogProductUpdated={() => setInventoryTick(tick => tick + 1)}
               onProductAdded={() => {
                 setInventoryTick(tick => tick + 1);
                 if (inventoryItemCount === 0) {

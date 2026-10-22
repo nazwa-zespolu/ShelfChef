@@ -3,12 +3,13 @@ import {Text, TextInput} from 'react-native';
 import ReactTestRenderer, {act} from 'react-test-renderer';
 import {launchImageLibrary} from 'react-native-image-picker';
 import {copyFile} from '@dr.pogodin/react-native-fs';
+import {useCameraPermission} from 'react-native-vision-camera';
 import ProductScannerView from '../ProductScannerView';
 import {ProductRepository} from '../infrastructure/ProductRepository';
 
 jest.mock('react-native-vision-camera', () => ({
   Camera: () => null,
-  useCameraPermission: () => ({hasPermission: true, requestPermission: jest.fn()}),
+  useCameraPermission: jest.fn(() => ({hasPermission: true, requestPermission: jest.fn()})),
   useCameraDevice: () => ({}),
   useCodeScanner: () => ({}),
 }));
@@ -23,7 +24,7 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 jest.mock('lucide-react-native', () => {
   const {View: MockIcon} = require('react-native');
-  return {Camera: MockIcon, ImagePlus: MockIcon, Trash2: MockIcon};
+  return {Camera: MockIcon, ImagePlus: MockIcon, Trash2: MockIcon, ArrowLeft: MockIcon, ChevronRight: MockIcon, Package: MockIcon, Search: MockIcon};
 });
 jest.mock('../components/AppToast', () => ({
   AppToast: () => null,
@@ -39,10 +40,13 @@ describe('UI: ProductScannerView manual products without EAN', () => {
   const saveGeneric = jest.spyOn(ProductRepository.prototype, 'saveGenericCatalogProduct');
   const saveDefinition = jest.spyOn(ProductRepository.prototype, 'saveDefinition');
   const addToInventory = jest.spyOn(ProductRepository.prototype, 'addToInventory');
+  const getCatalog = jest.spyOn(ProductRepository.prototype, 'getCatalogProducts');
   const onProductAdded = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.mocked(useCameraPermission).mockReturnValue({hasPermission: true, requestPermission: jest.fn()});
+    getCatalog.mockResolvedValue([]);
     saveGeneric.mockResolvedValue({
       id: 'catalog-sauce',
       name: 'Domowy sos',
@@ -68,6 +72,7 @@ describe('UI: ProductScannerView manual products without EAN', () => {
     saveGeneric.mockRestore();
     saveDefinition.mockRestore();
     addToInventory.mockRestore();
+    getCatalog.mockRestore();
   });
 
   const press = async (label: string) => {
@@ -129,5 +134,17 @@ describe('UI: ProductScannerView manual products without EAN', () => {
     });
     expect(addToInventory).toHaveBeenCalledTimes(1);
     expect(onProductAdded).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the catalog without camera permission and returns to the scanner screen', async () => {
+    jest.mocked(useCameraPermission).mockReturnValue({hasPermission: false, requestPermission: jest.fn()});
+    await act(() => { renderer = ReactTestRenderer.create(<ProductScannerView />); });
+
+    await press('Katalog produktów');
+
+    expect(getCatalog).toHaveBeenCalledTimes(1);
+    expect(renderer!.root.findAllByType(Text).map(node => node.props.children)).toContain('Katalog jest pusty');
+    await act(() => renderer!.root.findByProps({testID: 'catalog-back'}).props.onPress());
+    expect(renderer!.root.findAllByType(Text).map(node => node.props.children)).toContain('Brak zgody na użycie aparatu.');
   });
 });

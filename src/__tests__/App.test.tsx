@@ -9,6 +9,7 @@ import App from '../App';
 import HomeView from '../HomeView';
 import RecipeGeneratorView from '../RecipeGeneratorView';
 import BottomNav from '../components/BottomNav';
+import ProductScannerView from '../ProductScannerView';
 import {setupDatabase} from '../infrastructure/db/init';
 
 jest.mock('../infrastructure/db/init', () => ({setupDatabase: jest.fn()}));
@@ -80,4 +81,18 @@ test('keeps screens unmounted on database failure and opens them after a success
   expect(HomeView).toHaveBeenCalled();
   expect(RecipeGeneratorView).toHaveBeenCalled();
   expect(renderer.root.findAllByType(Button)).toHaveLength(0);
+});
+
+test('refreshes pantry data after a catalog edit without triggering the product-added hint', async () => {
+  await act(() => { renderer = ReactTestRenderer.create(<App />); });
+  const home = jest.mocked(HomeView).mock.calls.at(-1)![0];
+  await act(() => home.onInventoryCountChanged!(0));
+  await act(() => jest.mocked(BottomNav).mock.calls.at(-1)![0].onTabChange('scan'));
+
+  await act(() => jest.mocked(ProductScannerView).mock.calls.at(-1)![0].onCatalogProductUpdated!());
+  await act(() => jest.mocked(BottomNav).mock.calls.at(-1)![0].onTabChange('pantry'));
+
+  expect(jest.mocked(HomeView).mock.calls.at(-1)![0]).toMatchObject({
+    refreshToken: 1, shouldPlaySwipeHint: false,
+  });
 });

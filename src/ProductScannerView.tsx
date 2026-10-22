@@ -22,6 +22,7 @@ import {getProductRepository, getScanToAdd} from './app/services';
 import {colors} from './theme/colors';
 import {DraggableBottomSheet} from './shopping-lists/modals/DraggableBottomSheet';
 import {AppToast, useAppToast} from './components/AppToast';
+import ProductCatalogView from './ProductCatalogView';
 
 const visionCamera = (() => {
   try {
@@ -174,6 +175,7 @@ function ScannerUnavailable({onRequestClose}: {onRequestClose?: () => void}) {
 type ProductScannerViewProps = {
   onRequestClose?: () => void;
   onProductAdded?: () => void;
+  onCatalogProductUpdated?: () => void;
 };
 
 type VisionCameraModule = {
@@ -1168,7 +1170,7 @@ function ProductScannerVisionContent({
   );
 }
 
-export default function ProductScannerView({onRequestClose, onProductAdded}: ProductScannerViewProps) {
+function ProductScannerContent({onRequestClose, onProductAdded}: ProductScannerViewProps) {
   if (!visionCamera) {
     return <ScannerUnavailable onRequestClose={onRequestClose} />;
   }
@@ -1203,7 +1205,39 @@ export default function ProductScannerView({onRequestClose, onProductAdded}: Pro
   );
 }
 
+export default function ProductScannerView({onRequestClose, onProductAdded, onCatalogProductUpdated}: ProductScannerViewProps) {
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const insets = useSafeAreaInsets();
+  if (catalogOpen) {
+    return <ProductCatalogView onRequestClose={() => setCatalogOpen(false)} onProductUpdated={onCatalogProductUpdated} />;
+  }
+  return (
+    <View style={styles.container}>
+      <ProductScannerContent onRequestClose={onRequestClose} onProductAdded={onProductAdded} />
+      <Pressable
+        testID="open-product-catalog"
+        accessibilityRole="button"
+        onPress={() => setCatalogOpen(true)}
+        style={[styles.catalogButton, {top: Math.max(insets.top, 12) + (onRequestClose ? 44 : 0)}]}>
+        <Text style={styles.catalogButtonText}>Katalog produktów</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  catalogButton: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 20,
+    backgroundColor: colors.surface,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  catalogButtonText: {color: colors.textPrimary, fontSize: 13, fontWeight: '700'},
   container: {
     flex: 1,
     backgroundColor: colors.background,
