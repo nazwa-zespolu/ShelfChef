@@ -2,6 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -14,7 +15,7 @@ import {
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import type {CatalogProduct} from '../domain/types';
 import type {UpdateCatalogProductInput} from '../infrastructure/ProductRepository';
-import {selectProductPhoto, type ProductPhotoSource} from '../infrastructure/productPhotos';
+import {ProductPhotoPermissionError, selectProductPhoto, type ProductPhotoSource} from '../infrastructure/productPhotos';
 import {DraggableBottomSheet} from '../shopping-lists/modals/DraggableBottomSheet';
 import {colors} from '../theme/colors';
 
@@ -41,6 +42,7 @@ export function CatalogProductEditModal({
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [photoPicking, setPhotoPicking] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [photoPermissionBlocked, setPhotoPermissionBlocked] = useState(false);
   const photoRequest = useRef(0);
   const photoPickingRef = useRef(false);
 
@@ -50,6 +52,7 @@ export function CatalogProductEditModal({
     setCategory(product?.category ?? '');
     setImageUrl(product?.imageUrl ?? null);
     setPhotoError(null);
+    setPhotoPermissionBlocked(false);
     setPhotoPicking(false);
     photoPickingRef.current = false;
     photoRequest.current += 1;
@@ -64,6 +67,7 @@ export function CatalogProductEditModal({
     photoPickingRef.current = true;
     setPhotoPicking(true);
     setPhotoError(null);
+    setPhotoPermissionBlocked(false);
     try {
       const storedUri = await selectProductPhoto(source);
       if (requestId === photoRequest.current && storedUri) {
@@ -73,11 +77,26 @@ export function CatalogProductEditModal({
     } catch (error) {
       if (requestId === photoRequest.current) {
         setPhotoError(error instanceof Error ? error.message : 'Nie udało się dodać zdjęcia');
+        setPhotoPermissionBlocked(error instanceof ProductPhotoPermissionError && error.code === 'blocked');
       }
     } finally {
       if (requestId === photoRequest.current) {
         photoPickingRef.current = false;
         setPhotoPicking(false);
+      }
+    }
+  };
+
+  const openPhotoSettings = async () => {
+    if (busy || photoPickingRef.current) {
+      return;
+    }
+    const requestId = photoRequest.current;
+    try {
+      await Linking.openSettings();
+    } catch {
+      if (requestId === photoRequest.current) {
+        setPhotoError('Nie udało się otworzyć ustawień aplikacji. Spróbuj ponownie.');
       }
     }
   };
@@ -143,6 +162,7 @@ export function CatalogProductEditModal({
                   if (!busy && !photoPickingRef.current) {
                     setImageUrl(null);
                     setPhotoError(null);
+                    setPhotoPermissionBlocked(false);
                     onDraftChange();
                   }
                 }}
@@ -153,6 +173,16 @@ export function CatalogProductEditModal({
           </View>
           {photoPicking ? <Text style={styles.metadata}>Przygotowuję zdjęcie…</Text> : null}
           {photoError ? <Text accessibilityRole="alert" style={styles.error}>{photoError}</Text> : null}
+          {photoPermissionBlocked ? (
+            <Pressable
+              testID="catalog-edit-photo-settings"
+              accessibilityRole="button"
+              disabled={busy || photoPicking}
+              onPress={() => { openPhotoSettings().catch(() => {}); }}
+              style={[styles.button, styles.cancel, styles.settings, (busy || photoPicking) && styles.disabled]}>
+              <Text style={styles.cancelText}>Otwórz ustawienia</Text>
+            </Pressable>
+          ) : null}
           <Text style={styles.label}>Nazwa produktu</Text>
           <TextInput
             testID="catalog-edit-name"
@@ -224,6 +254,7 @@ const styles = StyleSheet.create({
   metadata: {fontSize: 13, color: colors.textSecondary, marginTop: 4},
   photo: {width: 64, height: 64, borderRadius: 8, resizeMode: 'cover', backgroundColor: colors.surfaceMuted},
   photoActions: {flexDirection: 'row', gap: 8, marginTop: 8, marginBottom: 14},
+  settings: {flex: 0, marginBottom: 14},
   label: {fontSize: 14, fontWeight: '700', color: colors.textPrimary, marginBottom: 6},
   input: {
     minHeight: 48, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1,

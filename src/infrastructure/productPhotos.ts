@@ -1,3 +1,5 @@
+import {PermissionsAndroid, Platform} from 'react-native';
+
 const imagePicker = (() => {
   try {
     return require('react-native-image-picker');
@@ -15,6 +17,34 @@ const fileSystem = (() => {
 })();
 
 export type ProductPhotoSource = 'camera' | 'library';
+
+export class ProductPhotoPermissionError extends Error {
+  constructor(readonly code: 'denied' | 'blocked') {
+    super(code === 'blocked'
+      ? 'Dostęp do aparatu jest zablokowany. Włącz go w ustawieniach aplikacji.'
+      : 'Brak zgody na użycie aparatu. Zezwól na dostęp, aby zrobić zdjęcie.');
+    this.name = 'ProductPhotoPermissionError';
+  }
+}
+
+async function ensureCameraPermission(): Promise<void> {
+  if (Platform.OS !== 'android') {
+    return;
+  }
+  let result: Awaited<ReturnType<typeof PermissionsAndroid.request>>;
+  try {
+    if (await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.CAMERA)) {
+      return;
+    }
+    result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA);
+  } catch {
+    throw new Error('Nie udało się sprawdzić dostępu do aparatu. Spróbuj ponownie.');
+  }
+  if (result === PermissionsAndroid.RESULTS.GRANTED) {
+    return;
+  }
+  throw new ProductPhotoPermissionError(result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN ? 'blocked' : 'denied');
+}
 
 type ImagePickerAsset = {
   uri?: string;
@@ -52,6 +82,9 @@ export async function selectProductPhoto(source: ProductPhotoSource): Promise<st
   if (typeof launcher !== 'function') {
     throw new Error('Ten sposób dodania zdjęcia jest niedostępny');
   }
+  if (source === 'camera') {
+    await ensureCameraPermission();
+  }
   let response: ImagePickerResponse;
   try {
     response = await launcher({
@@ -64,7 +97,10 @@ export async function selectProductPhoto(source: ProductPhotoSource): Promise<st
     return null;
   }
   if (response.errorCode) {
-    throw new Error(response.errorMessage || 'Nie udało się dodać zdjęcia');
+    if (source === 'camera' && response.errorCode === 'permission') {
+      throw new ProductPhotoPermissionError('blocked');
+    }
+    throw new Error('Nie udało się dodać zdjęcia');
   }
   const asset = response.assets?.[0];
   const sourceUri = asset?.uri?.trim();

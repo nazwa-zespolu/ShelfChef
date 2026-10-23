@@ -1,5 +1,5 @@
 import React from 'react';
-import {BackHandler, FlatList, Image, Text, TextInput} from 'react-native';
+import {BackHandler, FlatList, Image, Linking, PermissionsAndroid, Platform, Text, TextInput} from 'react-native';
 import ReactTestRenderer, {act} from 'react-test-renderer';
 import {launchCamera, launchImageLibrary} from 'react-native-image-picker';
 import {copyFile, mkdir} from '@dr.pogodin/react-native-fs';
@@ -48,8 +48,17 @@ describe('UI: ProductCatalogView', () => {
   const consoleError = jest.spyOn(console, 'error');
   const onRequestClose = jest.fn();
   const onProductUpdated = jest.fn();
+  const checkCameraPermission = jest.spyOn(PermissionsAndroid, 'check');
+  const requestCameraPermission = jest.spyOn(PermissionsAndroid, 'request');
+  const openSettings = jest.spyOn(Linking, 'openSettings');
+  let restorePlatform: () => void;
 
   beforeEach(() => {
+    const replacement = jest.replaceProperty(Platform, 'OS', 'android');
+    restorePlatform = () => replacement.restore();
+    checkCameraPermission.mockReset().mockResolvedValue(true);
+    requestCameraPermission.mockReset().mockResolvedValue(PermissionsAndroid.RESULTS.GRANTED);
+    openSettings.mockReset().mockResolvedValue();
     jest.mocked(launchCamera).mockReset().mockResolvedValue({didCancel: true});
     jest.mocked(launchImageLibrary).mockReset().mockResolvedValue({didCancel: true});
     jest.mocked(mkdir).mockReset().mockResolvedValue(undefined);
@@ -67,6 +76,7 @@ describe('UI: ProductCatalogView', () => {
   afterEach(async () => {
     await act(async () => renderer?.unmount());
     renderer = undefined;
+    restorePlatform();
     expect(consoleError).not.toHaveBeenCalled();
   });
 
@@ -77,6 +87,9 @@ describe('UI: ProductCatalogView', () => {
     updateProduct.mockRestore();
     backHandler.mockRestore();
     consoleError.mockRestore();
+    checkCameraPermission.mockRestore();
+    requestCameraPermission.mockRestore();
+    openSettings.mockRestore();
   });
 
   const renderCatalog = async () => {
@@ -499,5 +512,105 @@ describe('UI: ProductCatalogView', () => {
     expect(updateProduct).toHaveBeenLastCalledWith(generic.id, expect.objectContaining({imageUrl: selectedPhoto}));
     expect(copyFile).toHaveBeenCalledTimes(1);
     expect(onProductUpdated).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the draft after camera permission is denied and allows granting it on retry', async () => {
+    checkCameraPermission.mockResolvedValue(false);
+    requestCameraPermission.mockResolvedValueOnce(PermissionsAndroid.RESULTS.DENIED).mockResolvedValueOnce(PermissionsAndroid.RESULTS.GRANTED);
+    jest.mocked(launchCamera).mockResolvedValueOnce({assets: [{uri: 'file:///temporary/camera.jpg'}]});
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await change('catalog-edit-name', 'Niezapisana nazwa');
+    await press('catalog-edit-photo-camera');
+
+    expect(texts()).toContain('Brak zgody na użycie aparatu. Zezwól na dostęp, aby zrobić zdjęcie.');
+    expect(photoPreview()).toBe(generic.imageUrl);
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-name'}).props.value).toBe('Niezapisana nazwa');
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-save'}).props.disabled).toBe(false);
+    expect(launchCamera).not.toHaveBeenCalled();
+    expect(copyFile).not.toHaveBeenCalled();
+    expect(updateProduct).not.toHaveBeenCalled();
+    await press('catalog-edit-photo-camera');
+
+    expect(requestCameraPermission).toHaveBeenCalledTimes(2);
+    expect(launchCamera).toHaveBeenCalledTimes(1);
+    expect(photoPreview()).not.toBe(generic.imageUrl);
+    expect(texts()).not.toContain('Brak zgody na użycie aparatu. Zezwól na dostęp, aby zrobić zdjęcie.');
+    const selectedPhoto = photoPreview();
+    await press('catalog-edit-save');
+    expect(updateProduct).toHaveBeenCalledWith(generic.id, expect.objectContaining({name: 'Niezapisana nazwa', imageUrl: selectedPhoto}));
+  });
+
+  it('blocks saving while camera permission is pending and releases the form after denial', async () => {
+    const permission = deferred<typeof PermissionsAndroid.RESULTS.DENIED>();
+    checkCameraPermission.mockResolvedValue(false);
+    requestCameraPermission.mockReturnValueOnce(permission.promise);
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await press('catalog-edit-photo-camera');
+    await press('catalog-edit-save');
+
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-save'}).props.disabled).toBe(true);
+    expect(launchCamera).not.toHaveBeenCalled();
+    expect(updateProduct).not.toHaveBeenCalled();
+    await act(async () => permission.resolve(PermissionsAndroid.RESULTS.DENIED));
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-save'}).props.disabled).toBe(false);
+    expect(photoPreview()).toBe(generic.imageUrl);
+  });
+
+  it('opens app settings after permanent denial and uses the granted permission when the user returns', async () => {
+    checkCameraPermission.mockResolvedValue(false);
+    requestCameraPermission.mockResolvedValue(PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN);
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await change('catalog-edit-brand', 'Nowa marka');
+    await press('catalog-edit-photo-camera');
+
+    expect(texts()).toContain('Dostęp do aparatu jest zablokowany. Włącz go w ustawieniach aplikacji.');
+    expect(launchCamera).not.toHaveBeenCalled();
+    expect(photoPreview()).toBe(generic.imageUrl);
+    await press('catalog-edit-photo-settings');
+    expect(openSettings).toHaveBeenCalledTimes(1);
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-brand'}).props.value).toBe('Nowa marka');
+    checkCameraPermission.mockResolvedValue(true);
+    jest.mocked(launchCamera).mockResolvedValueOnce({assets: [{uri: 'file:///temporary/allowed.jpg'}]});
+    await press('catalog-edit-photo-camera');
+
+    expect(requestCameraPermission).toHaveBeenCalledTimes(1);
+    expect(launchCamera).toHaveBeenCalledTimes(1);
+    expect(renderer!.root.findAllByProps({testID: 'catalog-edit-photo-settings'})).toHaveLength(0);
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-brand'}).props.value).toBe('Nowa marka');
+    expect(updateProduct).not.toHaveBeenCalled();
+  });
+
+  it('keeps the draft and allows retry if opening app settings fails', async () => {
+    checkCameraPermission.mockResolvedValue(false);
+    requestCameraPermission.mockResolvedValue(PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN);
+    openSettings.mockRejectedValueOnce(new Error('Settings unavailable')).mockResolvedValueOnce();
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await press('catalog-edit-photo-camera');
+    await press('catalog-edit-photo-settings');
+
+    expect(texts()).toContain('Nie udało się otworzyć ustawień aplikacji. Spróbuj ponownie.');
+    expect(photoPreview()).toBe(generic.imageUrl);
+    await press('catalog-edit-photo-settings');
+    expect(openSettings).toHaveBeenCalledTimes(2);
+    expect(updateProduct).not.toHaveBeenCalled();
+  });
+
+  it('allows gallery selection when camera permission is permanently denied', async () => {
+    checkCameraPermission.mockResolvedValue(false);
+    requestCameraPermission.mockResolvedValue(PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN);
+    jest.mocked(launchImageLibrary).mockResolvedValueOnce({assets: [{uri: 'file:///temporary/gallery.jpg'}]});
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await press('catalog-edit-photo-camera');
+    await press('catalog-edit-photo-library');
+
+    expect(launchImageLibrary).toHaveBeenCalledTimes(1);
+    expect(photoPreview()).not.toBe(generic.imageUrl);
+    expect(renderer!.root.findAllByProps({testID: 'catalog-edit-photo-settings'})).toHaveLength(0);
+    expect(requestCameraPermission).toHaveBeenCalledTimes(1);
   });
 });
