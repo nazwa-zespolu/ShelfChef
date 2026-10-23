@@ -134,6 +134,14 @@ erDiagram
 - `searchCatalogProducts(query, limit?)` wyszukuje fragment nazwy lub EAN. Domyślnie zwraca wszystkie dopasowania; pusty tekst zwraca cały katalog. Znaki `%`, `_` i `\` są traktowane dosłownie.
 - Metody odczytu katalogu w `ShoppingListRepository` korzystają z tego samego API. Wyszukiwanie podpowiedzi zakupowych zachowuje limit 20 wyników.
 
+## Usuwanie z katalogu
+
+- `ProductRepository.deleteCatalogProduct(id)` usuwa wyłącznie nieużywany produkt po stabilnym ID. Edytor katalogu wymaga potwierdzenia usunięcia.
+- Sprawdzenie powiązań i usunięcie odbywają się w jednej transakcji. Egzemplarze w `inventory` (także powiązane samym EAN), bezpośrednie pozycje zakupowe, alternatywy oraz produkty wskazujące ten wpis jako rodzica blokują usunięcie. Sprawdzamy wszystkie statusy pozycji zakupowych. Nie usuwamy ani nie odłączamy tych danych automatycznie.
+- Dla produktu `specific` usuwamy wpis katalogu i lokalną definicję EAN atomowo; pozostawiona definicja odtworzyłaby wpis podczas uruchamiania aplikacji. Ponowne dodanie usuniętego produktu jest możliwe, a operacja nie zmienia danych w Open Food Facts.
+- `CatalogProductDeleteError` rozróżnia `not_found`, `in_inventory`, `in_shopping_list` i `has_children`. Błąd zachowuje szkic edytora i pozwala ponowić operację. Błąd zapisu wycofuje całą transakcję.
+- Usunięcie produktu odrzuca jego niezatwierdzony szkic zdjęcia. Operacja nie usuwa wcześniej zapisanych plików zdjęć ani plików źródłowych; sprzątanie szkiców zachowuje dotychczasowe zasady.
+
 ## Indeksy
 
 ```sql

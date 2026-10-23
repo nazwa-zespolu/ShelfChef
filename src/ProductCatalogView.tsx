@@ -5,7 +5,7 @@ import {ArrowLeft, ChevronRight, Package, Search} from 'lucide-react-native';
 import {getProductRepository} from './app/services';
 import {CatalogProductEditModal} from './components/CatalogProductEditModal';
 import type {CatalogProduct} from './domain/types';
-import {CatalogProductUpdateError, type UpdateCatalogProductInput} from './infrastructure/ProductRepository';
+import {CatalogProductDeleteError, CatalogProductUpdateError, type UpdateCatalogProductInput} from './infrastructure/ProductRepository';
 import {colors} from './theme/colors';
 
 function editErrorMessage(error: unknown): string {
@@ -19,6 +19,18 @@ function editErrorMessage(error: unknown): string {
   return 'Nie udało się zapisać zmian. Spróbuj ponownie.';
 }
 
+function deleteErrorMessage(error: unknown): string {
+  if (error instanceof CatalogProductDeleteError) {
+    switch (error.code) {
+      case 'not_found': return 'Ten produkt nie jest już dostępny w katalogu. Zamknij edycję.';
+      case 'in_inventory': return 'Produkt ma egzemplarze w spiżarni. Aby go usunąć z katalogu, najpierw usuń te egzemplarze.';
+      case 'in_shopping_list': return 'Produkt jest powiązany z listą zakupową. Najpierw usuń pozycję lub jej powiązanie z produktem.';
+      case 'has_children': return 'Nie można usunąć produktu, z którym są powiązane inne produkty w katalogu.';
+    }
+  }
+  return 'Nie udało się usunąć produktu. Spróbuj ponownie.';
+}
+
 export default function ProductCatalogView({onRequestClose, onProductUpdated}: {
   onRequestClose: () => void;
   onProductUpdated?: () => void;
@@ -26,7 +38,7 @@ export default function ProductCatalogView({onRequestClose, onProductUpdated}: {
   const insets = useSafeAreaInsets();
   const repository = useMemo(() => getProductRepository(), []);
   const mounted = useRef(true);
-  const savingRef = useRef(false);
+  const mutationRef = useRef(false);
   const openingRequest = useRef(0);
   const [query, setQuery] = useState('');
   const [products, setProducts] = useState<CatalogProduct[]>([]);
@@ -36,9 +48,9 @@ export default function ProductCatalogView({onRequestClose, onProductUpdated}: {
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const [editing, setEditing] = useState<CatalogProduct | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'save' | 'delete' | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -71,7 +83,7 @@ export default function ProductCatalogView({onRequestClose, onProductUpdated}: {
   }, [query, reload, repository]);
 
   const closeEditor = useCallback(() => {
-    if (!savingRef.current) {
+    if (!mutationRef.current) {
       Keyboard.dismiss();
       setEditing(null);
       setEditError(null);
@@ -79,7 +91,7 @@ export default function ProductCatalogView({onRequestClose, onProductUpdated}: {
   }, []);
 
   const goBack = useCallback(() => {
-    if (!savingRef.current) {
+    if (!mutationRef.current) {
       if (editing) {
         closeEditor();
       } else {
@@ -96,14 +108,14 @@ export default function ProductCatalogView({onRequestClose, onProductUpdated}: {
   }, [goBack]);
 
   const openProduct = async (id: string) => {
-    if (savingRef.current || openingId) {
+    if (mutationRef.current || openingId) {
       return;
     }
     const requestId = ++openingRequest.current;
     Keyboard.dismiss();
     setOpeningId(id);
     setOpenError(null);
-    setSuccess(false);
+    setSuccess(null);
     try {
       const product = await repository.findCatalogProductById(id);
       if (!mounted.current || requestId !== openingRequest.current) {
@@ -127,12 +139,27 @@ export default function ProductCatalogView({onRequestClose, onProductUpdated}: {
     }
   };
 
+  const finishChange = (message: string) => {
+    if (mounted.current) {
+      Keyboard.dismiss();
+      setEditing(null);
+      setSuccess(message);
+      setReload(value => value + 1);
+      try {
+        onProductUpdated?.();
+      } catch (error) {
+        // A notification failure must not change a committed operation's result.
+        console.error('[ShelfChef] Catalog change notification failed', error);
+      }
+    }
+  };
+
   const saveProduct = async (input: UpdateCatalogProductInput): Promise<boolean> => {
-    if (!editing || savingRef.current) {
+    if (!editing || mutationRef.current) {
       return false;
     }
-    savingRef.current = true;
-    setSaving(true);
+    mutationRef.current = true;
+    setPendingAction('save');
     setEditError(null);
     try {
       await repository.updateCatalogProduct(editing.id, input);
@@ -145,31 +172,46 @@ export default function ProductCatalogView({onRequestClose, onProductUpdated}: {
       }
       return false;
     } finally {
-      savingRef.current = false;
+      mutationRef.current = false;
       if (mounted.current) {
-        setSaving(false);
+        setPendingAction(null);
       }
     }
-    if (mounted.current) {
-      Keyboard.dismiss();
-      setEditing(null);
-      setSuccess(true);
-      setReload(value => value + 1);
-      try {
-        onProductUpdated?.();
-      } catch (error) {
-        // The database write succeeded; its photo must remain committed.
-        console.error('[ShelfChef] Catalog update notification failed', error);
-      }
-    }
+    finishChange('Zapisano zmiany produktu.');
     return true;
+  };
+
+  const deleteProduct = async (id: string): Promise<void> => {
+    if (!mounted.current || editing?.id !== id || mutationRef.current) {
+      return;
+    }
+    mutationRef.current = true;
+    setPendingAction('delete');
+    setEditError(null);
+    try {
+      await repository.deleteCatalogProduct(id);
+    } catch (error) {
+      if (mounted.current) {
+        setEditError(deleteErrorMessage(error));
+        if (error instanceof CatalogProductDeleteError && error.code === 'not_found') {
+          setReload(value => value + 1);
+        }
+      }
+      return;
+    } finally {
+      mutationRef.current = false;
+      if (mounted.current) {
+        setPendingAction(null);
+      }
+    }
+    finishChange('Usunięto produkt z katalogu.');
   };
 
   const changeQuery = (value: string) => {
     openingRequest.current += 1;
     setOpeningId(null);
     setOpenError(null);
-    setSuccess(false);
+    setSuccess(null);
     setQuery(value);
   };
 
@@ -195,7 +237,7 @@ export default function ProductCatalogView({onRequestClose, onProductUpdated}: {
           style={styles.searchInput}
         />
       </View>
-      {success ? <Text accessibilityRole="alert" style={styles.success}>Zapisano zmiany produktu.</Text> : null}
+      {success ? <Text accessibilityRole="alert" style={styles.success}>{success}</Text> : null}
       {openError ? <Text accessibilityRole="alert" style={styles.error}>{openError}</Text> : null}
       {loading ? (
         <View style={styles.status}><ActivityIndicator color={colors.success} /><Text style={styles.statusText}>Wczytuję katalog…</Text></View>
@@ -243,10 +285,12 @@ export default function ProductCatalogView({onRequestClose, onProductUpdated}: {
       )}
       <CatalogProductEditModal
         product={editing}
-        busy={saving}
+        busy={pendingAction !== null}
+        deleting={pendingAction === 'delete'}
         errorMessage={editError}
         onClose={closeEditor}
         onSave={saveProduct}
+        onDelete={deleteProduct}
         onDraftChange={() => setEditError(null)}
       />
     </View>

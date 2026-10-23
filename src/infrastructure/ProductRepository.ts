@@ -63,6 +63,16 @@ export class CatalogProductUpdateError extends Error {
   }
 }
 
+export class CatalogProductDeleteError extends Error {
+  constructor(
+    readonly code: 'not_found' | 'in_inventory' | 'in_shopping_list' | 'has_children',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'CatalogProductDeleteError';
+  }
+}
+
 export class ProductRepository {
   private static readonly RECIPE_MODEL_CONSENT_KEY = 'recipe_model_download_consent';
 
@@ -249,6 +259,42 @@ export class ProductRepository {
         );
       }
       return this.readCatalogProducts('catalog.id = ?', [id])[0];
+    });
+  }
+
+  async deleteCatalogProduct(id: string): Promise<void> {
+    runInTransaction(() => {
+      const product = this.readCatalogProducts('catalog.id = ?', [id])[0];
+      if (!product) {
+        throw new CatalogProductDeleteError('not_found', `Catalog product not found: ${id}`);
+      }
+      // Check references explicitly: native SQLite does not enable foreign keys.
+      // EAN also protects inventory rows without a catalog link.
+      if (db.execute(
+        'SELECT 1 FROM inventory WHERE catalog_product_id = ? OR product_ean = ? LIMIT 1',
+        [id, product.productEan],
+      ).rows?.length) {
+        throw new CatalogProductDeleteError('in_inventory', 'Product has inventory copies');
+      }
+      if (db.execute(
+        `SELECT 1 FROM shopping_list_items WHERE catalog_product_id = ?
+         UNION ALL
+         SELECT 1 FROM shopping_list_item_catalog_products WHERE catalog_product_id = ?
+         LIMIT 1`,
+        [id, id],
+      ).rows?.length) {
+        throw new CatalogProductDeleteError('in_shopping_list', 'Product is linked to a shopping list');
+      }
+      if (db.execute(
+        'SELECT 1 FROM product_catalog WHERE parent_catalog_product_id = ? LIMIT 1', [id],
+      ).rows?.length) {
+        throw new CatalogProductDeleteError('has_children', 'Product has catalog children');
+      }
+      db.execute('DELETE FROM product_catalog WHERE id = ?', [id]);
+      if (product.productEan) {
+        // Leaving the definition would recreate the catalog row on startup.
+        db.execute('DELETE FROM product_definitions WHERE ean = ?', [product.productEan]);
+      }
     });
   }
 

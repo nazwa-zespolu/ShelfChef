@@ -1,6 +1,8 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {
+  Alert,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -22,16 +24,20 @@ import {colors} from '../theme/colors';
 export function CatalogProductEditModal({
   product,
   busy,
+  deleting,
   errorMessage,
   onClose,
   onSave,
+  onDelete,
   onDraftChange,
 }: {
   product: CatalogProduct | null;
   busy: boolean;
+  deleting: boolean;
   errorMessage: string | null;
   onClose: () => void;
   onSave: (input: UpdateCatalogProductInput) => Promise<boolean>;
+  onDelete: (id: string) => Promise<void>;
   onDraftChange: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -46,6 +52,7 @@ export function CatalogProductEditModal({
   const photoRequest = useRef(0);
   const photoPickingRef = useRef(false);
   const photoDraft = useRef<ProductPhotoDraft | null>(null);
+  const deleteConfirmation = useRef<object | null>(null);
 
   useEffect(() => {
     const draft = new ProductPhotoDraft();
@@ -59,8 +66,10 @@ export function CatalogProductEditModal({
     setPhotoPicking(false);
     photoPickingRef.current = false;
     photoRequest.current += 1;
+    deleteConfirmation.current = null;
     return () => {
       photoRequest.current += 1;
+      deleteConfirmation.current = null;
       draft.dispose().catch(error => { console.warn('[ShelfChef] Photo draft cleanup failed', error); });
     };
   }, [product]);
@@ -116,6 +125,30 @@ export function CatalogProductEditModal({
       ...(imageUrl !== product?.imageUrl ? {imageUrl} : {}),
     };
     await photoDraft.current?.save(() => onSave(input));
+  };
+
+  const requestDelete = () => {
+    if (!product || busy || photoPickingRef.current || deleteConfirmation.current) {
+      return;
+    }
+    const confirmation = {};
+    deleteConfirmation.current = confirmation;
+    Keyboard.dismiss();
+    const dismiss = () => {
+      if (deleteConfirmation.current === confirmation) {
+        deleteConfirmation.current = null;
+      }
+    };
+    Alert.alert('Usunąć produkt?', `Produkt „${product.name}” zostanie usunięty z lokalnego katalogu.`, [
+      {text: 'Anuluj', style: 'cancel', onPress: dismiss},
+      {text: 'Usuń', style: 'destructive', onPress: () => {
+        if (deleteConfirmation.current !== confirmation) {
+          return;
+        }
+        dismiss();
+        onDelete(product.id).catch(() => {});
+      }},
+    ], {cancelable: true, onDismiss: dismiss});
   };
 
   return (
@@ -235,9 +268,17 @@ export function CatalogProductEditModal({
               disabled={busy || photoPicking || !name.trim()}
               onPress={() => { submit().catch(() => {}); }}
               style={[styles.button, styles.save, (busy || photoPicking || !name.trim()) && styles.disabled]}>
-              <Text style={styles.saveText}>{busy ? 'Zapisuję…' : 'Zapisz zmiany'}</Text>
+              <Text style={styles.saveText}>{busy && !deleting ? 'Zapisuję…' : 'Zapisz zmiany'}</Text>
             </Pressable>
           </View>
+          <Pressable
+            testID="catalog-edit-delete"
+            accessibilityRole="button"
+            disabled={busy || photoPicking}
+            onPress={requestDelete}
+            style={[styles.button, styles.delete, (busy || photoPicking) && styles.disabled]}>
+            <Text style={styles.deleteText}>{deleting ? 'Usuwam…' : 'Usuń produkt z katalogu'}</Text>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </DraggableBottomSheet>
@@ -276,5 +317,7 @@ const styles = StyleSheet.create({
   cancelText: {fontSize: 15, fontWeight: '700', color: colors.textPrimary},
   save: {backgroundColor: colors.success},
   saveText: {fontSize: 15, fontWeight: '700', color: colors.successText},
+  delete: {flex: 0, marginTop: 8, marginBottom: 8, borderWidth: 1, borderColor: colors.danger},
+  deleteText: {fontSize: 15, fontWeight: '700', color: colors.danger},
   disabled: {opacity: 0.5},
 });

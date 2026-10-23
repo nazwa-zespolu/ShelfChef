@@ -1,12 +1,12 @@
 import React from 'react';
-import {BackHandler, FlatList, Image, Linking, PermissionsAndroid, Platform, Text, TextInput} from 'react-native';
+import {Alert, BackHandler, FlatList, Image, Linking, PermissionsAndroid, Platform, Text, TextInput} from 'react-native';
 import ReactTestRenderer, {act} from 'react-test-renderer';
 import {launchCamera, launchImageLibrary} from 'react-native-image-picker';
 import {copyFile, mkdir, unlink} from '@dr.pogodin/react-native-fs';
 import ProductCatalogView from '../ProductCatalogView';
 import {CatalogProductEditModal} from '../components/CatalogProductEditModal';
 import type {CatalogProduct} from '../domain/types';
-import {CatalogProductUpdateError, ProductRepository} from '../infrastructure/ProductRepository';
+import {CatalogProductDeleteError, CatalogProductUpdateError, ProductRepository} from '../infrastructure/ProductRepository';
 
 jest.mock('react-native-image-picker', () => ({launchCamera: jest.fn(), launchImageLibrary: jest.fn()}));
 jest.mock('@dr.pogodin/react-native-fs', () => ({
@@ -45,6 +45,8 @@ describe('UI: ProductCatalogView', () => {
   const searchCatalog = jest.spyOn(ProductRepository.prototype, 'searchCatalogProducts');
   const findProduct = jest.spyOn(ProductRepository.prototype, 'findCatalogProductById');
   const updateProduct = jest.spyOn(ProductRepository.prototype, 'updateCatalogProduct');
+  const deleteProduct = jest.spyOn(ProductRepository.prototype, 'deleteCatalogProduct');
+  const alert = jest.spyOn(Alert, 'alert');
   const backHandler = jest.spyOn(BackHandler, 'addEventListener');
   const consoleError = jest.spyOn(console, 'error');
   const onRequestClose = jest.fn();
@@ -69,6 +71,8 @@ describe('UI: ProductCatalogView', () => {
     searchCatalog.mockReset().mockResolvedValue([specific]);
     findProduct.mockReset().mockImplementation(async id => [generic, specific].find(product => product.id === id) ?? null);
     updateProduct.mockReset().mockResolvedValue(edited);
+    deleteProduct.mockReset().mockResolvedValue();
+    alert.mockReset();
     backHandler.mockClear();
     consoleError.mockClear();
     onRequestClose.mockClear();
@@ -87,6 +91,8 @@ describe('UI: ProductCatalogView', () => {
     searchCatalog.mockRestore();
     findProduct.mockRestore();
     updateProduct.mockRestore();
+    deleteProduct.mockRestore();
+    alert.mockRestore();
     backHandler.mockRestore();
     consoleError.mockRestore();
     checkCameraPermission.mockRestore();
@@ -113,6 +119,186 @@ describe('UI: ProductCatalogView', () => {
     expect(handler).toBeDefined();
     await act(async () => { expect(handler!()).toBe(true); });
   };
+  const deleteConfirmation = () => {
+    const button = alert.mock.calls.at(-1)?.[2]?.find(action => action.style === 'destructive');
+    expect(button?.onPress).toBeDefined();
+    return button!.onPress!;
+  };
+  const confirmDelete = async () => {
+    await act(async () => { deleteConfirmation()(); });
+  };
+
+  it.each([generic, specific])('deletes the $kind product only after confirmation and refreshes the active search', async product => {
+    searchCatalog.mockResolvedValueOnce([product]).mockResolvedValueOnce([]);
+    await renderCatalog();
+    await change('catalog-search', 'żurek');
+    await press(`catalog-product-${product.id}`);
+    await change('catalog-edit-name', 'Niezapisana nazwa');
+    await press('catalog-edit-delete');
+
+    expect(alert).toHaveBeenCalledWith('Usunąć produkt?', expect.stringContaining(product.name), expect.any(Array), expect.any(Object));
+    expect(deleteProduct).not.toHaveBeenCalled();
+    await confirmDelete();
+
+    expect(deleteProduct).toHaveBeenCalledWith(product.id);
+    expect(updateProduct).not.toHaveBeenCalled();
+    expect(onProductUpdated).toHaveBeenCalledTimes(1);
+    expect(displayedProducts()).toEqual([]);
+    expect(renderer!.root.findByProps({testID: 'catalog-search'}).props.value).toBe('żurek');
+    expect(renderer!.root.findByType(CatalogProductEditModal).props.product).toBeNull();
+    expect(texts()).toContain('Usunięto produkt z katalogu.');
+  });
+
+  it.each(['cancel', 'dismiss'] as const)('preserves the draft after confirmation %s and allows requesting deletion again', async action => {
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await change('catalog-edit-name', 'Szkic nazwy');
+    await press('catalog-edit-delete');
+    await press('catalog-edit-delete');
+    expect(alert).toHaveBeenCalledTimes(1);
+    const oldConfirm = deleteConfirmation();
+
+    await act(async () => {
+      if (action === 'cancel') { alert.mock.calls[0][2]!.find(button => button.style === 'cancel')!.onPress!(); }
+      else { alert.mock.calls[0][3]!.onDismiss!(); }
+      oldConfirm();
+    });
+
+    expect(deleteProduct).not.toHaveBeenCalled();
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-name'}).props.value).toBe('Szkic nazwy');
+    expect(photoPreview()).toBe(generic.imageUrl);
+    await press('catalog-edit-delete');
+    expect(alert).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [new CatalogProductDeleteError('in_inventory', 'In use'), 'Produkt ma egzemplarze w spiżarni. Aby go usunąć z katalogu, najpierw usuń te egzemplarze.'],
+    [new CatalogProductDeleteError('in_shopping_list', 'In use'), 'Produkt jest powiązany z listą zakupową. Najpierw usuń pozycję lub jej powiązanie z produktem.'],
+    [new CatalogProductDeleteError('has_children', 'In use'), 'Nie można usunąć produktu, z którym są powiązane inne produkty w katalogu.'],
+    [new Error('Database unavailable'), 'Nie udało się usunąć produktu. Spróbuj ponownie.'],
+  ])('explains a deletion failure without closing or saving the draft: %s', async (error, message) => {
+    deleteProduct.mockRejectedValueOnce(error);
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await change('catalog-edit-brand', 'Szkic marki');
+    await press('catalog-edit-delete');
+    await confirmDelete();
+
+    expect(texts()).toContain(message);
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-brand'}).props.value).toBe('Szkic marki');
+    expect(photoPreview()).toBe(generic.imageUrl);
+    expect(updateProduct).not.toHaveBeenCalled();
+    expect(onProductUpdated).not.toHaveBeenCalled();
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-delete'}).props.disabled).toBe(false);
+  });
+
+  it('preserves a photo draft after deletion fails and cleans it after a successful retry', async () => {
+    deleteProduct.mockRejectedValueOnce(new Error('Database unavailable'));
+    jest.mocked(launchImageLibrary).mockResolvedValue({assets: [{uri: 'file:///temporary/new.jpg'}]});
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await press('catalog-edit-photo-library');
+    const draftPhoto = photoPreview();
+    await press('catalog-edit-delete');
+    await confirmDelete();
+
+    expect(photoPreview()).toBe(draftPhoto);
+    expect(unlink).not.toHaveBeenCalled();
+    await press('catalog-edit-delete');
+    await confirmDelete();
+
+    expect(deleteProduct).toHaveBeenCalledTimes(2);
+    expect(unlink).toHaveBeenCalledWith(draftPhoto.slice('file://'.length));
+    expect(unlink).not.toHaveBeenCalledWith(generic.imageUrl!.slice('file://'.length));
+    expect(onProductUpdated).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks duplicate deletion, saving, photo selection and dismissal while deletion is pending', async () => {
+    const pending = deferred<void>();
+    deleteProduct.mockReturnValueOnce(pending.promise);
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await press('catalog-edit-delete');
+    const confirm = deleteConfirmation();
+    await act(async () => { confirm(); confirm(); });
+    await press('catalog-edit-delete');
+    await press('catalog-edit-save');
+    await press('catalog-edit-photo-camera');
+    await press('catalog-edit-cancel');
+    await hardwareBack();
+
+    expect(deleteProduct).toHaveBeenCalledTimes(1);
+    expect(alert).toHaveBeenCalledTimes(1);
+    expect(updateProduct).not.toHaveBeenCalled();
+    expect(launchCamera).not.toHaveBeenCalled();
+    expect(onRequestClose).not.toHaveBeenCalled();
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-name'}).props.editable).toBe(false);
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-delete'}).props.disabled).toBe(true);
+    expect(texts()).toContain('Usuwam…');
+    await act(async () => pending.resolve());
+    expect(onProductUpdated).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores an old deletion confirmation after closing the editor and selecting another product', async () => {
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await press('catalog-edit-delete');
+    const oldConfirm = deleteConfirmation();
+    await press('catalog-edit-cancel');
+    await press(`catalog-product-${specific.id}`);
+    await act(async () => { oldConfirm(); });
+
+    expect(deleteProduct).not.toHaveBeenCalled();
+    expect(renderer!.root.findByType(CatalogProductEditModal).props.product).toEqual(specific);
+  });
+
+  it('refreshes the catalog if the deleted product no longer exists while preserving the editor draft', async () => {
+    deleteProduct.mockRejectedValueOnce(new CatalogProductDeleteError('not_found', 'Missing'));
+    getCatalog.mockResolvedValueOnce([generic]).mockResolvedValueOnce([]);
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await change('catalog-edit-name', 'Szkic nazwy');
+    await press('catalog-edit-delete');
+    await confirmDelete();
+
+    expect(texts()).toContain('Ten produkt nie jest już dostępny w katalogu. Zamknij edycję.');
+    expect(displayedProducts()).toEqual([]);
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-name'}).props.value).toBe('Szkic nazwy');
+    expect(onProductUpdated).not.toHaveBeenCalled();
+  });
+
+  it('reports a refresh failure separately after deletion and retries loading without deleting again', async () => {
+    getCatalog.mockResolvedValueOnce([generic]).mockRejectedValueOnce(new Error('Refresh failed')).mockResolvedValueOnce([]);
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await press('catalog-edit-delete');
+    await confirmDelete();
+
+    expect(texts()).toContain('Usunięto produkt z katalogu.');
+    expect(texts()).toContain('Nie udało się wczytać katalogu. Spróbuj ponownie.');
+    expect(renderer!.root.findByType(CatalogProductEditModal).props.product).toBeNull();
+    await press('catalog-retry');
+    expect(displayedProducts()).toEqual([]);
+    expect(deleteProduct).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['success', 'failure'] as const)('ignores deletion %s after the catalog is unmounted', async outcome => {
+    const pending = deferred<void>();
+    deleteProduct.mockReturnValueOnce(pending.promise);
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await press('catalog-edit-delete');
+    await confirmDelete();
+    await act(async () => { renderer!.unmount(); });
+    renderer = undefined;
+    await act(async () => {
+      if (outcome === 'success') { pending.resolve(); }
+      else { pending.reject(new Error('Delete failed')); }
+    });
+
+    expect(onProductUpdated).not.toHaveBeenCalled();
+    expect(deleteProduct).toHaveBeenCalledTimes(1);
+  });
 
   it('loads all local products, searches by name or EAN and restores the list when the query is cleared', async () => {
     await renderCatalog();
@@ -236,6 +422,9 @@ describe('UI: ProductCatalogView', () => {
     expect(renderer!.root.findByProps({testID: 'catalog-edit-photo-camera'}).props.disabled).toBe(true);
     expect(renderer!.root.findByProps({testID: 'catalog-edit-photo-library'}).props.disabled).toBe(true);
     expect(renderer!.root.findByProps({testID: 'catalog-edit-photo-clear'}).props.disabled).toBe(true);
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-delete'}).props.disabled).toBe(true);
+    await press('catalog-edit-delete');
+    expect(alert).not.toHaveBeenCalled();
     expect(renderer!.root.findByType(CatalogProductEditModal).props.product).toEqual(generic);
     expect(onRequestClose).not.toHaveBeenCalled();
     await act(async () => pending.resolve(edited));
@@ -471,6 +660,9 @@ describe('UI: ProductCatalogView', () => {
     expect(launchImageLibrary).toHaveBeenCalledTimes(1);
     expect(updateProduct).not.toHaveBeenCalled();
     expect(renderer!.root.findByProps({testID: 'catalog-edit-save'}).props.disabled).toBe(true);
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-delete'}).props.disabled).toBe(true);
+    await press('catalog-edit-delete');
+    expect(alert).not.toHaveBeenCalled();
     await act(async () => pending.resolve({didCancel: true}));
     expect(renderer!.root.findByProps({testID: 'catalog-edit-save'}).props.disabled).toBe(false);
   });
