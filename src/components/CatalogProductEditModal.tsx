@@ -15,7 +15,7 @@ import {
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import type {CatalogProduct} from '../domain/types';
 import type {UpdateCatalogProductInput} from '../infrastructure/ProductRepository';
-import {ProductPhotoPermissionError, selectProductPhoto, type ProductPhotoSource} from '../infrastructure/productPhotos';
+import {ProductPhotoDraft, ProductPhotoPermissionError, type ProductPhotoSource} from '../infrastructure/productPhotos';
 import {DraggableBottomSheet} from '../shopping-lists/modals/DraggableBottomSheet';
 import {colors} from '../theme/colors';
 
@@ -31,7 +31,7 @@ export function CatalogProductEditModal({
   busy: boolean;
   errorMessage: string | null;
   onClose: () => void;
-  onSave: (input: UpdateCatalogProductInput) => void;
+  onSave: (input: UpdateCatalogProductInput) => Promise<boolean>;
   onDraftChange: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -45,8 +45,11 @@ export function CatalogProductEditModal({
   const [photoPermissionBlocked, setPhotoPermissionBlocked] = useState(false);
   const photoRequest = useRef(0);
   const photoPickingRef = useRef(false);
+  const photoDraft = useRef<ProductPhotoDraft | null>(null);
 
   useEffect(() => {
+    const draft = new ProductPhotoDraft();
+    photoDraft.current = draft;
     setName(product?.name ?? '');
     setBrand(product?.brand ?? '');
     setCategory(product?.category ?? '');
@@ -56,7 +59,10 @@ export function CatalogProductEditModal({
     setPhotoPicking(false);
     photoPickingRef.current = false;
     photoRequest.current += 1;
-    return () => { photoRequest.current += 1; };
+    return () => {
+      photoRequest.current += 1;
+      draft.dispose().catch(error => { console.warn('[ShelfChef] Photo draft cleanup failed', error); });
+    };
   }, [product]);
 
   const pickPhoto = async (source: ProductPhotoSource) => {
@@ -69,7 +75,7 @@ export function CatalogProductEditModal({
     setPhotoError(null);
     setPhotoPermissionBlocked(false);
     try {
-      const storedUri = await selectProductPhoto(source);
+      const storedUri = await photoDraft.current?.select(source);
       if (requestId === photoRequest.current && storedUri) {
         setImageUrl(storedUri);
         onDraftChange();
@@ -101,14 +107,15 @@ export function CatalogProductEditModal({
     }
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (busy || photoPickingRef.current || !name.trim()) {
       return;
     }
-    onSave({
+    const input: UpdateCatalogProductInput = {
       name: name.trim(), brand: brand.trim() || null, category: category.trim() || null,
       ...(imageUrl !== product?.imageUrl ? {imageUrl} : {}),
-    });
+    };
+    await photoDraft.current?.save(() => onSave(input));
   };
 
   return (
@@ -160,6 +167,7 @@ export function CatalogProductEditModal({
                 disabled={busy || photoPicking}
                 onPress={() => {
                   if (!busy && !photoPickingRef.current) {
+                    photoDraft.current?.clear().catch(error => { console.warn('[ShelfChef] Photo draft cleanup failed', error); });
                     setImageUrl(null);
                     setPhotoError(null);
                     setPhotoPermissionBlocked(false);
@@ -225,7 +233,7 @@ export function CatalogProductEditModal({
               testID="catalog-edit-save"
               accessibilityRole="button"
               disabled={busy || photoPicking || !name.trim()}
-              onPress={submit}
+              onPress={() => { submit().catch(() => {}); }}
               style={[styles.button, styles.save, (busy || photoPicking || !name.trim()) && styles.disabled]}>
               <Text style={styles.saveText}>{busy ? 'Zapisuję…' : 'Zapisz zmiany'}</Text>
             </Pressable>

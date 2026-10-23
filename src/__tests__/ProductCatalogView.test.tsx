@@ -2,7 +2,7 @@ import React from 'react';
 import {BackHandler, FlatList, Image, Linking, PermissionsAndroid, Platform, Text, TextInput} from 'react-native';
 import ReactTestRenderer, {act} from 'react-test-renderer';
 import {launchCamera, launchImageLibrary} from 'react-native-image-picker';
-import {copyFile, mkdir} from '@dr.pogodin/react-native-fs';
+import {copyFile, mkdir, unlink} from '@dr.pogodin/react-native-fs';
 import ProductCatalogView from '../ProductCatalogView';
 import {CatalogProductEditModal} from '../components/CatalogProductEditModal';
 import type {CatalogProduct} from '../domain/types';
@@ -11,6 +11,7 @@ import {CatalogProductUpdateError, ProductRepository} from '../infrastructure/Pr
 jest.mock('react-native-image-picker', () => ({launchCamera: jest.fn(), launchImageLibrary: jest.fn()}));
 jest.mock('@dr.pogodin/react-native-fs', () => ({
   DocumentDirectoryPath: '/documents', mkdir: jest.fn(), copyFile: jest.fn(),
+  exists: jest.fn().mockResolvedValue(true), unlink: jest.fn(),
 }));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({top: 0, right: 0, bottom: 0, left: 0}),
@@ -63,6 +64,7 @@ describe('UI: ProductCatalogView', () => {
     jest.mocked(launchImageLibrary).mockReset().mockResolvedValue({didCancel: true});
     jest.mocked(mkdir).mockReset().mockResolvedValue(undefined);
     jest.mocked(copyFile).mockReset().mockResolvedValue(undefined);
+    jest.mocked(unlink).mockReset().mockResolvedValue(undefined);
     getCatalog.mockReset().mockResolvedValue([generic, specific]);
     searchCatalog.mockReset().mockResolvedValue([specific]);
     findProduct.mockReset().mockImplementation(async id => [generic, specific].find(product => product.id === id) ?? null);
@@ -359,6 +361,7 @@ describe('UI: ProductCatalogView', () => {
     });
     expect(onProductUpdated).toHaveBeenCalledTimes(1);
     expect(displayedProducts()).toMatchObject([{id: product.id, imageUrl: storedUri}]);
+    expect(unlink).not.toHaveBeenCalled();
   });
 
   it('discards a selected photo when cancelled and restores the stored photo when reopened', async () => {
@@ -367,12 +370,31 @@ describe('UI: ProductCatalogView', () => {
     await press(`catalog-product-${generic.id}`);
     await press('catalog-edit-photo-library');
     expect(photoPreview()).not.toBe(generic.imageUrl);
+    const discardedPhoto = photoPreview().slice('file://'.length);
     await press('catalog-edit-cancel');
     await press(`catalog-product-${generic.id}`);
 
     expect(photoPreview()).toBe(generic.imageUrl);
     expect(updateProduct).not.toHaveBeenCalled();
     expect(onProductUpdated).not.toHaveBeenCalled();
+    expect(unlink).toHaveBeenCalledWith(discardedPhoto);
+  });
+
+  it('removes superseded and cleared draft copies while preserving the stored photo', async () => {
+    jest.mocked(launchImageLibrary).mockResolvedValue({assets: [{uri: 'file:///temporary/new.jpg'}]});
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await press('catalog-edit-photo-library');
+    const first = photoPreview().slice('file://'.length);
+    await press('catalog-edit-photo-library');
+    const second = photoPreview().slice('file://'.length);
+
+    expect(unlink).toHaveBeenCalledWith(first);
+    expect(unlink).not.toHaveBeenCalledWith(second);
+    await press('catalog-edit-photo-clear');
+    expect(unlink).toHaveBeenCalledWith(second);
+    expect(unlink).not.toHaveBeenCalledWith(generic.imageUrl!.slice('file://'.length));
+    expect(updateProduct).not.toHaveBeenCalled();
   });
 
   it('keeps the photo and draft when the native picker is cancelled', async () => {
@@ -492,6 +514,7 @@ describe('UI: ProductCatalogView', () => {
       expect(texts()).not.toContain('Nie udało się zapisać zdjęcia w pamięci aplikacji');
       expect(updateProduct).not.toHaveBeenCalled();
       expect(renderer!.root.findByProps({testID: 'catalog-edit-save'}).props.disabled).toBe(false);
+      expect(unlink).toHaveBeenCalledWith(jest.mocked(copyFile).mock.calls[0][1]);
     },
   );
 
@@ -507,12 +530,38 @@ describe('UI: ProductCatalogView', () => {
     expect(photoPreview()).toBe(selectedPhoto);
     expect(texts()).toContain('Nie udało się zapisać zmian. Spróbuj ponownie.');
     expect(onProductUpdated).not.toHaveBeenCalled();
+    expect(unlink).not.toHaveBeenCalled();
     await press('catalog-edit-save');
     expect(updateProduct).toHaveBeenCalledTimes(2);
     expect(updateProduct).toHaveBeenLastCalledWith(generic.id, expect.objectContaining({imageUrl: selectedPhoto}));
     expect(copyFile).toHaveBeenCalledTimes(1);
     expect(onProductUpdated).toHaveBeenCalledTimes(1);
+    expect(unlink).not.toHaveBeenCalled();
   });
+
+  it.each(['success', 'failure'])(
+    'protects the selected file if the catalog unmounts during a save, then handles %s',
+    async outcome => {
+      const pending = deferred<CatalogProduct>();
+      updateProduct.mockReturnValueOnce(pending.promise);
+      jest.mocked(launchImageLibrary).mockResolvedValueOnce({assets: [{uri: 'file:///temporary/new.jpg'}]});
+      await renderCatalog();
+      await press(`catalog-product-${generic.id}`);
+      await press('catalog-edit-photo-library');
+      const selectedFile = photoPreview().slice('file://'.length);
+      await press('catalog-edit-save');
+      await act(async () => renderer?.unmount());
+      renderer = undefined;
+
+      expect(unlink).not.toHaveBeenCalled();
+      await act(async () => {
+        if (outcome === 'success') { pending.resolve({...generic, imageUrl: `file://${selectedFile}`}); }
+        else { pending.reject(new Error('Write failure')); }
+      });
+      if (outcome === 'success') { expect(unlink).not.toHaveBeenCalled(); }
+      else { expect(unlink).toHaveBeenCalledWith(selectedFile); }
+    },
+  );
 
   it('keeps the draft after camera permission is denied and allows granting it on retry', async () => {
     checkCameraPermission.mockResolvedValue(false);

@@ -6,6 +6,7 @@ import {selectProductPhoto} from '../infrastructure/productPhotos';
 jest.mock('react-native-image-picker', () => ({launchCamera: jest.fn(), launchImageLibrary: jest.fn()}));
 jest.mock('@dr.pogodin/react-native-fs', () => ({
   DocumentDirectoryPath: '/documents', mkdir: jest.fn(), copyFile: jest.fn(),
+  exists: jest.fn().mockResolvedValue(true), unlink: jest.fn().mockResolvedValue(undefined),
 }));
 
 describe('Product photo camera permissions', () => {

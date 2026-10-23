@@ -127,9 +127,9 @@ export default function ProductCatalogView({onRequestClose, onProductUpdated}: {
     }
   };
 
-  const saveProduct = async (input: UpdateCatalogProductInput) => {
+  const saveProduct = async (input: UpdateCatalogProductInput): Promise<boolean> => {
     if (!editing || savingRef.current) {
-      return;
+      return false;
     }
     savingRef.current = true;
     setSaving(true);
@@ -143,7 +143,7 @@ export default function ProductCatalogView({onRequestClose, onProductUpdated}: {
           setReload(value => value + 1);
         }
       }
-      return;
+      return false;
     } finally {
       savingRef.current = false;
       if (mounted.current) {
@@ -155,8 +155,14 @@ export default function ProductCatalogView({onRequestClose, onProductUpdated}: {
       setEditing(null);
       setSuccess(true);
       setReload(value => value + 1);
-      onProductUpdated?.();
+      try {
+        onProductUpdated?.();
+      } catch (error) {
+        // The database write succeeded; its photo must remain committed.
+        console.error('[ShelfChef] Catalog update notification failed', error);
+      }
     }
+    return true;
   };
 
   const changeQuery = (value: string) => {
@@ -240,7 +246,7 @@ export default function ProductCatalogView({onRequestClose, onProductUpdated}: {
         busy={saving}
         errorMessage={editError}
         onClose={closeEditor}
-        onSave={input => { saveProduct(input).catch(() => {}); }}
+        onSave={saveProduct}
         onDraftChange={() => setEditError(null)}
       />
     </View>

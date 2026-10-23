@@ -73,6 +73,23 @@ function extensionFromPhotoAsset(asset: ImagePickerAsset): string {
   return 'jpg';
 }
 
+async function discardPhotoCopy(uri: string): Promise<boolean> {
+  const prefix = `file://${fileSystem?.DocumentDirectoryPath}/product-photos/`;
+  if (!uri.startsWith(prefix) || !/^product-\d+-\d+\.[a-z0-9]+$/.test(uri.slice(prefix.length))) {
+    return false;
+  }
+  const path = uri.slice('file://'.length);
+  try {
+    if (await fileSystem.exists(path)) {
+      await fileSystem.unlink(path);
+    }
+    return true;
+  } catch (error) {
+    console.warn('[ShelfChef] Could not remove draft product photo', error);
+    return false;
+  }
+}
+
 // Both adding and editing store a private copy rather than a temporary picker URI.
 export async function selectProductPhoto(source: ProductPhotoSource): Promise<string | null> {
   if (!imagePicker) {
@@ -118,7 +135,95 @@ export async function selectProductPhoto(source: ProductPhotoSource): Promise<st
     await fileSystem.mkdir(directory);
     await fileSystem.copyFile(sourceUri, destinationPath);
   } catch {
+    await discardPhotoCopy(`file://${destinationPath}`);
     throw new Error('Nie udało się zapisać zdjęcia w pamięci aplikacji');
   }
   return `file://${destinationPath}`;
+}
+
+// Owns only copies created in this editing session, never a product's stored photo.
+export class ProductPhotoDraft {
+  private readonly copies = new Set<string>();
+  private readonly deleting = new Map<string, Promise<void>>();
+  private current: string | null = null;
+  private disposed = false;
+  private saving = false;
+  private savingPhoto: string | null = null;
+
+  async select(source: ProductPhotoSource): Promise<string | null> {
+    if (this.disposed || this.saving) {
+      return null;
+    }
+    const uri = await selectProductPhoto(source);
+    if (!uri) {
+      return null;
+    }
+    this.copies.add(uri);
+    if (this.disposed) {
+      await this.remove(uri);
+      return null;
+    }
+    const previous = this.current;
+    this.current = uri;
+    if (previous) {
+      await this.remove(previous);
+    }
+    return this.disposed ? null : uri;
+  }
+
+  async clear(): Promise<void> {
+    if (this.saving) {
+      return;
+    }
+    const previous = this.current;
+    this.current = null;
+    if (previous) {
+      await this.remove(previous);
+    }
+  }
+
+  async save(persist: () => Promise<boolean>): Promise<boolean> {
+    if (this.disposed || this.saving) {
+      return false;
+    }
+    this.saving = true;
+    const photo = this.current;
+    this.savingPhoto = photo;
+    try {
+      const saved = await persist();
+      if (saved && photo) {
+        this.copies.delete(photo);
+      }
+      return saved;
+    } finally {
+      this.savingPhoto = null;
+      this.saving = false;
+      if (this.disposed) {
+        await this.dispose();
+      }
+    }
+  }
+
+  async dispose(): Promise<void> {
+    this.disposed = true;
+    this.current = null;
+    await Promise.all(Array.from(this.copies, uri => this.remove(uri)));
+  }
+
+  private async remove(uri: string): Promise<void> {
+    if (!this.copies.has(uri) || uri === this.savingPhoto) {
+      return;
+    }
+    const pending = this.deleting.get(uri);
+    if (pending) {
+      return pending;
+    }
+    const deletion = discardPhotoCopy(uri).then(removed => {
+      if (removed) {
+        this.copies.delete(uri);
+      }
+    }).finally(() => { this.deleting.delete(uri); });
+    this.deleting.set(uri, deletion);
+    return deletion;
+  }
 }
