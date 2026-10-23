@@ -49,6 +49,8 @@ export interface UpdateCatalogProductInput {
   name: string;
   brand: string | null;
   category: string | null;
+  // Omitted keeps the current photo; null explicitly removes it.
+  imageUrl?: string | null;
 }
 
 export class CatalogProductUpdateError extends Error {
@@ -217,6 +219,7 @@ export class ProductRepository {
       if (!product) {
         throw new CatalogProductUpdateError('not_found', `Catalog product not found: ${id}`);
       }
+      const imageUrl = input.imageUrl === undefined ? product.imageUrl : input.imageUrl;
       if (product.kind === 'generic') {
         const duplicate = this.readCatalogProducts(
           "catalog.kind = 'generic' AND catalog.normalized_name = ? AND catalog.id <> ?",
@@ -227,9 +230,9 @@ export class ProductRepository {
         }
         db.execute(
           `UPDATE product_catalog
-           SET name = ?, normalized_name = ?, brand = ?, category = ?, updated_at = datetime('now')
+           SET name = ?, normalized_name = ?, brand = ?, category = ?, image_url = ?, updated_at = datetime('now')
            WHERE id = ?`,
-          [name, normalizedName, brand, category, id],
+          [name, normalizedName, brand, category, imageUrl, id],
         );
       } else {
         const definition = db.execute('SELECT ean FROM product_definitions WHERE ean = ?', [product.productEan]);
@@ -237,12 +240,12 @@ export class ProductRepository {
           throw new CatalogProductUpdateError('not_found', `Product definition not found: ${product.productEan}`);
         }
         db.execute(
-          'UPDATE product_definitions SET name = ?, brand = ?, category = ? WHERE ean = ?',
-          [name, brand, category, product.productEan],
+          'UPDATE product_definitions SET name = ?, brand = ?, category = ?, image_url = ? WHERE ean = ?',
+          [name, brand, category, imageUrl, product.productEan],
         );
         db.execute(
-          `UPDATE product_catalog SET name = ?, normalized_name = ?, updated_at = datetime('now') WHERE id = ?`,
-          [name, normalizedName, id],
+          `UPDATE product_catalog SET name = ?, normalized_name = ?, image_url = ?, updated_at = datetime('now') WHERE id = ?`,
+          [name, normalizedName, imageUrl, id],
         );
       }
       return this.readCatalogProducts('catalog.id = ?', [id])[0];

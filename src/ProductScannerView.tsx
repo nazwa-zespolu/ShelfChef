@@ -23,6 +23,7 @@ import {colors} from './theme/colors';
 import {DraggableBottomSheet} from './shopping-lists/modals/DraggableBottomSheet';
 import {AppToast, useAppToast} from './components/AppToast';
 import ProductCatalogView from './ProductCatalogView';
+import {selectProductPhoto, type ProductPhotoSource} from './infrastructure/productPhotos';
 
 const visionCamera = (() => {
   try {
@@ -32,26 +33,6 @@ const visionCamera = (() => {
     return null;
   }
 })();
-
-const imagePicker = (() => {
-  try {
-    // Runtime require keeps Jest/tests working when native module is missing.
-    return require('react-native-image-picker');
-  } catch {
-    return null;
-  }
-})();
-
-const fileSystem = (() => {
-  try {
-    // Runtime require keeps Jest/tests working when native module is missing.
-    return require('@dr.pogodin/react-native-fs');
-  } catch {
-    return null;
-  }
-})();
-
-const PRODUCT_PHOTO_DIR_NAME = 'product-photos';
 
 function getDefaultExpirationDate() {
   const date = new Date();
@@ -85,54 +66,6 @@ function formatAddSuccessMessage(name: string, amount: number) {
 
 function generateInventoryId(index: number) {
   return `inv-${Date.now()}-${index}-${Math.floor(Math.random() * 1_000_000)}`;
-}
-
-type ProductPhotoSource = 'camera' | 'library';
-
-type ImagePickerAsset = {
-  uri?: string;
-  fileName?: string;
-  type?: string;
-};
-
-type ImagePickerResponse = {
-  didCancel?: boolean;
-  errorCode?: string;
-  errorMessage?: string;
-  assets?: ImagePickerAsset[];
-};
-
-function extensionFromPhotoAsset(asset: ImagePickerAsset): string {
-  const fileName = asset.fileName?.trim();
-  const fileExtension = fileName?.match(/\.([a-zA-Z0-9]+)$/)?.[1];
-  if (fileExtension) {
-    return fileExtension.toLowerCase();
-  }
-  if (asset.type?.includes('png')) {
-    return 'png';
-  }
-  if (asset.type?.includes('webp')) {
-    return 'webp';
-  }
-  return 'jpg';
-}
-
-async function copyProductPhotoToAppStorage(asset: ImagePickerAsset): Promise<string | null> {
-  const sourceUri = asset.uri?.trim();
-  if (!sourceUri) {
-    return null;
-  }
-  if (!fileSystem?.DocumentDirectoryPath || !fileSystem?.mkdir || !fileSystem?.copyFile) {
-    return sourceUri;
-  }
-
-  const directory = `${fileSystem.DocumentDirectoryPath}/${PRODUCT_PHOTO_DIR_NAME}`;
-  const extension = extensionFromPhotoAsset(asset);
-  const fileName = `product-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}.${extension}`;
-  const destinationPath = `${directory}/${fileName}`;
-  await fileSystem.mkdir(directory);
-  await fileSystem.copyFile(sourceUri, destinationPath);
-  return `file://${destinationPath}`;
 }
 
 function isValidEAN(code: string) {
@@ -596,41 +529,14 @@ function ProductScannerVisionContent({
   };
 
   const pickProductPhoto = async (source: ProductPhotoSource) => {
-    if (!imagePicker) {
-      showToast('Nie udało się uruchomić wyboru zdjęcia', 'error');
-      return;
-    }
-
-    const launcher =
-      source === 'camera' ? imagePicker.launchCamera : imagePicker.launchImageLibrary;
-    if (typeof launcher !== 'function') {
-      showToast('Ten sposób dodania zdjęcia jest niedostępny', 'error');
-      return;
-    }
-
     setPhotoPicking(true);
     try {
-      const response: ImagePickerResponse = await launcher({
-        mediaType: 'photo',
-        selectionLimit: 1,
-        quality: 0.82,
-        includeBase64: false,
-      });
-      if (response.didCancel) {
-        return;
-      }
-      if (response.errorCode) {
-        showToast(response.errorMessage || 'Nie udało się dodać zdjęcia', 'error');
-        return;
-      }
-
-      const pickedAsset = response.assets?.[0];
-      const storedUri = pickedAsset ? await copyProductPhotoToAppStorage(pickedAsset) : null;
+      const storedUri = await selectProductPhoto(source);
       if (storedUri) {
         setManualPhotoUri(storedUri);
       }
-    } catch {
-      showToast('Nie udało się dodać zdjęcia', 'error');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Nie udało się dodać zdjęcia', 'error');
     } finally {
       setPhotoPicking(false);
     }

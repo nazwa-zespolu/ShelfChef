@@ -148,7 +148,7 @@ describe('Local product catalog queries and editing', () => {
     }
   });
 
-  it('accepts only editable shared fields and preserves EAN, photo and identity', async () => {
+  it('accepts only editable shared fields and preserves EAN and identity', async () => {
     const product = await createProduct('specific');
     const input = {
       ...changes, ean: 'changed-ean', productEan: 'changed-ean', id: 'changed-id', kind: 'generic',
@@ -158,9 +158,9 @@ describe('Local product catalog queries and editing', () => {
     const updated = await products.updateCatalogProduct(product.id, input);
 
     expect(updated).toMatchObject({
-      id: product.id, productEan: product.productEan, kind: 'specific', imageUrl: original.imageUrl,
+      id: product.id, productEan: product.productEan, kind: 'specific', imageUrl: input.imageUrl,
     });
-    expect(await products.findDefinitionByEan(product.productEan!)).toMatchObject({imageUrl: original.imageUrl, dietary});
+    expect(await products.findDefinitionByEan(product.productEan!)).toMatchObject({imageUrl: input.imageUrl, dietary});
   });
 
   it.each(['', '  \n\t '])('rejects an empty product name: %j', async name => {
