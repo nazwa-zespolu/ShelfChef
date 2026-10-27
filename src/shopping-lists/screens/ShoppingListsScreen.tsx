@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import {Search} from 'lucide-react-native';
 import type {ShoppingListSummary, ShoppingListType} from '../../domain/types';
 import {SwipeToDeleteCard} from '../../components/SwipeToDeleteCard';
 import {
@@ -16,6 +17,7 @@ import {
   getShoppingListIconDefinition,
 } from '../../shoppingListIcons';
 import {colors} from '../../theme/colors';
+import {shadowInsets, shadows} from '../../theme/shadows';
 import {EmptyState} from '../components/EmptyState';
 import type {ShoppingListCardStats, ShoppingListFilter} from '../types';
 
@@ -68,6 +70,11 @@ function pluralizeItems(count: number) {
 function purchasedLabel(count: number) {
   if (count === 1) {
     return '1 kupiona';
+  }
+  const lastTwoDigits = count % 100;
+  const lastDigit = count % 10;
+  if (lastDigit >= 2 && lastDigit <= 4 && (lastTwoDigits < 12 || lastTwoDigits > 14)) {
+    return `${count} kupione`;
   }
   return `${count} kupionych`;
 }
@@ -139,7 +146,7 @@ export function ShoppingListsScreen({
         <Text style={styles.screenTitle}>Listy zakupów</Text>
         <View style={styles.searchCreateRow}>
           <View style={styles.searchBox}>
-            <Text style={styles.searchIcon}>⌕</Text>
+            <Search color={colors.textMuted} size={22} strokeWidth={2.1} />
             <TextInput
               value={listSearch}
               onChangeText={onChangeListSearch}
@@ -183,6 +190,7 @@ export function ShoppingListsScreen({
         ListEmptyComponent={
           lists.length === 0 ? (
             <EmptyState
+              variant="lists"
               title="Zacznij od pierwszej listy"
               description="Manualna sprawdzi się na zakupy, auto pokaże braki w zapasach."
               details={[
@@ -191,7 +199,7 @@ export function ShoppingListsScreen({
               ]}
             />
           ) : (
-            <EmptyState title="Brak pasujących list" />
+            <EmptyState variant="search" title="Brak pasujących list" />
           )
         }
       />
@@ -371,18 +379,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
     paddingHorizontal: 12,
     shadowColor: colors.shadow,
     shadowOpacity: 0.04,
     shadowRadius: 8,
     shadowOffset: {width: 0, height: 3},
     elevation: 2,
-  },
-  searchIcon: {
-    color: colors.textMuted,
-    fontSize: 25,
-    lineHeight: 28,
-    marginRight: 8,
   },
   searchInput: {
     flex: 1,
@@ -505,10 +508,12 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   listContent: {
-    paddingHorizontal: 16,
+    paddingTop: shadowInsets.card.top,
+    paddingHorizontal: shadowInsets.card.horizontal,
     paddingBottom: 94,
   },
   card: {
+    ...shadows.card,
     borderRadius: 8,
     backgroundColor: colors.surface,
     borderWidth: 1,
@@ -516,11 +521,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 10,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: {width: 0, height: 6},
-    elevation: 3,
   },
   listCard: {
     minHeight: 74,

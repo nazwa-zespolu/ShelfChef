@@ -3,6 +3,7 @@ import {AppState, Image, Pressable, ScrollView, StyleSheet, Text, View} from 're
 import {CalendarDays, Package} from 'lucide-react-native';
 import type {InventoryItem} from '../domain/types';
 import {colors} from '../theme/colors';
+import {shadowGutters, shadows} from '../theme/shadows';
 import {DraggableBottomSheet} from '../shopping-lists/modals/DraggableBottomSheet';
 import WheelPicker from './WheelPicker';
 
@@ -282,7 +283,7 @@ export function ProductDetailsModal({
       {item ? (
         <View style={styles.content}>
           <ScrollView
-            style={styles.scroll}
+            style={[styles.scroll, shadowGutters.viewport]}
             contentContainerStyle={styles.scrollContent}
             nestedScrollEnabled
             scrollEnabled={scrollEnabled}
@@ -301,7 +302,7 @@ export function ProductDetailsModal({
                 </Text>
                 {metadata ? <Text style={styles.productMetadata}>{metadata}</Text> : null}
                 <Text style={styles.productEan}>
-                  {item.ean ? `EAN: ${item.ean}` : 'Produkt dodany ręcznie'}
+                  {item.ean ? `EAN: ${item.ean}` : 'Produkt bez EAN'}
                 </Text>
               </View>
             </View>
@@ -493,9 +494,10 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   scrollContent: {
-    paddingBottom: 8,
+    ...shadowGutters.content,
   },
   productHeader: {
+    ...shadows.preview,
     minHeight: 92,
     flexDirection: 'row',
     alignItems: 'center',

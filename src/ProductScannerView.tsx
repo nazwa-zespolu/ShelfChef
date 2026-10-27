@@ -15,11 +15,12 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Camera as CameraIcon, ImagePlus, Trash2} from 'lucide-react-native';
 import WheelPicker from './components/WheelPicker';
+import {ProductPhotoActions} from './components/ProductPhotoActions';
 import {ProductDefinition} from './domain/types';
 import {getProductRepository, getScanToAdd} from './app/services';
 import {colors} from './theme/colors';
+import {shadowGutters, shadowInsets, shadows} from './theme/shadows';
 import {DraggableBottomSheet} from './shopping-lists/modals/DraggableBottomSheet';
 import {AppToast, useAppToast} from './components/AppToast';
 import ProductCatalogView from './ProductCatalogView';
@@ -162,7 +163,7 @@ function SheetScrollableForm({
           style={styles.sheetScroll}
           contentContainerStyle={[
             styles.sheetScrollContent,
-            {paddingBottom: contentBottomInset},
+            {paddingBottom: Math.max(contentBottomInset, shadowInsets.card.bottom)},
           ]}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
@@ -344,28 +345,14 @@ function ProductPhotoPicker({
           </View>
         )}
         <View style={styles.photoActions}>
-          <View style={styles.photoActionRow}>
-            <Pressable
-              style={[styles.photoButton, disabled && styles.buttonDisabled]}
-              onPress={onTakePhoto}
-              disabled={disabled}>
-              <CameraIcon color={colors.textPrimary} size={17} strokeWidth={2.2} />
-              <Text style={styles.photoButtonText}>{picking ? 'Wybieram…' : 'Aparat'}</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.photoButton, disabled && styles.buttonDisabled]}
-              onPress={onPickFromLibrary}
-              disabled={disabled}>
-              <ImagePlus color={colors.textPrimary} size={17} strokeWidth={2.2} />
-              <Text style={styles.photoButtonText}>Galeria</Text>
-            </Pressable>
-          </View>
-          {imageUri ? (
-            <Pressable style={styles.photoClearButton} onPress={onClear} disabled={disabled}>
-              <Trash2 color={colors.warning} size={16} strokeWidth={2.2} />
-              <Text style={styles.photoClearButtonText}>Usuń zdjęcie</Text>
-            </Pressable>
-          ) : null}
+          <ProductPhotoActions
+            hasPhoto={Boolean(imageUri)}
+            disabled={disabled}
+            picking={picking}
+            onTakePhoto={onTakePhoto}
+            onPickFromLibrary={onPickFromLibrary}
+            onClear={onClear}
+          />
         </View>
       </View>
     </View>
@@ -1304,12 +1291,13 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   sheetScroll: {
+    ...shadowGutters.viewport,
     flexGrow: 0,
     flexShrink: 1,
   },
   sheetScrollContent: {
+    ...shadowGutters.content,
     gap: 14,
-    paddingBottom: 8,
   },
   resolvingBox: {
     minHeight: 120,
@@ -1318,6 +1306,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   productRow: {
+    ...shadows.preview,
     flexDirection: 'row',
     gap: 12,
     borderRadius: 8,
@@ -1325,11 +1314,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.surface,
     padding: 12,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: {width: 0, height: 4},
-    elevation: 2,
   },
   productImage: {
     width: 84,
@@ -1364,6 +1348,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   textInput: {
+    ...shadows.control,
     backgroundColor: colors.surface,
     borderRadius: 8,
     paddingHorizontal: 12,
@@ -1371,11 +1356,6 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     borderWidth: 1,
     borderColor: colors.border,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: {width: 0, height: 3},
-    elevation: 1,
   },
   photoSection: {
     gap: 8,
@@ -1419,53 +1399,6 @@ const styles = StyleSheet.create({
   photoActions: {
     flex: 1,
     gap: 8,
-  },
-  photoActionRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  photoButton: {
-    flex: 1,
-    minHeight: 38,
-    borderRadius: 8,
-    backgroundColor: colors.surfaceSubtle,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 8,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: {width: 0, height: 3},
-    elevation: 1,
-  },
-  photoButtonText: {
-    color: colors.textPrimary,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  photoClearButton: {
-    minHeight: 34,
-    borderRadius: 8,
-    backgroundColor: colors.warningSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 8,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: {width: 0, height: 3},
-    elevation: 1,
-  },
-  photoClearButtonText: {
-    color: colors.warning,
-    fontSize: 12,
-    fontWeight: '800',
   },
   wheelsRow: {
     flexDirection: 'row',

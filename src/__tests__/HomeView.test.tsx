@@ -46,6 +46,7 @@ jest.mock('lucide-react-native', () => {
     Clock3: MockIcon,
     Package: MockIcon,
     Search: MockIcon,
+    Check: MockIcon,
   };
 });
 

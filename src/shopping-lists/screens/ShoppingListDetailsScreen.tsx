@@ -12,6 +12,7 @@ import {
 import {Check, Lock, Plus, RefreshCcw, Search, Settings, Unlock} from 'lucide-react-native';
 import type {AutoShoppingListItemState, ShoppingListSummary} from '../../domain/types';
 import {colors} from '../../theme/colors';
+import {shadowInsets} from '../../theme/shadows';
 import {EmptyState} from '../components/EmptyState';
 
 type ShoppingListDetailsScreenProps = {
@@ -44,6 +45,11 @@ function pluralizeItems(count: number) {
 function purchasedLabel(count: number) {
   if (count === 1) {
     return '1 kupiona';
+  }
+  const lastTwoDigits = count % 100;
+  const lastDigit = count % 10;
+  if (lastDigit >= 2 && lastDigit <= 4 && (lastTwoDigits < 12 || lastTwoDigits > 14)) {
+    return `${count} kupione`;
   }
   return `${count} kupionych`;
 }
@@ -102,7 +108,7 @@ export function ShoppingListDetailsScreen({
                 description="Przesuń w prawo, żeby oznaczyć jako kupiony. W lewo, żeby usunąć."
               />
             ) : (
-              <EmptyState title="Brak pasujących produktów" />
+              <EmptyState variant="search" title="Brak pasujących produktów" />
             )
           }
         />
@@ -174,7 +180,7 @@ export function ShoppingListDetailsScreen({
               description="Dodaj produkty, które chcesz mieć w zapasach. Braki pojawią się w Do uzupełnienia."
             />
           ) : (
-            <EmptyState title="Brak pasujących produktów" />
+            <EmptyState variant="search" title="Brak pasujących produktów" />
           )
         }
       />
@@ -397,7 +403,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   itemsContent: {
-    paddingHorizontal: 16,
+    paddingTop: shadowInsets.card.top,
+    paddingHorizontal: shadowInsets.card.horizontal,
     paddingBottom: 112,
   },
   bottomBar: {

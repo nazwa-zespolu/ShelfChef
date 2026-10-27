@@ -1,8 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {
-  Alert,
   Image,
-  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -15,29 +13,37 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {Package, Trash2} from 'lucide-react-native';
 import type {CatalogProduct} from '../domain/types';
 import type {UpdateCatalogProductInput} from '../infrastructure/ProductRepository';
 import {ProductPhotoDraft, ProductPhotoPermissionError, type ProductPhotoSource} from '../infrastructure/productPhotos';
 import {DraggableBottomSheet} from '../shopping-lists/modals/DraggableBottomSheet';
+import {InlineFeedback} from '../shopping-lists/components/InlineFeedback';
 import {colors} from '../theme/colors';
+import {shadowGutters, shadowInsets, shadows} from '../theme/shadows';
+import {ProductPhotoActions} from './ProductPhotoActions';
 
 export function CatalogProductEditModal({
   product,
   busy,
   deleting,
+  confirmingDelete,
   errorMessage,
   onClose,
   onSave,
-  onDelete,
+  onRequestDelete,
+  onConfirmDelete,
   onDraftChange,
 }: {
   product: CatalogProduct | null;
   busy: boolean;
   deleting: boolean;
+  confirmingDelete: boolean;
   errorMessage: string | null;
   onClose: () => void;
   onSave: (input: UpdateCatalogProductInput) => Promise<boolean>;
-  onDelete: (id: string) => Promise<void>;
+  onRequestDelete: () => void;
+  onConfirmDelete: () => Promise<void>;
   onDraftChange: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -52,7 +58,6 @@ export function CatalogProductEditModal({
   const photoRequest = useRef(0);
   const photoPickingRef = useRef(false);
   const photoDraft = useRef<ProductPhotoDraft | null>(null);
-  const deleteConfirmation = useRef<object | null>(null);
 
   useEffect(() => {
     const draft = new ProductPhotoDraft();
@@ -66,10 +71,8 @@ export function CatalogProductEditModal({
     setPhotoPicking(false);
     photoPickingRef.current = false;
     photoRequest.current += 1;
-    deleteConfirmation.current = null;
     return () => {
       photoRequest.current += 1;
-      deleteConfirmation.current = null;
       draft.dispose().catch(error => { console.warn('[ShelfChef] Photo draft cleanup failed', error); });
     };
   }, [product]);
@@ -128,77 +131,78 @@ export function CatalogProductEditModal({
   };
 
   const requestDelete = () => {
-    if (!product || busy || photoPickingRef.current || deleteConfirmation.current) {
+    if (!product || busy || photoPickingRef.current) {
       return;
     }
-    const confirmation = {};
-    deleteConfirmation.current = confirmation;
-    Keyboard.dismiss();
-    const dismiss = () => {
-      if (deleteConfirmation.current === confirmation) {
-        deleteConfirmation.current = null;
-      }
-    };
-    Alert.alert('Usunąć produkt?', `Produkt „${product.name}” zostanie usunięty z lokalnego katalogu.`, [
-      {text: 'Anuluj', style: 'cancel', onPress: dismiss},
-      {text: 'Usuń', style: 'destructive', onPress: () => {
-        if (deleteConfirmation.current !== confirmation) {
-          return;
-        }
-        dismiss();
-        onDelete(product.id).catch(() => {});
-      }},
-    ], {cancelable: true, onDismiss: dismiss});
+    onRequestDelete();
   };
 
   return (
     <DraggableBottomSheet
       visible={product != null}
-      accessibilityLabel="Zamknij edycję produktu katalogowego"
+      accessibilityLabel={confirmingDelete ? 'Anuluj usuwanie produktu' : 'Zamknij edycję produktu katalogowego'}
       onClose={onClose}
       sheetStyle={[styles.sheet, {maxHeight: height * 0.9, paddingBottom: Math.max(insets.bottom, 12)}]}
       handleStyle={styles.handle}
-      handleContent={<Text style={styles.title}>Edytuj produkt</Text>}>
-      <KeyboardAvoidingView
-        style={styles.form}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Math.max(insets.top, 12)}>
-        <ScrollView keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}>
-          <Text style={styles.notice}>Zmiany dotyczą wszystkich egzemplarzy tego produktu</Text>
-          {product ? (
-            <View style={styles.productHeader}>
-              {imageUrl ? <Image source={{uri: imageUrl}} style={styles.photo} /> : null}
-              <View style={styles.productText}>
-                <Text style={styles.productName}>{product.name}</Text>
-                <Text style={styles.metadata}>{product.productEan ? `EAN: ${product.productEan}` : 'Produkt bez EAN'}</Text>
+      handleContent={<Text style={[styles.title, confirmingDelete && styles.confirmationTitle]}>{confirmingDelete ? 'Usunąć produkt?' : 'Edytuj produkt'}</Text>}>
+      {confirmingDelete ? (
+        <ScrollView style={[styles.form, shadowGutters.viewport]} contentContainerStyle={[shadowGutters.content, styles.confirmation]}>
+          <Text testID="catalog-delete-product-name" style={styles.confirmationProduct}>{product?.name}</Text>
+          <Text style={styles.confirmationDescription}>Produkt zostanie usunięty z lokalnego katalogu.</Text>
+          <InlineFeedback feedback={errorMessage ? {message: errorMessage, tone: 'error'} : null} numberOfLines={0} />
+          <View style={styles.actions}>
+            <Pressable
+              testID="catalog-delete-cancel"
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={onClose}
+              style={({pressed}) => [styles.button, styles.cancel, busy && styles.disabled, pressed && styles.pressed]}>
+              <Text style={styles.cancelText}>Anuluj</Text>
+            </Pressable>
+            <Pressable
+              testID="catalog-delete-confirm"
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => { onConfirmDelete().catch(() => {}); }}
+              style={({pressed}) => [styles.button, styles.confirmDelete, busy && styles.disabled, pressed && styles.pressed]}>
+              <Text style={styles.saveText}>{deleting ? 'Usuwam…' : 'Usuń'}</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      ) : (
+        <KeyboardAvoidingView
+          style={styles.form}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Math.max(insets.top, 12)}>
+          <ScrollView
+            style={shadowGutters.viewport}
+            contentContainerStyle={shadowGutters.content}
+            keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}>
+            <Text style={styles.notice}>Zmiany dotyczą wszystkich egzemplarzy tego produktu</Text>
+            {product ? (
+              <View style={styles.productHeader}>
+                {imageUrl ? <Image source={{uri: imageUrl}} style={styles.photo} /> : (
+                  <View style={[styles.photo, styles.photoPlaceholder]}><Package size={28} color={colors.textMuted} /></View>
+                )}
+                <View style={styles.productText}>
+                  <Text style={styles.productName}>{name.trim() || product.name}</Text>
+                  {brand.trim() || category.trim() ? <Text style={styles.metadata}>{[brand.trim(), category.trim()].filter(Boolean).join(' · ')}</Text> : null}
+                  <Text style={styles.metadata}>{product.productEan ? `EAN: ${product.productEan}` : 'Produkt bez EAN'}</Text>
+                </View>
               </View>
-            </View>
-          ) : null}
-          <Text style={styles.label}>Zdjęcie produktu</Text>
-          {!imageUrl ? <Text style={styles.metadata}>Brak zdjęcia</Text> : null}
-          <View style={styles.photoActions}>
-            <Pressable
-              testID="catalog-edit-photo-camera"
-              accessibilityRole="button"
-              disabled={busy || photoPicking}
-              onPress={() => { pickPhoto('camera').catch(() => {}); }}
-              style={[styles.button, styles.cancel, (busy || photoPicking) && styles.disabled]}>
-              <Text style={styles.cancelText}>Aparat</Text>
-            </Pressable>
-            <Pressable
-              testID="catalog-edit-photo-library"
-              accessibilityRole="button"
-              disabled={busy || photoPicking}
-              onPress={() => { pickPhoto('library').catch(() => {}); }}
-              style={[styles.button, styles.cancel, (busy || photoPicking) && styles.disabled]}>
-              <Text style={styles.cancelText}>Galeria</Text>
-            </Pressable>
-            {imageUrl ? (
-              <Pressable
-                testID="catalog-edit-photo-clear"
-                accessibilityRole="button"
-                disabled={busy || photoPicking}
-                onPress={() => {
+            ) : null}
+            <Text style={styles.label}>Zdjęcie produktu</Text>
+            {!imageUrl ? <Text style={styles.metadata}>Brak zdjęcia</Text> : null}
+            <View style={styles.photoActions}>
+              <ProductPhotoActions
+                testIDPrefix="catalog-edit-photo"
+                hasPhoto={Boolean(imageUrl)}
+                disabled={busy}
+                picking={photoPicking}
+                onTakePhoto={() => { pickPhoto('camera').catch(() => {}); }}
+                onPickFromLibrary={() => { pickPhoto('library').catch(() => {}); }}
+                onClear={() => {
                   if (!busy && !photoPickingRef.current) {
                     photoDraft.current?.clear().catch(error => { console.warn('[ShelfChef] Photo draft cleanup failed', error); });
                     setImageUrl(null);
@@ -207,80 +211,84 @@ export function CatalogProductEditModal({
                     onDraftChange();
                   }
                 }}
-                style={[styles.button, styles.cancel, (busy || photoPicking) && styles.disabled]}>
-                <Text style={styles.cancelText}>Usuń zdjęcie</Text>
+              />
+            </View>
+            <InlineFeedback feedback={photoError ? {message: photoError, tone: 'error'} : null} numberOfLines={0} />
+            {photoPermissionBlocked ? (
+              <Pressable
+                testID="catalog-edit-photo-settings"
+                accessibilityRole="button"
+                disabled={busy || photoPicking}
+                onPress={() => { openPhotoSettings().catch(() => {}); }}
+                style={({pressed}) => [styles.textButton, styles.settings, (busy || photoPicking) && styles.disabled, pressed && styles.pressed]}>
+                <Text style={styles.settingsText}>Otwórz ustawienia</Text>
               </Pressable>
             ) : null}
-          </View>
-          {photoPicking ? <Text style={styles.metadata}>Przygotowuję zdjęcie…</Text> : null}
-          {photoError ? <Text accessibilityRole="alert" style={styles.error}>{photoError}</Text> : null}
-          {photoPermissionBlocked ? (
-            <Pressable
-              testID="catalog-edit-photo-settings"
-              accessibilityRole="button"
-              disabled={busy || photoPicking}
-              onPress={() => { openPhotoSettings().catch(() => {}); }}
-              style={[styles.button, styles.cancel, styles.settings, (busy || photoPicking) && styles.disabled]}>
-              <Text style={styles.cancelText}>Otwórz ustawienia</Text>
-            </Pressable>
-          ) : null}
-          <Text style={styles.label}>Nazwa produktu</Text>
-          <TextInput
-            testID="catalog-edit-name"
-            accessibilityLabel="Nazwa produktu"
-            value={name}
-            onChangeText={value => { setName(value); onDraftChange(); }}
-            editable={!busy}
-            style={styles.input}
-            autoCapitalize="sentences"
-          />
-          <Text style={styles.label}>Marka (opcjonalnie)</Text>
-          <TextInput
-            testID="catalog-edit-brand"
-            accessibilityLabel="Marka"
-            value={brand}
-            onChangeText={value => { setBrand(value); onDraftChange(); }}
-            editable={!busy}
-            style={styles.input}
-          />
-          <Text style={styles.label}>Kategoria (opcjonalnie)</Text>
-          <TextInput
-            testID="catalog-edit-category"
-            accessibilityLabel="Kategoria"
-            value={category}
-            onChangeText={value => { setCategory(value); onDraftChange(); }}
-            editable={!busy}
-            style={styles.input}
-          />
-          {errorMessage ? <Text accessibilityRole="alert" style={styles.error}>{errorMessage}</Text> : null}
-          <View style={styles.actions}>
-            <Pressable
-              testID="catalog-edit-cancel"
-              accessibilityRole="button"
-              disabled={busy}
-              onPress={onClose}
-              style={[styles.button, styles.cancel, busy && styles.disabled]}>
-              <Text style={styles.cancelText}>Anuluj</Text>
-            </Pressable>
-            <Pressable
-              testID="catalog-edit-save"
-              accessibilityRole="button"
-              disabled={busy || photoPicking || !name.trim()}
-              onPress={() => { submit().catch(() => {}); }}
-              style={[styles.button, styles.save, (busy || photoPicking || !name.trim()) && styles.disabled]}>
-              <Text style={styles.saveText}>{busy && !deleting ? 'Zapisuję…' : 'Zapisz zmiany'}</Text>
-            </Pressable>
-          </View>
-          <Pressable
-            testID="catalog-edit-delete"
-            accessibilityRole="button"
-            disabled={busy || photoPicking}
-            onPress={requestDelete}
-            style={[styles.button, styles.delete, (busy || photoPicking) && styles.disabled]}>
-            <Text style={styles.deleteText}>{deleting ? 'Usuwam…' : 'Usuń produkt z katalogu'}</Text>
-          </Pressable>
-        </ScrollView>
-      </KeyboardAvoidingView>
+            <Text style={styles.label}>Nazwa produktu</Text>
+            <TextInput
+              testID="catalog-edit-name"
+              accessibilityLabel="Nazwa produktu"
+              value={name}
+              onChangeText={value => { setName(value); onDraftChange(); }}
+              editable={!busy}
+              style={styles.input}
+              autoCapitalize="sentences"
+            />
+            <Text style={styles.label}>Marka (opcjonalnie)</Text>
+            <TextInput
+              testID="catalog-edit-brand"
+              accessibilityLabel="Marka"
+              placeholder="Np. Barilla"
+              placeholderTextColor={colors.textMuted}
+              value={brand}
+              onChangeText={value => { setBrand(value); onDraftChange(); }}
+              editable={!busy}
+              style={styles.input}
+            />
+            <Text style={styles.label}>Kategoria (opcjonalnie)</Text>
+            <TextInput
+              testID="catalog-edit-category"
+              accessibilityLabel="Kategoria"
+              placeholder="Np. Produkty suche"
+              placeholderTextColor={colors.textMuted}
+              value={category}
+              onChangeText={value => { setCategory(value); onDraftChange(); }}
+              editable={!busy}
+              style={styles.input}
+            />
+            <InlineFeedback feedback={errorMessage ? {message: errorMessage, tone: 'error'} : null} numberOfLines={0} />
+            <View style={styles.actions}>
+              <Pressable
+                testID="catalog-edit-cancel"
+                accessibilityRole="button"
+                disabled={busy}
+                onPress={onClose}
+                style={({pressed}) => [styles.button, styles.cancel, busy && styles.disabled, pressed && styles.pressed]}>
+                <Text style={styles.cancelText}>Anuluj</Text>
+              </Pressable>
+              <Pressable
+                testID="catalog-edit-save"
+                accessibilityRole="button"
+                disabled={busy || photoPicking || !name.trim()}
+                onPress={() => { submit().catch(() => {}); }}
+                style={({pressed}) => [styles.button, styles.save, (busy || photoPicking || !name.trim()) && styles.disabled, pressed && styles.pressed]}>
+                <Text style={styles.saveText}>{busy && !deleting ? 'Zapisuję…' : 'Zapisz zmiany'}</Text>
+              </Pressable>
+            </View>
+            <View style={styles.deleteSection}>
+              <Pressable
+                testID="catalog-edit-delete"
+                accessibilityRole="button"
+                disabled={busy || photoPicking}
+                onPress={requestDelete}
+                style={({pressed}) => [styles.textButton, (busy || photoPicking) && styles.disabled, pressed && styles.pressed]}>
+                <Trash2 size={18} color={colors.danger} />
+                <Text style={styles.deleteText}>Usuń produkt z katalogu</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      )}
     </DraggableBottomSheet>
   );
 }
@@ -294,30 +302,42 @@ const styles = StyleSheet.create({
   title: {fontSize: 23, fontWeight: '900', color: colors.textPrimary, textAlign: 'center', marginTop: 8},
   form: {flexShrink: 1},
   notice: {
-    padding: 12, borderRadius: 8, backgroundColor: colors.accentSoft,
-    color: colors.textPrimary, fontSize: 14, lineHeight: 20, marginBottom: 16,
+    color: colors.textSecondary, fontSize: 14, lineHeight: 20, textAlign: 'center', marginBottom: 14,
   },
-  productHeader: {flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16},
-  productText: {flex: 1},
-  productName: {fontSize: 17, fontWeight: '800', color: colors.textPrimary},
+  productHeader: {
+    ...shadows.preview,
+    minHeight: 92, flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 18,
+    padding: 12, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface,
+  },
+  productText: {flex: 1, minWidth: 0},
+  productName: {fontSize: 17, fontWeight: '900', color: colors.textPrimary},
   metadata: {fontSize: 13, color: colors.textSecondary, marginTop: 4},
-  photo: {width: 64, height: 64, borderRadius: 8, resizeMode: 'cover', backgroundColor: colors.surfaceMuted},
-  photoActions: {flexDirection: 'row', gap: 8, marginTop: 8, marginBottom: 14},
-  settings: {flex: 0, marginBottom: 14},
-  label: {fontSize: 14, fontWeight: '700', color: colors.textPrimary, marginBottom: 6},
+  photo: {width: 68, height: 68, borderRadius: 8, resizeMode: 'cover', backgroundColor: colors.surfaceMuted},
+  photoPlaceholder: {alignItems: 'center', justifyContent: 'center'},
+  photoActions: {marginTop: 8, marginBottom: 14},
+  settingsText: {fontSize: 14, fontWeight: '900', color: colors.accent},
+  textButton: {minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 8},
+  settings: {alignSelf: 'flex-start', marginBottom: 14},
+  label: {fontSize: 14, fontWeight: '900', color: colors.textPrimary, marginBottom: 8},
   input: {
+    ...shadows.control,
     minHeight: 48, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1,
     borderColor: colors.border, borderRadius: 8, backgroundColor: colors.surface,
     color: colors.textPrimary, fontSize: 16, marginBottom: 14,
   },
-  error: {color: colors.danger, fontSize: 14, lineHeight: 20, marginBottom: 12},
   actions: {flexDirection: 'row', gap: 12, marginTop: 4, paddingBottom: 8},
   button: {flex: 1, minHeight: 48, borderRadius: 8, alignItems: 'center', justifyContent: 'center', padding: 10},
   cancel: {backgroundColor: colors.surfaceSubtle, borderWidth: 1, borderColor: colors.border},
-  cancelText: {fontSize: 15, fontWeight: '700', color: colors.textPrimary},
-  save: {backgroundColor: colors.success},
-  saveText: {fontSize: 15, fontWeight: '700', color: colors.successText},
-  delete: {flex: 0, marginTop: 8, marginBottom: 8, borderWidth: 1, borderColor: colors.danger},
-  deleteText: {fontSize: 15, fontWeight: '700', color: colors.danger},
-  disabled: {opacity: 0.5},
+  cancelText: {fontSize: 14, fontWeight: '900', color: colors.textPrimary},
+  save: {flex: 2, minHeight: 54, backgroundColor: colors.success},
+  saveText: {fontSize: 16, fontWeight: '900', color: colors.successText},
+  deleteSection: {borderTopWidth: 1, borderTopColor: colors.border, marginTop: 16, paddingTop: 8, paddingBottom: 4},
+  deleteText: {fontSize: 14, fontWeight: '900', color: colors.danger},
+  confirmation: {paddingBottom: shadowInsets.card.bottom},
+  confirmationTitle: {fontSize: 18, textAlign: 'left'},
+  confirmationProduct: {fontSize: 17, fontWeight: '900', color: colors.textPrimary, marginBottom: 8},
+  confirmationDescription: {fontSize: 15, lineHeight: 21, color: colors.textSecondary, marginBottom: 14},
+  confirmDelete: {backgroundColor: colors.danger},
+  pressed: {opacity: 0.78},
+  disabled: {opacity: 0.45},
 });

@@ -18,7 +18,10 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 jest.mock('lucide-react-native', () => {
   const {View: MockIcon} = require('react-native');
-  return {ArrowLeft: MockIcon, ChevronRight: MockIcon, Package: MockIcon, Search: MockIcon};
+  return {
+    ArrowLeft: MockIcon, ChevronRight: MockIcon, Package: MockIcon, Search: MockIcon,
+    Camera: MockIcon, ImagePlus: MockIcon, Trash2: MockIcon, Check: MockIcon, X: MockIcon,
+  };
 });
 jest.mock('../shopping-lists/modals/DraggableBottomSheet', () => ({
   DraggableBottomSheet: ({visible, children}: {visible: boolean; children: React.ReactNode}) => visible ? children : null,
@@ -57,6 +60,7 @@ describe('UI: ProductCatalogView', () => {
   let restorePlatform: () => void;
 
   beforeEach(() => {
+    jest.useFakeTimers();
     const replacement = jest.replaceProperty(Platform, 'OS', 'android');
     restorePlatform = () => replacement.restore();
     checkCameraPermission.mockReset().mockResolvedValue(true);
@@ -82,6 +86,7 @@ describe('UI: ProductCatalogView', () => {
   afterEach(async () => {
     await act(async () => renderer?.unmount());
     renderer = undefined;
+    jest.useRealTimers();
     restorePlatform();
     expect(consoleError).not.toHaveBeenCalled();
   });
@@ -120,9 +125,7 @@ describe('UI: ProductCatalogView', () => {
     await act(async () => { expect(handler!()).toBe(true); });
   };
   const deleteConfirmation = () => {
-    const button = alert.mock.calls.at(-1)?.[2]?.find(action => action.style === 'destructive');
-    expect(button?.onPress).toBeDefined();
-    return button!.onPress!;
+    return renderer!.root.findByProps({testID: 'catalog-delete-confirm'}).props.onPress as () => void;
   };
   const confirmDelete = async () => {
     await act(async () => { deleteConfirmation()(); });
@@ -136,7 +139,8 @@ describe('UI: ProductCatalogView', () => {
     await change('catalog-edit-name', 'Niezapisana nazwa');
     await press('catalog-edit-delete');
 
-    expect(alert).toHaveBeenCalledWith('Usunąć produkt?', expect.stringContaining(product.name), expect.any(Array), expect.any(Object));
+    expect(renderer!.root.findByProps({testID: 'catalog-delete-product-name'}).props.children).toBe(product.name);
+    expect(alert).not.toHaveBeenCalled();
     expect(deleteProduct).not.toHaveBeenCalled();
     await confirmDelete();
 
@@ -147,28 +151,71 @@ describe('UI: ProductCatalogView', () => {
     expect(renderer!.root.findByProps({testID: 'catalog-search'}).props.value).toBe('żurek');
     expect(renderer!.root.findByType(CatalogProductEditModal).props.product).toBeNull();
     expect(texts()).toContain('Usunięto produkt z katalogu.');
-  });
+  }, 10_000);
 
-  it.each(['cancel', 'dismiss'] as const)('preserves the draft after confirmation %s and allows requesting deletion again', async action => {
+  it.each(['cancel', 'back', 'backdrop'] as const)('preserves the draft after confirmation %s and allows requesting deletion again', async action => {
     await renderCatalog();
     await press(`catalog-product-${generic.id}`);
     await change('catalog-edit-name', 'Szkic nazwy');
-    await press('catalog-edit-delete');
-    await press('catalog-edit-delete');
-    expect(alert).toHaveBeenCalledTimes(1);
+    const requestDelete = renderer!.root.findByProps({testID: 'catalog-edit-delete'}).props.onPress;
+    await act(async () => { requestDelete(); requestDelete(); });
+    expect(renderer!.root.findByProps({testID: 'catalog-delete-confirm'}).props.disabled).toBe(false);
     const oldConfirm = deleteConfirmation();
 
-    await act(async () => {
-      if (action === 'cancel') { alert.mock.calls[0][2]!.find(button => button.style === 'cancel')!.onPress!(); }
-      else { alert.mock.calls[0][3]!.onDismiss!(); }
-      oldConfirm();
-    });
+    if (action === 'cancel') { await press('catalog-delete-cancel'); }
+    else if (action === 'back') { await hardwareBack(); }
+    else { await act(async () => { renderer!.root.findByType(CatalogProductEditModal).props.onClose(); }); }
+    await act(async () => { oldConfirm(); });
 
     expect(deleteProduct).not.toHaveBeenCalled();
     expect(renderer!.root.findByProps({testID: 'catalog-edit-name'}).props.value).toBe('Szkic nazwy');
     expect(photoPreview()).toBe(generic.imageUrl);
     await press('catalog-edit-delete');
-    expect(alert).toHaveBeenCalledTimes(2);
+    expect(renderer!.root.findByProps({testID: 'catalog-delete-confirm'}).props.disabled).toBe(false);
+  });
+
+  it('keeps the photo and fields when deletion is cancelled and can save the preserved draft', async () => {
+    jest.mocked(launchImageLibrary).mockResolvedValue({assets: [{uri: 'file:///temporary/new.jpg'}]});
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await change('catalog-edit-name', 'Żurek domowy');
+    await change('catalog-edit-brand', 'Nowa marka');
+    await press('catalog-edit-photo-library');
+    const draftPhoto = photoPreview();
+    const save = renderer!.root.findByType(CatalogProductEditModal).props.onSave;
+    await press('catalog-edit-delete');
+    await act(async () => {
+      expect(await save({name: 'Queued save', brand: null, category: null})).toBe(false);
+    });
+    await hardwareBack();
+
+    expect(photoPreview()).toBe(draftPhoto);
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-name'}).props.value).toBe('Żurek domowy');
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-brand'}).props.value).toBe('Nowa marka');
+    expect(unlink).not.toHaveBeenCalled();
+    expect(updateProduct).not.toHaveBeenCalled();
+    expect(deleteProduct).not.toHaveBeenCalled();
+    await press('catalog-edit-save');
+
+    expect(updateProduct).toHaveBeenCalledWith(generic.id, {
+      name: 'Żurek domowy', brand: 'Nowa marka', category: generic.category, imageUrl: draftPhoto,
+    });
+    expect(unlink).not.toHaveBeenCalled();
+  });
+
+  it('rejects an old confirmation after requesting deletion again for the same product', async () => {
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await press('catalog-edit-delete');
+    const oldConfirm = deleteConfirmation();
+    await press('catalog-delete-cancel');
+    await press('catalog-edit-delete');
+    await act(async () => { oldConfirm(); });
+
+    expect(deleteProduct).not.toHaveBeenCalled();
+    await confirmDelete();
+    expect(deleteProduct).toHaveBeenCalledTimes(1);
+    expect(deleteProduct).toHaveBeenCalledWith(generic.id);
   });
 
   it.each([
@@ -185,6 +232,9 @@ describe('UI: ProductCatalogView', () => {
     await confirmDelete();
 
     expect(texts()).toContain(message);
+    expect(renderer!.root.findByProps({testID: 'catalog-delete-confirm'}).props.disabled).toBe(false);
+    expect(renderer!.root.findAllByType(Text).find(node => node.props.children === message)?.props.numberOfLines).toBe(0);
+    await press('catalog-delete-cancel');
     expect(renderer!.root.findByProps({testID: 'catalog-edit-brand'}).props.value).toBe('Szkic marki');
     expect(photoPreview()).toBe(generic.imageUrl);
     expect(updateProduct).not.toHaveBeenCalled();
@@ -202,6 +252,7 @@ describe('UI: ProductCatalogView', () => {
     await press('catalog-edit-delete');
     await confirmDelete();
 
+    await press('catalog-delete-cancel');
     expect(photoPreview()).toBe(draftPhoto);
     expect(unlink).not.toHaveBeenCalled();
     await press('catalog-edit-delete');
@@ -218,22 +269,26 @@ describe('UI: ProductCatalogView', () => {
     deleteProduct.mockReturnValueOnce(pending.promise);
     await renderCatalog();
     await press(`catalog-product-${generic.id}`);
+    const save = renderer!.root.findByType(CatalogProductEditModal).props.onSave;
     await press('catalog-edit-delete');
     const confirm = deleteConfirmation();
     await act(async () => { confirm(); confirm(); });
-    await press('catalog-edit-delete');
-    await press('catalog-edit-save');
-    await press('catalog-edit-photo-camera');
-    await press('catalog-edit-cancel');
+    await press('catalog-delete-confirm');
+    await press('catalog-delete-cancel');
+    await act(async () => {
+      expect(await save({name: generic.name, brand: generic.brand, category: generic.category})).toBe(false);
+    });
     await hardwareBack();
 
     expect(deleteProduct).toHaveBeenCalledTimes(1);
-    expect(alert).toHaveBeenCalledTimes(1);
+    expect(alert).not.toHaveBeenCalled();
     expect(updateProduct).not.toHaveBeenCalled();
     expect(launchCamera).not.toHaveBeenCalled();
     expect(onRequestClose).not.toHaveBeenCalled();
-    expect(renderer!.root.findByProps({testID: 'catalog-edit-name'}).props.editable).toBe(false);
-    expect(renderer!.root.findByProps({testID: 'catalog-edit-delete'}).props.disabled).toBe(true);
+    expect(renderer!.root.findAllByProps({testID: 'catalog-edit-name'})).toHaveLength(0);
+    expect(renderer!.root.findAllByProps({testID: 'catalog-edit-photo-camera'})).toHaveLength(0);
+    expect(renderer!.root.findByProps({testID: 'catalog-delete-confirm'}).props.disabled).toBe(true);
+    expect(renderer!.root.findByProps({testID: 'catalog-delete-cancel'}).props.disabled).toBe(true);
     expect(texts()).toContain('Usuwam…');
     await act(async () => pending.resolve());
     expect(onProductUpdated).toHaveBeenCalledTimes(1);
@@ -244,6 +299,7 @@ describe('UI: ProductCatalogView', () => {
     await press(`catalog-product-${generic.id}`);
     await press('catalog-edit-delete');
     const oldConfirm = deleteConfirmation();
+    await press('catalog-delete-cancel');
     await press('catalog-edit-cancel');
     await press(`catalog-product-${specific.id}`);
     await act(async () => { oldConfirm(); });
@@ -263,6 +319,7 @@ describe('UI: ProductCatalogView', () => {
 
     expect(texts()).toContain('Ten produkt nie jest już dostępny w katalogu. Zamknij edycję.');
     expect(displayedProducts()).toEqual([]);
+    await press('catalog-delete-cancel');
     expect(renderer!.root.findByProps({testID: 'catalog-edit-name'}).props.value).toBe('Szkic nazwy');
     expect(onProductUpdated).not.toHaveBeenCalled();
   });
@@ -508,6 +565,22 @@ describe('UI: ProductCatalogView', () => {
     expect(renderer!.root.findByType(CatalogProductEditModal).props.product).toBeNull();
     await press('catalog-retry');
     expect(displayedProducts()).toEqual([edited]);
+    expect(updateProduct).toHaveBeenCalledTimes(1);
+  });
+
+  it('expires the shared success toast while keeping a catalog refresh error available for retry', async () => {
+    getCatalog.mockResolvedValueOnce([generic]).mockRejectedValueOnce(new Error('Refresh failed'));
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await press('catalog-edit-save');
+
+    expect(texts()).toContain('Zapisano zmiany produktu.');
+    expect(texts()).toContain('Nie udało się wczytać katalogu. Spróbuj ponownie.');
+    await act(async () => { jest.advanceTimersByTime(3000); });
+
+    expect(texts()).not.toContain('Zapisano zmiany produktu.');
+    expect(texts()).toContain('Nie udało się wczytać katalogu. Spróbuj ponownie.');
+    expect(renderer!.root.findByProps({testID: 'catalog-retry'})).toBeDefined();
     expect(updateProduct).toHaveBeenCalledTimes(1);
   });
 

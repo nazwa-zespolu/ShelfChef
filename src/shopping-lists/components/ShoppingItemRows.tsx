@@ -4,6 +4,7 @@ import {Link, Pencil} from 'lucide-react-native';
 import {SwipeToDeleteCard} from '../../components/SwipeToDeleteCard';
 import type {AutoShoppingListItemState, ShoppingItemStatus} from '../../domain/types';
 import {colors} from '../../theme/colors';
+import {shadows} from '../../theme/shadows';
 import {ShoppingItemIconBubble} from './ShoppingItemIconBubble';
 
 const DRAG_START_DELAY_MS = 135;
@@ -121,7 +122,6 @@ export function ManualShoppingItemRow({
               iconKey={item.iconKey}
               iconColorKey={item.iconColorKey}
               imageUrl={item.imageUrl}
-              purchased={isPurchased}
             />
           </View>
           <ShoppingItemText item={item} purchased={isPurchased} onOpenLinks={onOpenLinks} onEdit={onEdit} />
@@ -360,6 +360,7 @@ function QuantityStepper({
 
 const styles = StyleSheet.create({
   itemCard: {
+    ...shadows.card,
     minHeight: 78,
     borderRadius: 8,
     backgroundColor: colors.surface,
@@ -370,11 +371,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: {width: 0, height: 6},
-    elevation: 3,
   },
   itemCardPurchased: {
     borderColor: colors.accentSoft,

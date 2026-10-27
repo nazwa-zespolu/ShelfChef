@@ -1,19 +1,26 @@
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
+import {Check, ClipboardList, Package, Search} from 'lucide-react-native';
 import {colors} from '../../theme/colors';
 
 export function EmptyState({
   title,
   description,
   details = [],
+  variant = 'products',
+  compact = false,
 }: {
   title: string;
   description?: string;
   details?: string[];
+  variant?: 'products' | 'lists' | 'search' | 'complete';
+  compact?: boolean;
 }) {
+  const Icon = {products: Package, lists: ClipboardList, search: Search, complete: Check}[variant];
   return (
-    <View style={styles.box}>
-      <Text style={styles.title}>{title}</Text>
+    <View style={[styles.box, compact && styles.compact]}>
+      <Icon color={variant === 'complete' ? colors.success : colors.textMuted} size={compact ? 24 : 32} strokeWidth={2} />
+      <Text style={[styles.title, compact && styles.compactTitle]}>{title}</Text>
       {description ? (
         <Text style={styles.description}>{description}</Text>
       ) : null}
@@ -35,11 +42,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 28,
   },
+  compact: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
   title: {
-    color: colors.textMuted,
-    fontSize: 15,
-    fontWeight: '700',
+    color: colors.textSecondary,
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 22,
     textAlign: 'center',
+    marginTop: 12,
+    flexShrink: 1,
+  },
+  compactTitle: {
+    marginTop: 0,
   },
   description: {
     maxWidth: 300,

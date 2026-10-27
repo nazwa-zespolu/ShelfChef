@@ -140,6 +140,7 @@ erDiagram
 - Sprawdzenie powiązań i usunięcie odbywają się w jednej transakcji. Egzemplarze w `inventory` (także powiązane samym EAN), bezpośrednie pozycje zakupowe, alternatywy oraz produkty wskazujące ten wpis jako rodzica blokują usunięcie. Sprawdzamy wszystkie statusy pozycji zakupowych. Nie usuwamy ani nie odłączamy tych danych automatycznie.
 - Dla produktu `specific` usuwamy wpis katalogu i lokalną definicję EAN atomowo; pozostawiona definicja odtworzyłaby wpis podczas uruchamiania aplikacji. Ponowne dodanie usuniętego produktu jest możliwe, a operacja nie zmienia danych w Open Food Facts.
 - `CatalogProductDeleteError` rozróżnia `not_found`, `in_inventory`, `in_shopping_list` i `has_children`. Błąd zachowuje szkic edytora i pozwala ponowić operację. Błąd zapisu wycofuje całą transakcję.
+- Potwierdzenie usunięcia jest osobnym widokiem tego samego dolnego panelu. Anulowanie i Wstecz przywracają szkic edycji wraz ze zdjęciem. Odmowa usunięcia pozostaje widoczna w potwierdzeniu i pozwala ponowić operację albo wrócić do edycji.
 - Usunięcie produktu odrzuca jego niezatwierdzony szkic zdjęcia. Operacja nie usuwa wcześniej zapisanych plików zdjęć ani plików źródłowych; sprzątanie szkiców zachowuje dotychczasowe zasady.
 
 ## Indeksy

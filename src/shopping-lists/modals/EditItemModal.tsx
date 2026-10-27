@@ -1,5 +1,5 @@
 import React from 'react';
-import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
+import {Keyboard, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import {Pencil} from 'lucide-react-native';
 import type {
   AutoShoppingListItemState,
@@ -7,10 +7,13 @@ import type {
   ShoppingListIconKey,
 } from '../../domain/types';
 import {colors} from '../../theme/colors';
+import {shadows} from '../../theme/shadows';
 import {InlineFeedback, type FeedbackMessage} from '../components/InlineFeedback';
 import {ShoppingIconAppearancePicker} from '../components/ShoppingIconAppearancePicker';
 import {ShoppingItemIconBubble} from '../components/ShoppingItemIconBubble';
 import {DraggableBottomSheet} from './DraggableBottomSheet';
+import {FormScrollView} from '../../components/FormScrollView';
+import {useKeyboardVisible} from '../hooks/useKeyboardVisible';
 
 export function EditItemModal({
   item,
@@ -37,6 +40,7 @@ export function EditItemModal({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const keyboardVisible = useKeyboardVisible(item == null);
   return (
     <DraggableBottomSheet
       visible={item != null}
@@ -45,50 +49,62 @@ export function EditItemModal({
       sheetStyle={styles.sheet}
       handleStyle={styles.handleTouch}
       handleContent={<Text style={styles.title}>Edytuj produkt</Text>}>
-      <Text style={styles.subtitle}>Zmień nazwę, ikonę lub kolor produktu tekstowego</Text>
-      <InlineFeedback feedback={feedback} />
+      <FormScrollView visible={item != null}>
+        <Text style={styles.subtitle}>Zmień nazwę, ikonę lub kolor produktu tekstowego</Text>
+        <InlineFeedback feedback={feedback} />
 
-      <View style={styles.previewCard}>
-        <ShoppingItemIconBubble iconKey={iconKey} iconColorKey={iconColorKey} />
-        <View style={styles.productText}>
-          <Text style={styles.productName} numberOfLines={1}>
-            {name.trim() || 'Nazwa produktu'}
-          </Text>
-          <Text style={styles.productMeta}>Produkt tekstowy</Text>
+        {!keyboardVisible ? (
+          <ShoppingIconAppearancePicker
+            compact={false}
+            label="Ikona produktu"
+            colorAccessibilityLabel="Kolor ikony produktu"
+            iconKey={iconKey}
+            iconColorKey={iconColorKey}
+            onChangeIconKey={onChangeIconKey}
+            onChangeIconColorKey={onChangeIconColorKey}
+          />
+        ) : null}
+
+        <Pressable
+          disabled={!keyboardVisible}
+          accessibilityRole={keyboardVisible ? 'button' : undefined}
+          accessibilityLabel={keyboardVisible ? 'Zmień ikonę i kolor produktu' : undefined}
+          onPress={() => Keyboard.dismiss()}
+          style={({pressed}) => [styles.previewCard, pressed && styles.pressed]}>
+          <ShoppingItemIconBubble iconKey={iconKey} iconColorKey={iconColorKey} />
+          <View style={styles.productText}>
+            <Text style={styles.productName} numberOfLines={1}>
+              {name.trim() || 'Nazwa produktu'}
+            </Text>
+            <Text style={[styles.productMeta, keyboardVisible && styles.appearanceActionText]}>
+              {keyboardVisible ? 'Zmień ikonę i kolor' : 'Produkt tekstowy'}
+            </Text>
+          </View>
+        </Pressable>
+
+        <Text style={styles.inputLabel}>Nazwa produktu</Text>
+        <View style={styles.searchBox}>
+          <Pencil color={colors.textMuted} size={20} strokeWidth={2.1} />
+          <TextInput
+            value={name}
+            onChangeText={onChangeName}
+            placeholder="Nazwa produktu"
+            placeholderTextColor={colors.textMuted}
+            style={styles.searchInput}
+          />
         </View>
-      </View>
 
-      <Text style={styles.inputLabel}>Nazwa produktu</Text>
-      <View style={styles.searchBox}>
-        <Pencil color={colors.textMuted} size={20} strokeWidth={2.1} />
-        <TextInput
-          value={name}
-          onChangeText={onChangeName}
-          placeholder="Nazwa produktu"
-          placeholderTextColor={colors.textMuted}
-          style={styles.searchInput}
-        />
-      </View>
-
-      <ShoppingIconAppearancePicker
-        label="Ikona produktu"
-        colorAccessibilityLabel="Kolor ikony produktu"
-        iconKey={iconKey}
-        iconColorKey={iconColorKey}
-        onChangeIconKey={onChangeIconKey}
-        onChangeIconColorKey={onChangeIconColorKey}
-      />
-
-      <Pressable
-        disabled={busy || name.trim().length === 0}
-        onPress={onSubmit}
-        style={({pressed}) => [
-          styles.submitButton,
-          (busy || name.trim().length === 0) && styles.disabled,
-          pressed && styles.pressed,
-        ]}>
-        <Text style={styles.submitButtonText}>Zapisz zmiany</Text>
-      </Pressable>
+        <Pressable
+          disabled={busy || name.trim().length === 0}
+          onPress={onSubmit}
+          style={({pressed}) => [
+            styles.submitButton,
+            (busy || name.trim().length === 0) && styles.disabled,
+            pressed && styles.pressed,
+          ]}>
+          <Text style={styles.submitButtonText}>Zapisz zmiany</Text>
+        </Pressable>
+      </FormScrollView>
     </DraggableBottomSheet>
   );
 }
@@ -125,6 +141,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   previewCard: {
+    ...shadows.preview,
     minHeight: 74,
     borderRadius: 8,
     borderWidth: 1,
@@ -136,11 +153,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.07,
-    shadowRadius: 12,
-    shadowOffset: {width: 0, height: 5},
-    elevation: 3,
   },
   productText: {
     flex: 1,
@@ -156,6 +168,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 3,
   },
+  appearanceActionText: {
+    color: colors.accent,
+    fontWeight: '800',
+  },
   inputLabel: {
     color: colors.textPrimary,
     fontSize: 14,
@@ -163,6 +179,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   searchBox: {
+    ...shadows.control,
     minHeight: 52,
     borderRadius: 8,
     borderWidth: 1,
@@ -173,11 +190,6 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 12,
     marginBottom: 12,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: {width: 0, height: 3},
-    elevation: 1,
   },
   searchInput: {
     flex: 1,

@@ -1,5 +1,5 @@
 import React from 'react';
-import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
+import {Keyboard, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import {ClipboardList, RefreshCcw} from 'lucide-react-native';
 import type {
   ShoppingListIconColorKey,
@@ -11,9 +11,12 @@ import {
   getShoppingListIconDefinition,
 } from '../../shoppingListIcons';
 import {colors} from '../../theme/colors';
+import {shadows} from '../../theme/shadows';
 import {InlineFeedback, type FeedbackMessage} from '../components/InlineFeedback';
 import {ShoppingIconAppearancePicker} from '../components/ShoppingIconAppearancePicker';
 import {DraggableBottomSheet} from './DraggableBottomSheet';
+import {FormScrollView} from '../../components/FormScrollView';
+import {useKeyboardVisible} from '../hooks/useKeyboardVisible';
 
 export function ListFormModal({
   visible,
@@ -47,6 +50,7 @@ export function ListFormModal({
   onSubmit: () => void;
 }) {
   const isEditing = mode === 'edit';
+  const keyboardVisible = useKeyboardVisible(!visible);
   const selectedIcon = getShoppingListIconDefinition(iconKey);
   const selectedColor = getShoppingListIconColorDefinition(iconColorKey);
   const SelectedIcon = selectedIcon.Icon;
@@ -63,95 +67,111 @@ export function ListFormModal({
           {isEditing ? 'Ustawienia listy' : 'Nowa lista zakupów'}
         </Text>
       }>
-      <Text style={styles.subtitle}>
-        {isEditing ? 'Zmień nazwę, ikonę i kolor listy.' : 'Nadaj nazwę i wybierz typ listy.'}
-      </Text>
-      <InlineFeedback feedback={feedback} />
-      <View style={styles.preview}>
-        <View style={[styles.previewIcon, {backgroundColor: selectedColor.background}]}>
-          <SelectedIcon color={selectedColor.color} size={30} strokeWidth={2.2} />
-        </View>
-        <View style={styles.rowText}>
-          <Text style={styles.previewTitle} numberOfLines={1}>
-            {name.trim() || 'Nazwa listy'}
-          </Text>
-          <Text style={styles.previewMeta}>
-            {type === 'manual' ? 'Lista zakupów' : 'Lista uzupełniania'}
-          </Text>
-        </View>
-      </View>
-      <Text style={styles.fieldLabel}>Nazwa listy</Text>
-      <TextInput
-        value={name}
-        onChangeText={onChangeName}
-        placeholder="Np. zakupy na weekend"
-        placeholderTextColor={colors.textMuted}
-        style={styles.input}
-      />
-      {!isEditing ? (
-        <>
-          <Text style={styles.fieldLabel}>Typ listy</Text>
-          <View style={styles.typeRow}>
-            {(['manual', 'auto'] as ShoppingListType[]).map(option => {
-              const active = type === option;
-              const TypeIcon = option === 'manual' ? ClipboardList : RefreshCcw;
-              const typeColor = option === 'manual' ? colors.accent : colors.warning;
-              return (
-                <Pressable
-                  key={option}
-                  onPress={() => onChangeType(option)}
-                  style={({pressed}) => [
-                    styles.typeOption,
-                    active && styles.typeOptionActive,
-                    active && (
-                      option === 'manual'
-                        ? styles.typeOptionManualActive
-                        : styles.typeOptionAutoActive
-                    ),
-                    pressed && styles.pressed,
-                  ]}>
-                  <TypeIcon
-                    color={active ? typeColor : colors.textSecondary}
-                    size={20}
-                    strokeWidth={2.2}
-                  />
-                  <Text
-                    style={[
-                      styles.typeTitle,
+      <FormScrollView visible={visible}>
+        <Text style={styles.subtitle}>
+          {isEditing ? 'Zmień nazwę, ikonę i kolor listy.' : 'Nadaj nazwę i wybierz typ listy.'}
+        </Text>
+        <InlineFeedback feedback={feedback} />
+
+        {!keyboardVisible ? (
+          <ShoppingIconAppearancePicker
+            compact={false}
+            label="Ikona listy"
+            colorAccessibilityLabel="Kolor ikony"
+            iconKey={iconKey}
+            iconColorKey={iconColorKey}
+            onChangeIconKey={onChangeIconKey}
+            onChangeIconColorKey={onChangeIconColorKey}
+          />
+        ) : null}
+        <Pressable
+          disabled={!keyboardVisible}
+          accessibilityRole={keyboardVisible ? 'button' : undefined}
+          accessibilityLabel={keyboardVisible ? 'Zmień ikonę i kolor listy' : undefined}
+          onPress={() => Keyboard.dismiss()}
+          style={({pressed}) => [styles.preview, pressed && styles.pressed]}>
+          <View style={[styles.previewIcon, {backgroundColor: selectedColor.background}]}>
+            <SelectedIcon color={selectedColor.color} size={30} strokeWidth={2.2} />
+          </View>
+          <View style={styles.rowText}>
+            <Text style={styles.previewTitle} numberOfLines={1}>
+              {name.trim() || 'Nazwa listy'}
+            </Text>
+            <Text style={[styles.previewMeta, keyboardVisible && styles.appearanceActionText]}>
+              {keyboardVisible
+                ? 'Zmień ikonę i kolor'
+                : type === 'manual'
+                  ? 'Lista zakupów'
+                  : 'Lista uzupełniania'}
+            </Text>
+          </View>
+        </Pressable>
+        <Text style={styles.fieldLabel}>Nazwa listy</Text>
+        <TextInput
+          value={name}
+          onChangeText={onChangeName}
+          placeholder="Np. zakupy na weekend"
+          placeholderTextColor={colors.textMuted}
+          style={styles.input}
+        />
+        {!isEditing ? (
+          <>
+            <Text style={styles.fieldLabel}>Typ listy</Text>
+            <View style={styles.typeRow}>
+              {(['manual', 'auto'] as ShoppingListType[]).map(option => {
+                const active = type === option;
+                const TypeIcon = option === 'manual' ? ClipboardList : RefreshCcw;
+                const typeColor = option === 'manual' ? colors.accent : colors.warning;
+                return (
+                  <Pressable
+                    key={option}
+                    onPress={() => onChangeType(option)}
+                    style={({pressed}) => [
+                      styles.typeOption,
+                      active && styles.typeOptionActive,
                       active && (
                         option === 'manual'
-                          ? styles.typeTitleManualActive
-                          : styles.typeTitleAutoActive
+                          ? styles.typeOptionManualActive
+                          : styles.typeOptionAutoActive
                       ),
+                      pressed && styles.pressed,
                     ]}>
-                    {option === 'manual' ? 'Manualna' : 'Auto'}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </>
-      ) : null}
-      <ShoppingIconAppearancePicker
-        label="Ikona listy"
-        colorAccessibilityLabel="Kolor ikony"
-        iconKey={iconKey}
-        iconColorKey={iconColorKey}
-        onChangeIconKey={onChangeIconKey}
-        onChangeIconColorKey={onChangeIconColorKey}
-      />
-      <Pressable
-        disabled={busy || name.trim().length === 0}
-        onPress={onSubmit}
-        style={({pressed}) => [
-          styles.submitButton,
-          (busy || name.trim().length === 0) && styles.disabled,
-          pressed && styles.pressed,
-        ]}>
-        <Text style={styles.submitButtonText}>
-          {isEditing ? 'Zapisz zmiany' : 'Utwórz listę'}
-        </Text>
-      </Pressable>
+                    <TypeIcon
+                      color={active ? typeColor : colors.textSecondary}
+                      size={20}
+                      strokeWidth={2.2}
+                    />
+                    <Text
+                      style={[
+                        styles.typeTitle,
+                        active && (
+                          option === 'manual'
+                            ? styles.typeTitleManualActive
+                            : styles.typeTitleAutoActive
+                        ),
+                      ]}>
+                      {option === 'manual' ? 'Manualna' : 'Auto'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </>
+        ) : null}
+
+        <Pressable
+          disabled={busy || name.trim().length === 0}
+          onPress={onSubmit}
+          style={({pressed}) => [
+            styles.submitButton,
+            (busy || name.trim().length === 0) && styles.disabled,
+            pressed && styles.pressed,
+          ]}>
+          <Text style={styles.submitButtonText}>
+            {isEditing ? 'Zapisz zmiany' : 'Utwórz listę'}
+          </Text>
+        </Pressable>
+      </FormScrollView>
     </DraggableBottomSheet>
   );
 }
@@ -188,6 +208,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   preview: {
+    ...shadows.preview,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.border,
@@ -197,11 +218,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: {width: 0, height: 4},
-    elevation: 2,
   },
   previewIcon: {
     width: 62,
@@ -225,6 +241,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 4,
   },
+  appearanceActionText: {
+    color: colors.accent,
+    fontWeight: '800',
+  },
   fieldLabel: {
     color: colors.textPrimary,
     fontSize: 14,
@@ -232,6 +252,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   input: {
+    ...shadows.control,
     backgroundColor: colors.surface,
     borderRadius: 8,
     borderWidth: 1,
@@ -241,11 +262,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
     marginBottom: 10,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: {width: 0, height: 3},
-    elevation: 1,
   },
   typeRow: {
     minHeight: 50,
