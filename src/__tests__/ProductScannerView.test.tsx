@@ -8,6 +8,7 @@ import ProductScannerView from '../ProductScannerView';
 import {ProductRepository} from '../infrastructure/ProductRepository';
 import {ScanToAdd} from '../app/ScanToAdd';
 import {ProductDefinition} from '../domain/types';
+import {DraggableBottomSheet} from '../shopping-lists/modals/DraggableBottomSheet';
 
 const mockShowToast = jest.fn();
 
@@ -45,8 +46,8 @@ jest.mock('../components/AppToast', () => ({
   useAppToast: () => ({toast: null, toastAnim: {}, showToast: mockShowToast}),
 }));
 jest.mock('../shopping-lists/modals/DraggableBottomSheet', () => ({
-  DraggableBottomSheet: ({visible, children}: {visible: boolean; children: React.ReactNode}) =>
-    visible ? children : null,
+  DraggableBottomSheet: ({visible, children, handleContent, overlay}: {visible: boolean; children: React.ReactNode; handleContent?: React.ReactNode; overlay?: React.ReactNode}) =>
+    visible ? <>{handleContent}{children}{overlay}</> : null,
 }));
 
 describe('UI: ProductScannerView product adding', () => {
@@ -140,6 +141,20 @@ describe('UI: ProductScannerView product adding', () => {
     await changeInput('Np. Domowy zakwas', '  Domowy sos  ');
   };
 
+  it('previews a scanned product photo and preserves the quantity after closing it', async () => {
+    scan.mockResolvedValue(existing);
+    await act(async () => { renderer = ReactTestRenderer.create(<ProductScannerView onProductAdded={onProductAdded} />); });
+    const scanner = jest.mocked(useCodeScanner).mock.calls.at(-1)![0];
+    await act(async () => { scanner.onCodeScanned([{type: 'ean-13', value: existing.ean}], {width: 100, height: 100}); });
+    await press('+');
+    await act(async () => { renderer!.root.findByProps({testID: 'scanned-photo-preview'}).props.onPress(); });
+    expect(renderer!.root.findByProps({testID: 'product-photo-preview-image'}).props.source.uri).toBe(existing.imageUrl);
+    await act(async () => { renderer!.root.findByType(DraggableBottomSheet).props.onClose(); });
+    expect(addToInventory).not.toHaveBeenCalled();
+    await press('Dodaj');
+    expect(addToInventory).toHaveBeenCalledTimes(2);
+  });
+
   it('passes the brand, category and stored photo to the catalog when adding an inventory item', async () => {
     jest.mocked(launchImageLibrary).mockResolvedValue({assets: [{uri: 'file:///temporary/sauce.jpg'}]});
     await openForm();
@@ -147,6 +162,13 @@ describe('UI: ProductScannerView product adding', () => {
     await changeInput('Np. Produkty suche', '  Przetwory warzywne  ');
     await press('Galeria');
     const photoDestination = jest.mocked(copyFile).mock.calls[0][1];
+
+    await act(async () => { renderer!.root.findByProps({testID: 'manual-photo-preview'}).props.onPress(); });
+    expect(renderer!.root.findByProps({testID: 'product-photo-preview-image'}).props.source.uri).toBe(`file://${photoDestination}`);
+    await act(async () => { renderer!.root.findByType(DraggableBottomSheet).props.onClose(); });
+    expectSharedFields({name: '  Domowy sos  ', brand: '  Spichlerz  ', category: '  Przetwory warzywne  '}, true);
+    expect(renderer!.root.findAllByProps({testID: 'product-photo-preview'})).toHaveLength(0);
+    expect(saveGeneric).not.toHaveBeenCalled();
 
     await press('Zapisz i dodaj');
 
@@ -201,6 +223,10 @@ describe('UI: ProductScannerView product adding', () => {
     expect(button('Galeria').props.disabled).toBe(true);
     expect(button('Aparat').props.disabled).toBe(true);
     expect(button('Usuń zdjęcie').props.disabled).toBe(true);
+    await act(async () => { renderer!.root.findByProps({testID: 'manual-photo-preview'}).props.onPress(); });
+    expect(renderer!.root.findByProps({testID: 'product-photo-preview-image'}).props.source.uri).toBe(existing.imageUrl);
+    await act(async () => { renderer!.root.findByProps({testID: 'product-photo-preview-close'}).props.onPress(); });
+    expectSharedFields(existing, false);
     await press('+');
     await press('Ustaw datę');
     await press('Zapisz i dodaj');

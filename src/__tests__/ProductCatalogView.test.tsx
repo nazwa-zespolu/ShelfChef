@@ -5,6 +5,7 @@ import {launchCamera, launchImageLibrary} from 'react-native-image-picker';
 import {copyFile, mkdir, unlink} from '@dr.pogodin/react-native-fs';
 import ProductCatalogView from '../ProductCatalogView';
 import {CatalogProductEditModal} from '../components/CatalogProductEditModal';
+import {DraggableBottomSheet} from '../shopping-lists/modals/DraggableBottomSheet';
 import type {CatalogProduct} from '../domain/types';
 import {CatalogProductDeleteError, CatalogProductUpdateError, ProductRepository} from '../infrastructure/ProductRepository';
 
@@ -24,7 +25,7 @@ jest.mock('lucide-react-native', () => {
   };
 });
 jest.mock('../shopping-lists/modals/DraggableBottomSheet', () => ({
-  DraggableBottomSheet: ({visible, children}: {visible: boolean; children: React.ReactNode}) => visible ? children : null,
+  DraggableBottomSheet: ({visible, children, overlay}: {visible: boolean; children: React.ReactNode; overlay?: React.ReactNode}) => visible ? <>{children}{overlay}</> : null,
 }));
 
 const generic: CatalogProduct = {
@@ -926,5 +927,32 @@ describe('UI: ProductCatalogView', () => {
     expect(photoPreview()).not.toBe(generic.imageUrl);
     expect(renderer!.root.findAllByProps({testID: 'catalog-edit-photo-settings'})).toHaveLength(0);
     expect(requestCameraPermission).toHaveBeenCalledTimes(1);
+  });
+  it('preserves metadata and an unpublished photo when closing its preview with Back or the close button', async () => {
+    jest.mocked(launchImageLibrary).mockResolvedValue({assets: [{uri: 'file:///temporary/new-photo.jpg'}]});
+    await renderCatalog();
+    await press(`catalog-product-${generic.id}`);
+    await change('catalog-edit-name', 'Nowa nazwa');
+    await change('catalog-edit-brand', 'Nowa marka');
+    await change('catalog-edit-category', 'Nowa kategoria');
+    await press('catalog-edit-photo-library');
+    const draftPhoto = photoPreview();
+
+    await press('catalog-edit-photo-preview');
+    expect(renderer!.root.findByProps({testID: 'product-photo-preview-image'}).props.source.uri).toBe(draftPhoto);
+    await act(async () => { renderer!.root.findByType(DraggableBottomSheet).props.onClose(); });
+    expect(renderer!.root.findAllByProps({testID: 'product-photo-preview'})).toHaveLength(0);
+    expect(renderer!.root.findByProps({testID: 'catalog-edit-name'}).props.value).toBe('Nowa nazwa');
+    expect(photoPreview()).toBe(draftPhoto);
+    expect(unlink).not.toHaveBeenCalled();
+    expect(updateProduct).not.toHaveBeenCalled();
+
+    await press('catalog-edit-photo-preview');
+    await press('product-photo-preview-close');
+    await press('catalog-edit-save');
+    expect(updateProduct).toHaveBeenCalledWith(generic.id, {
+      name: 'Nowa nazwa', brand: 'Nowa marka', category: 'Nowa kategoria', imageUrl: draftPhoto,
+    });
+    expect(unlink).not.toHaveBeenCalled();
   });
 });

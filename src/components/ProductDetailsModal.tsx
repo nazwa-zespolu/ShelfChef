@@ -6,6 +6,7 @@ import {colors} from '../theme/colors';
 import {shadowGutters, shadows} from '../theme/shadows';
 import {DraggableBottomSheet} from '../shopping-lists/modals/DraggableBottomSheet';
 import WheelPicker from './WheelPicker';
+import {useProductPhotoPreview} from './ProductPhotoPreview';
 
 export type ProductDetailsChanges = {
   expiryDate: string | null;
@@ -135,6 +136,7 @@ export function ProductDetailsModal({
   const [openingDatePickerVisible, setOpeningDatePickerVisible] = useState(false);
   const [scrollEnabled, setScrollEnabled] = useState(true);
   const [today, setToday] = useState(() => new Date());
+  const photoPreview = useProductPhotoPreview({uri: item?.imageUrl, name: item?.name ?? '', ownerKey: item?.id ?? null});
 
   useEffect(() => {
     if (!item) {
@@ -253,6 +255,9 @@ export function ProductDetailsModal({
   };
 
   const close = () => {
+    if (photoPreview.close()) {
+      return;
+    }
     if (!busy) {
       onClose();
     }
@@ -277,6 +282,8 @@ export function ProductDetailsModal({
       visible={item != null}
       accessibilityLabel="Zamknij szczegóły produktu"
       onClose={close}
+      overlay={photoPreview.overlay}
+      accessibilityContentHidden={photoPreview.visible}
       sheetStyle={styles.sheet}
       handleStyle={styles.handleTouch}
       handleContent={<Text style={styles.title}>Szczegóły produktu</Text>}>
@@ -290,7 +297,9 @@ export function ProductDetailsModal({
             showsVerticalScrollIndicator={false}>
             <View style={styles.productHeader}>
               {item.imageUrl ? (
-                <Image source={{uri: item.imageUrl}} style={styles.productImage} />
+                <Pressable testID="product-details-photo-preview" accessibilityRole="button" accessibilityLabel="Powiększ zdjęcie produktu" onPress={photoPreview.open}>
+                  <Image source={{uri: item.imageUrl}} style={styles.productImage} />
+                </Pressable>
               ) : (
                 <View style={styles.productImagePlaceholder}>
                   <Package color={colors.textMuted} size={30} strokeWidth={2} />

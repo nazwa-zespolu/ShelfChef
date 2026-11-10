@@ -17,6 +17,7 @@ import {
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import WheelPicker from './components/WheelPicker';
 import {ProductPhotoActions} from './components/ProductPhotoActions';
+import {useProductPhotoPreview} from './components/ProductPhotoPreview';
 import {ProductDefinition} from './domain/types';
 import {getProductRepository, getScanToAdd} from './app/services';
 import {colors} from './theme/colors';
@@ -323,6 +324,7 @@ type ProductPhotoPickerProps = {
   onTakePhoto: () => void;
   onPickFromLibrary: () => void;
   onClear: () => void;
+  onPreview: () => void;
 };
 
 function ProductPhotoPicker({
@@ -332,13 +334,16 @@ function ProductPhotoPicker({
   onTakePhoto,
   onPickFromLibrary,
   onClear,
+  onPreview,
 }: ProductPhotoPickerProps) {
   return (
     <View style={styles.photoSection}>
       <Text style={styles.inputLabel}>Zdjęcie produktu</Text>
       <View style={styles.photoRow}>
         {imageUri ? (
-          <Image source={{uri: imageUri}} style={styles.manualPhotoPreview} />
+          <Pressable testID="manual-photo-preview" accessibilityRole="button" accessibilityLabel="Powiększ zdjęcie produktu" onPress={onPreview}>
+            <Image source={{uri: imageUri}} style={styles.manualPhotoPreview} />
+          </Pressable>
         ) : (
           <View style={styles.manualPhotoPlaceholder}>
             <Text style={styles.manualPhotoPlaceholderText}>Brak zdjęcia</Text>
@@ -413,6 +418,11 @@ function ProductScannerVisionContent({
   const existingManualProduct = shouldLookupManualEan && currentManualLookup?.status === 'ready'
     ? currentManualLookup.product : null;
   const manualSharedFieldsLocked = adding || resolving || photoPicking || manualLookupPending || manualLookupFailed || !!existingManualProduct;
+  const photoPreview = useProductPhotoPreview({
+    uri: sheetMode === 'details' ? scannedProduct?.imageUrl : existingManualProduct ? existingManualProduct.imageUrl : manualPhotoUri,
+    name: sheetMode === 'details' ? scannedProduct?.name ?? '' : existingManualProduct?.name ?? manualName,
+    ownerKey: sheetMode === 'none' ? null : `${sheetMode}:${sheetMode === 'details' ? scannedProduct?.ean : normalizedManualEan}`,
+  });
   const {toast, toastAnim, showToast} = useAppToast();
   const toastTop = useMemo(() => insets.top + 12, [insets.top]);
   const currentYear = useMemo(() => new Date().getFullYear(), []);
@@ -738,7 +748,9 @@ function ProductScannerVisionContent({
   const sheetHeader = sheetMode === 'details' && scannedProduct ? (
     <View style={[styles.productRow, styles.sheetHeader]}>
       {scannedProduct.imageUrl ? (
-        <Image source={{uri: scannedProduct.imageUrl}} style={styles.productImage} />
+        <Pressable testID="scanned-photo-preview" accessibilityRole="button" accessibilityLabel="Powiększ zdjęcie produktu" onPress={photoPreview.open}>
+          <Image source={{uri: scannedProduct.imageUrl}} style={styles.productImage} />
+        </Pressable>
       ) : (
         <View style={styles.productImage} />
       )}
@@ -780,7 +792,12 @@ function ProductScannerVisionContent({
       <DraggableBottomSheet
         visible={resolving || sheetMode !== 'none'}
         accessibilityLabel="Zamknij dodawanie produktu"
-        onClose={resolving || adding ? () => {} : closeBottomSheet}
+        onClose={() => {
+          if (!photoPreview.close() && !resolving && !adding) {
+            closeBottomSheet();
+          }
+        }}
+        accessibilityContentHidden={photoPreview.visible}
         sheetStyle={[
           styles.addProductSheet,
           (sheetMode === 'manualWithEan' || sheetMode === 'manualNoEan') && {
@@ -790,7 +807,7 @@ function ProductScannerVisionContent({
         ]}
         handleStyle={styles.sheetHandleTouch}
         handleContent={sheetHeader}
-        overlay={<AppToast toast={toast} animatedValue={toastAnim} top={toastTop} />}>
+        overlay={<><AppToast toast={toast} animatedValue={toastAnim} top={toastTop} />{photoPreview.overlay}</>}>
         {resolving ? (
           <View style={styles.resolvingBox}>
             <ActivityIndicator color={colors.success} />
@@ -932,6 +949,7 @@ function ProductScannerVisionContent({
               placeholderTextColor={colors.textMuted}
             />
             <ProductPhotoPicker
+              onPreview={photoPreview.open}
               imageUri={existingManualProduct ? existingManualProduct.imageUrl ?? null : manualPhotoUri}
               disabled={manualSharedFieldsLocked}
               picking={photoPicking}
@@ -1047,6 +1065,7 @@ function ProductScannerVisionContent({
               placeholderTextColor={colors.textMuted}
             />
             <ProductPhotoPicker
+              onPreview={photoPreview.open}
               imageUri={existingManualProduct ? existingManualProduct.imageUrl ?? null : manualPhotoUri}
               disabled={manualSharedFieldsLocked}
               picking={photoPicking}

@@ -22,6 +22,7 @@ import {InlineFeedback} from '../shopping-lists/components/InlineFeedback';
 import {colors} from '../theme/colors';
 import {shadowGutters, shadowInsets, shadows} from '../theme/shadows';
 import {ProductPhotoActions} from './ProductPhotoActions';
+import {useProductPhotoPreview} from './ProductPhotoPreview';
 
 export function CatalogProductEditModal({
   product,
@@ -58,6 +59,11 @@ export function CatalogProductEditModal({
   const photoRequest = useRef(0);
   const photoPickingRef = useRef(false);
   const photoDraft = useRef<ProductPhotoDraft | null>(null);
+  const photoPreview = useProductPhotoPreview({
+    uri: imageUrl,
+    name,
+    ownerKey: product && !confirmingDelete ? product.id : null,
+  });
 
   useEffect(() => {
     const draft = new ProductPhotoDraft();
@@ -141,7 +147,9 @@ export function CatalogProductEditModal({
     <DraggableBottomSheet
       visible={product != null}
       accessibilityLabel={confirmingDelete ? 'Anuluj usuwanie produktu' : 'Zamknij edycję produktu katalogowego'}
-      onClose={onClose}
+      onClose={() => { if (!photoPreview.close()) { onClose(); } }}
+      overlay={photoPreview.overlay}
+      accessibilityContentHidden={photoPreview.visible}
       sheetStyle={[styles.sheet, {maxHeight: height * 0.9, paddingBottom: Math.max(insets.bottom, 12)}]}
       handleStyle={styles.handle}
       handleContent={<Text style={[styles.title, confirmingDelete && styles.confirmationTitle]}>{confirmingDelete ? 'Usunąć produkt?' : 'Edytuj produkt'}</Text>}>
@@ -182,7 +190,11 @@ export function CatalogProductEditModal({
             <Text style={styles.notice}>Zmiany dotyczą wszystkich egzemplarzy tego produktu</Text>
             {product ? (
               <View style={styles.productHeader}>
-                {imageUrl ? <Image source={{uri: imageUrl}} style={styles.photo} /> : (
+                {imageUrl ? (
+                  <Pressable testID="catalog-edit-photo-preview" accessibilityRole="button" accessibilityLabel="Powiększ zdjęcie produktu" onPress={photoPreview.open}>
+                    <Image source={{uri: imageUrl}} style={styles.photo} />
+                  </Pressable>
+                ) : (
                   <View style={[styles.photo, styles.photoPlaceholder]}><Package size={28} color={colors.textMuted} /></View>
                 )}
                 <View style={styles.productText}>
