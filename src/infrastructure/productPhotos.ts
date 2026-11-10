@@ -141,7 +141,7 @@ export async function selectProductPhoto(source: ProductPhotoSource): Promise<st
   return `file://${destinationPath}`;
 }
 
-// Owns only copies created in this editing session, never a product's stored photo.
+// Owns only copies created in this form session, never a product's stored photo.
 export class ProductPhotoDraft {
   private readonly copies = new Set<string>();
   private readonly deleting = new Map<string, Promise<void>>();

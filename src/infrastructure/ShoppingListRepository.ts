@@ -10,7 +10,7 @@ import {
   ShoppingListType,
   ShoppingSuggestion,
 } from '../domain/types';
-import {normalizeProductName, ProductRepository} from './ProductRepository';
+import {ProductRepository} from './ProductRepository';
 import {db, runInTransaction} from './db/init';
 
 export type AddShoppingItemInput = {
@@ -483,47 +483,7 @@ export class ShoppingListRepository {
     name: string,
     imageUrl?: string | null,
   ): Promise<CatalogProduct> {
-    const timestamp = nowIso();
-    const normalizedName = normalizeProductName(name);
-    const id = generateId('catalog-generic');
-    db.execute(
-      `
-        INSERT INTO product_catalog (
-          id,
-          name,
-          normalized_name,
-          kind,
-          product_ean,
-          image_url,
-          parent_catalog_product_id,
-          created_at,
-          updated_at
-        )
-        VALUES (?, ?, ?, 'generic', NULL, ?, NULL, ?, ?)
-        ON CONFLICT(kind, normalized_name) WHERE kind = 'generic' DO UPDATE SET
-          name = excluded.name,
-          image_url = COALESCE(excluded.image_url, product_catalog.image_url),
-          updated_at = excluded.updated_at
-      `,
-      [id, name.trim(), normalizedName, imageUrl ?? null, timestamp, timestamp],
-    );
-    const existing = await this.findCatalogProductByNormalizedName('generic', normalizedName);
-    if (existing) {
-      return existing;
-    }
-    return {
-      id,
-      name: name.trim(),
-      normalizedName,
-      kind: 'generic',
-      productEan: null,
-      brand: null,
-      category: null,
-      parentCatalogProductId: null,
-      imageUrl: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
+    return this.products.saveGenericCatalogProduct({name, imageUrl});
   }
 
   async findCatalogProductById(id: string): Promise<CatalogProduct | null> {

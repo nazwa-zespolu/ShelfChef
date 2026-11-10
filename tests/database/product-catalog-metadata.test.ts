@@ -75,16 +75,15 @@ describe('Product catalog metadata', () => {
     },
   );
 
-  it('updates generic metadata while preserving the catalog ID, photo and inventory state', async () => {
+  it('updates generic metadata through catalog editing while preserving the ID, photo and inventory state', async () => {
     const catalog = await products.saveGenericCatalogProduct(metadata);
     await products.addToInventory('sauce-copy', null, metadata.name, '2027-01-01');
     await products.markAsOpened('sauce-copy', '2026-10-20T09:30:00.000Z');
 
-    const updated = await products.saveGenericCatalogProduct({
+    const updated = await products.updateCatalogProduct(catalog.id, {
       name: '  Domowy sos  ',
       brand: '  Nowa marka  ',
       category: '  Sosy i dodatki  ',
-      imageUrl: null,
     });
     const savedAgain = await products.saveGenericCatalogProduct({name: metadata.name});
 

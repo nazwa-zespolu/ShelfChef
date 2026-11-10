@@ -18,14 +18,18 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import WheelPicker from './components/WheelPicker';
 import {ProductPhotoActions} from './components/ProductPhotoActions';
 import {useProductPhotoPreview} from './components/ProductPhotoPreview';
-import {ProductDefinition} from './domain/types';
+import {CatalogProduct, ProductDefinition} from './domain/types';
+import {normalizeProductName} from './infrastructure/ProductRepository';
 import {getProductRepository, getScanToAdd} from './app/services';
 import {colors} from './theme/colors';
 import {shadowGutters, shadowInsets, shadows} from './theme/shadows';
 import {DraggableBottomSheet} from './shopping-lists/modals/DraggableBottomSheet';
 import {AppToast, useAppToast} from './components/AppToast';
 import ProductCatalogView from './ProductCatalogView';
-import {selectProductPhoto, type ProductPhotoSource} from './infrastructure/productPhotos';
+import {ProductPhotoDraft, type ProductPhotoSource} from './infrastructure/productPhotos';
+
+const MANUAL_HEADER_LINE_HEIGHT = 22;
+const MANUAL_HEADER_LINES = 2;
 
 const visionCamera = (() => {
   try {
@@ -127,6 +131,22 @@ type VisionCameraModule = {
 };
 
 type SheetMode = 'none' | 'details' | 'manualWithEan' | 'manualNoEan';
+
+async function persistWithManualPhoto<T extends {imageUrl?: string | null}>(
+  draft: ProductPhotoDraft,
+  photoUri: string | null,
+  persist: () => Promise<T>,
+): Promise<T> {
+  let result: T | undefined;
+  await draft.save(async () => {
+    result = await persist();
+    return photoUri != null && result.imageUrl === photoUri;
+  });
+  if (!result) {
+    throw new Error('Manual photo draft is no longer available');
+  }
+  return result;
+}
 
 const SheetFormScrollContext = createContext<{
   lockParentScroll: (locked: boolean) => void;
@@ -338,7 +358,7 @@ function ProductPhotoPicker({
 }: ProductPhotoPickerProps) {
   return (
     <View style={styles.photoSection}>
-      <Text style={styles.inputLabel}>Zdjęcie produktu</Text>
+      <Text style={styles.inputLabel}>Zdjęcie produktu (opcjonalnie)</Text>
       <View style={styles.photoRow}>
         {imageUri ? (
           <Pressable testID="manual-photo-preview" accessibilityRole="button" accessibilityLabel="Powiększ zdjęcie produktu" onPress={onPreview}>
@@ -375,7 +395,7 @@ function ProductScannerVisionContent({
 }) {
   const {Camera, useCameraPermission, useCameraDevice, useCodeScanner} = visionModule;
   const insets = useSafeAreaInsets();
-  const {height: windowHeight} = useWindowDimensions();
+  const {height: windowHeight, fontScale} = useWindowDimensions();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const keyboardInset = Math.max(0, keyboardHeight - insets.bottom);
   const sheetContentBottomInset = keyboardInset > 0 ? keyboardInset + 24 : 8;
@@ -392,6 +412,7 @@ function ProductScannerVisionContent({
   const [manualBrand, setManualBrand] = useState('');
   const [manualCategory, setManualCategory] = useState('');
   const [manualPhotoUri, setManualPhotoUri] = useState<string | null>(null);
+  const manualPhotoDraft = useRef<ProductPhotoDraft | null>(null);
   const [expirationDate, setExpirationDate] = useState<Date | null>(null);
   const [amount, setAmount] = useState(1);
   const [resolving, setResolving] = useState(false);
@@ -404,6 +425,13 @@ function ProductScannerVisionContent({
   } | null>(null);
   const [manualLookupAttempt, setManualLookupAttempt] = useState(0);
   const manualLookupRequestRef = useRef(0);
+  const [manualNameLookup, setManualNameLookup] = useState<{
+    name: string;
+    status: 'loading' | 'ready' | 'error';
+    product: CatalogProduct | null;
+  } | null>(null);
+  const [manualNameLookupAttempt, setManualNameLookupAttempt] = useState(0);
+  const manualNameLookupRequestRef = useRef(0);
   const addingRef = useRef(false);
   const lastAcceptedScanRef = useRef<{code: string; scannedAt: number} | null>(null);
   const resolveRequestIdRef = useRef(0);
@@ -415,13 +443,23 @@ function ProductScannerVisionContent({
   const currentManualLookup = manualLookup?.ean === normalizedManualEan ? manualLookup : null;
   const manualLookupPending = shouldLookupManualEan && (!currentManualLookup || currentManualLookup.status === 'loading');
   const manualLookupFailed = shouldLookupManualEan && currentManualLookup?.status === 'error';
-  const existingManualProduct = shouldLookupManualEan && currentManualLookup?.status === 'ready'
+  const existingEanProduct = shouldLookupManualEan && currentManualLookup?.status === 'ready'
     ? currentManualLookup.product : null;
-  const manualSharedFieldsLocked = adding || resolving || photoPicking || manualLookupPending || manualLookupFailed || !!existingManualProduct;
+  const normalizedManualName = normalizeProductName(manualName);
+  const shouldLookupManualName = manualFormOpen && !normalizedManualEan && !!normalizedManualName;
+  const currentManualNameLookup = manualNameLookup?.name === normalizedManualName ? manualNameLookup : null;
+  const manualNameLookupPending = shouldLookupManualName && (!currentManualNameLookup || currentManualNameLookup.status === 'loading');
+  const manualNameLookupFailed = shouldLookupManualName && currentManualNameLookup?.status === 'error';
+  const existingGenericProduct = shouldLookupManualName && currentManualNameLookup?.status === 'ready'
+    ? currentManualNameLookup.product : null;
+  const existingManualProduct = existingEanProduct ?? existingGenericProduct;
+  const manualLookupBlocked = manualLookupPending || manualLookupFailed || manualNameLookupPending || manualNameLookupFailed;
+  const manualNameLocked = adding || resolving || photoPicking || manualLookupPending || manualLookupFailed || !!existingEanProduct;
+  const manualSharedFieldsLocked = adding || resolving || photoPicking || manualLookupBlocked || !!existingManualProduct;
   const photoPreview = useProductPhotoPreview({
     uri: sheetMode === 'details' ? scannedProduct?.imageUrl : existingManualProduct ? existingManualProduct.imageUrl : manualPhotoUri,
     name: sheetMode === 'details' ? scannedProduct?.name ?? '' : existingManualProduct?.name ?? manualName,
-    ownerKey: sheetMode === 'none' ? null : `${sheetMode}:${sheetMode === 'details' ? scannedProduct?.ean : normalizedManualEan}`,
+    ownerKey: sheetMode === 'none' ? null : `${sheetMode}:${sheetMode === 'details' ? scannedProduct?.ean : normalizedManualEan || normalizedManualName}`,
   });
   const {toast, toastAnim, showToast} = useAppToast();
   const toastTop = useMemo(() => insets.top + 12, [insets.top]);
@@ -442,6 +480,20 @@ function ProductScannerVisionContent({
   );
 
   useEffect(() => {
+    if (!manualFormOpen) {
+      return;
+    }
+    const draft = new ProductPhotoDraft();
+    manualPhotoDraft.current = draft;
+    return () => {
+      if (manualPhotoDraft.current === draft) {
+        manualPhotoDraft.current = null;
+      }
+      draft.dispose().catch(error => { console.warn('[ShelfChef] Photo draft cleanup failed', error); });
+    };
+  }, [manualFormOpen]);
+
+  useEffect(() => {
     const requestId = ++manualLookupRequestRef.current;
     if (!shouldLookupManualEan) {
       setManualLookup(null);
@@ -460,6 +512,26 @@ function ProductScannerVisionContent({
     });
     return () => { active = false; };
   }, [repo, shouldLookupManualEan, normalizedManualEan, manualLookupAttempt]);
+
+  useEffect(() => {
+    const requestId = ++manualNameLookupRequestRef.current;
+    if (!shouldLookupManualName) {
+      setManualNameLookup(null);
+      return;
+    }
+    let active = true;
+    setManualNameLookup({name: normalizedManualName, status: 'loading', product: null});
+    repo.findCatalogProductByNormalizedName('generic', normalizedManualName).then(product => {
+      if (active && requestId === manualNameLookupRequestRef.current) {
+        setManualNameLookup({name: normalizedManualName, status: 'ready', product});
+      }
+    }).catch(() => {
+      if (active && requestId === manualNameLookupRequestRef.current) {
+        setManualNameLookup({name: normalizedManualName, status: 'error', product: null});
+      }
+    });
+    return () => { active = false; };
+  }, [repo, shouldLookupManualName, normalizedManualName, manualNameLookupAttempt]);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -512,7 +584,11 @@ function ProductScannerVisionContent({
       return;
     }
     manualLookupRequestRef.current += 1;
+    manualNameLookupRequestRef.current += 1;
+    setManualLookupAttempt(attempt => attempt + 1);
+    setManualNameLookupAttempt(attempt => attempt + 1);
     setManualLookup(null);
+    setManualNameLookup(null);
     setSheetMode('none');
     setScannedProduct(null);
   };
@@ -520,23 +596,49 @@ function ProductScannerVisionContent({
   const changeManualEan = (value: string) => {
     if (value.trim() !== normalizedManualEan) {
       manualLookupRequestRef.current += 1;
+      manualNameLookupRequestRef.current += 1;
+      setManualLookupAttempt(attempt => attempt + 1);
+      setManualNameLookupAttempt(attempt => attempt + 1);
       setManualLookup(null);
+      setManualNameLookup(null);
     }
     setManualEan(value);
   };
 
+  const changeManualName = (value: string) => {
+    if (normalizeProductName(value) !== normalizedManualName) {
+      manualNameLookupRequestRef.current += 1;
+      setManualNameLookupAttempt(attempt => attempt + 1);
+      setManualNameLookup(null);
+    }
+    setManualName(value);
+  };
+
   const pickProductPhoto = async (source: ProductPhotoSource) => {
+    const draft = manualPhotoDraft.current;
+    if (!draft || photoPicking) {
+      return;
+    }
     setPhotoPicking(true);
     try {
-      const storedUri = await selectProductPhoto(source);
-      if (storedUri) {
+      const storedUri = await draft.select(source);
+      if (storedUri && manualPhotoDraft.current === draft) {
         setManualPhotoUri(storedUri);
       }
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Nie udało się dodać zdjęcia', 'error');
+      if (manualPhotoDraft.current === draft) {
+        showToast(error instanceof Error ? error.message : 'Nie udało się dodać zdjęcia', 'error');
+      }
     } finally {
-      setPhotoPicking(false);
+      if (manualPhotoDraft.current === draft) {
+        setPhotoPicking(false);
+      }
     }
+  };
+
+  const clearManualPhoto = () => {
+    manualPhotoDraft.current?.clear().catch(error => { console.warn('[ShelfChef] Photo draft cleanup failed', error); });
+    setManualPhotoUri(null);
   };
 
   const updateDatePart = (part: 'day' | 'month' | 'year', value: number) => {
@@ -664,7 +766,11 @@ function ProductScannerVisionContent({
   };
 
   const handleSaveManualProduct = async () => {
-    if (addingRef.current || resolving || photoPicking || manualLookupPending || manualLookupFailed) {
+    if (addingRef.current || resolving || photoPicking || manualLookupBlocked) {
+      return;
+    }
+    const photoDraft = manualPhotoDraft.current;
+    if (!photoDraft) {
       return;
     }
     const normalizedName = (existingManualProduct?.name ?? manualName).trim();
@@ -690,12 +796,16 @@ function ProductScannerVisionContent({
       if (normalizedEan) {
         let definition = await repo.findDefinitionByEan(normalizedEan);
         if (!definition) {
-          await repo.saveDefinition({
+          const input = {
             ean: normalizedEan,
             name: normalizedName,
             brand: manualBrand.trim() || undefined,
             category: manualCategory.trim() || undefined,
             imageUrl: manualPhotoUri ?? undefined,
+          };
+          await persistWithManualPhoto(photoDraft, manualPhotoUri, async () => {
+            await repo.saveDefinition(input);
+            return input;
           });
           definition = await repo.findDefinitionByEan(normalizedEan);
         }
@@ -707,14 +817,21 @@ function ProductScannerVisionContent({
           await repo.addToInventory(generateInventoryId(i), normalizedEan, null, expiryDate);
         }
       } else {
-        const catalog = await repo.saveGenericCatalogProduct({
-          name: normalizedName,
-          brand: manualBrand.trim() || undefined,
-          category: manualCategory.trim() || undefined,
-          imageUrl: manualPhotoUri,
-        });
+        const catalog = existingGenericProduct
+          ? await repo.findCatalogProductById(existingGenericProduct.id)
+          : await persistWithManualPhoto(photoDraft, manualPhotoUri, () => repo.saveGenericCatalogProduct({
+            name: normalizedName,
+            brand: manualBrand.trim() || undefined,
+            category: manualCategory.trim() || undefined,
+            imageUrl: manualPhotoUri,
+          }));
+        if (!catalog) {
+          throw new Error('Catalog product not found before adding inventory');
+        }
+        savedName = catalog.name;
+        setManualNameLookup({name: normalizedManualName, status: 'ready', product: catalog});
         for (let i = 0; i < amount; i += 1) {
-          await repo.addToInventory(generateInventoryId(i), null, normalizedName, expiryDate, catalog.id);
+          await repo.addToInventory(generateInventoryId(i), null, catalog.name, expiryDate, catalog.id);
         }
       }
       addingRef.current = false;
@@ -729,9 +846,7 @@ function ProductScannerVisionContent({
     }
   };
 
-  const manualLookupNotice = manualLookupPending ? (
-    <Text style={styles.info}>Sprawdzam EAN w lokalnym katalogu…</Text>
-  ) : manualLookupFailed ? (
+  const manualLookupError = manualLookupFailed ? (
     <View>
       <Text style={styles.info}>Nie udało się sprawdzić EAN. Ponów sprawdzenie przed dodaniem produktu.</Text>
       <Pressable accessibilityRole="button" onPress={() => {
@@ -741,8 +856,16 @@ function ProductScannerVisionContent({
         <Text style={styles.backText}>Ponów sprawdzenie EAN</Text>
       </Pressable>
     </View>
-  ) : existingManualProduct ? (
-    <Text style={styles.info}>Produkt jest już w katalogu</Text>
+  ) : manualNameLookupFailed ? (
+    <View>
+      <Text style={styles.info}>Nie udało się sprawdzić nazwy. Ponów sprawdzenie przed dodaniem produktu.</Text>
+      <Pressable accessibilityRole="button" onPress={() => {
+        setManualNameLookup(null);
+        setManualNameLookupAttempt(attempt => attempt + 1);
+      }}>
+        <Text style={styles.backText}>Ponów sprawdzenie nazwy</Text>
+      </Pressable>
+    </View>
   ) : null;
 
   const sheetHeader = sheetMode === 'details' && scannedProduct ? (
@@ -763,7 +886,11 @@ function ProductScannerVisionContent({
       </View>
     </View>
   ) : sheetMode === 'manualWithEan' || sheetMode === 'manualNoEan' ? (
-    <Text style={[styles.productName, styles.sheetHeader]}>Dodaj produkt ręcznie</Text>
+    <View style={[styles.sheetHeader, styles.manualHeader, {height: Math.ceil(MANUAL_HEADER_LINE_HEIGHT * MANUAL_HEADER_LINES * fontScale)}]}>
+      <Text testID="manual-product-title" accessibilityRole="header" numberOfLines={MANUAL_HEADER_LINES} style={[styles.productName, styles.manualHeaderTitle]}>
+        {existingManualProduct ? 'Dodaj produkt z katalogu' : 'Dodaj produkt ręcznie'}
+      </Text>
+    </View>
   ) : null;
 
   return (
@@ -920,12 +1047,12 @@ function ProductScannerVisionContent({
               editable={false}
               selectTextOnFocus={false}
             />
-            {manualLookupNotice}
+            {manualLookupError}
             <Text style={styles.inputLabel}>Nazwa produktu</Text>
             <TextInput
-              value={existingManualProduct ? existingManualProduct.name : manualName}
-              onChangeText={setManualName}
-              editable={!manualSharedFieldsLocked}
+              value={existingEanProduct ? existingEanProduct.name : manualName}
+              onChangeText={changeManualName}
+              editable={!manualNameLocked}
               style={styles.textInput}
               placeholder="Np. Makaron pełnoziarnisty"
               placeholderTextColor={colors.textMuted}
@@ -959,7 +1086,7 @@ function ProductScannerVisionContent({
               onPickFromLibrary={() => {
                 pickProductPhoto('library').catch(() => {});
               }}
-              onClear={() => setManualPhotoUri(null)}
+              onClear={clearManualPhoto}
             />
             <View style={styles.expirationSection}>
               <Text style={styles.inputLabel}>
@@ -1011,7 +1138,7 @@ function ProductScannerVisionContent({
               amount={amount}
               setAmount={setAmount}
               adding={adding}
-              resolving={resolving || photoPicking || manualLookupPending || manualLookupFailed}
+              resolving={resolving || photoPicking || manualLookupBlocked}
               onClose={closeBottomSheet}
               onSave={() => {
                 handleSaveManualProduct().catch(() => {});
@@ -1036,12 +1163,12 @@ function ProductScannerVisionContent({
               placeholderTextColor={colors.textMuted}
               keyboardType="number-pad"
             />
-            {manualLookupNotice}
+            {manualLookupError}
             <Text style={styles.inputLabel}>Nazwa produktu</Text>
             <TextInput
-              value={existingManualProduct ? existingManualProduct.name : manualName}
-              onChangeText={setManualName}
-              editable={!manualSharedFieldsLocked}
+              value={existingEanProduct ? existingEanProduct.name : manualName}
+              onChangeText={changeManualName}
+              editable={!manualNameLocked}
               style={styles.textInput}
               placeholder="Np. Domowy zakwas"
               placeholderTextColor={colors.textMuted}
@@ -1075,7 +1202,7 @@ function ProductScannerVisionContent({
               onPickFromLibrary={() => {
                 pickProductPhoto('library').catch(() => {});
               }}
-              onClear={() => setManualPhotoUri(null)}
+              onClear={clearManualPhoto}
             />
             <View style={styles.expirationSection}>
               <Text style={styles.inputLabel}>
@@ -1127,7 +1254,7 @@ function ProductScannerVisionContent({
               amount={amount}
               setAmount={setAmount}
               adding={adding}
-              resolving={resolving || photoPicking || manualLookupPending || manualLookupFailed}
+              resolving={resolving || photoPicking || manualLookupBlocked}
               onClose={closeBottomSheet}
               onSave={() => {
                 handleSaveManualProduct().catch(() => {});
@@ -1301,6 +1428,13 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     marginTop: 8,
     marginBottom: 14,
+  },
+  manualHeader: {
+    justifyContent: 'center',
+  },
+  manualHeaderTitle: {
+    lineHeight: MANUAL_HEADER_LINE_HEIGHT,
+    includeFontPadding: false,
   },
   sheetContent: {
     gap: 14,

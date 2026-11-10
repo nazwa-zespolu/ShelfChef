@@ -67,6 +67,25 @@ describe('Product photo draft ownership with real files and SQLite', () => {
     return (await products.findCatalogProductByEan('5901234123457'))!;
   };
 
+  it('removes a manual draft ignored by create-only generic saving while preserving the catalog photo', async () => {
+    const product = await createProduct('generic');
+    const draft = new ProductPhotoDraft();
+    const uri = await choose(draft);
+    const retained = await draft.save(async () => {
+      const reused = await products.saveGenericCatalogProduct({...metadata, imageUrl: uri});
+      expect(reused.id).toBe(product.id);
+      return reused.imageUrl === uri;
+    });
+    expect(retained).toBe(false);
+    expect(await exists(pathFor(uri))).toBe(true);
+    await draft.dispose();
+    sqlite.reopen();
+    setupDatabase();
+    expect(await exists(pathFor(uri))).toBe(false);
+    expect(await exists(source)).toBe(true);
+    expect(await products.findCatalogProductById(product.id)).toEqual(product);
+  });
+
   it('removes an abandoned copy while preserving the source and stored product photo', async () => {
     const product = await createProduct('generic');
     const draft = new ProductPhotoDraft();

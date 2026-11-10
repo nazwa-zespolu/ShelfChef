@@ -140,47 +140,45 @@ export class ProductRepository {
   }
 
   async saveGenericCatalogProduct(input: SaveGenericCatalogProductInput): Promise<CatalogProduct> {
-    const trimmedName = input.name.trim();
-    const normalizedName = normalizeProductName(trimmedName);
-    const id = `catalog-generic-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
-    db.execute(
-      `
-        INSERT INTO product_catalog (
+    // Reusing a name adds copies; shared data is edited only through the catalog.
+    return runInTransaction(() => {
+      const trimmedName = input.name.trim();
+      const normalizedName = normalizeProductName(trimmedName);
+      const id = `catalog-generic-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+      db.execute(
+        `
+          INSERT INTO product_catalog (
+            id,
+            name,
+            normalized_name,
+            kind,
+            product_ean,
+            brand,
+            category,
+            image_url,
+            parent_catalog_product_id,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, 'generic', NULL, ?, ?, ?, NULL, datetime('now'), datetime('now'))
+          ON CONFLICT(kind, normalized_name) WHERE kind = 'generic' DO NOTHING
+        `,
+        [
           id,
-          name,
-          normalized_name,
-          kind,
-          product_ean,
-          brand,
-          category,
-          image_url,
-          parent_catalog_product_id,
-          created_at,
-          updated_at
-        )
-        VALUES (?, ?, ?, 'generic', NULL, ?, ?, ?, NULL, datetime('now'), datetime('now'))
-        ON CONFLICT(kind, normalized_name) WHERE kind = 'generic' DO UPDATE SET
-          name = excluded.name,
-          brand = COALESCE(excluded.brand, product_catalog.brand),
-          category = COALESCE(excluded.category, product_catalog.category),
-          image_url = COALESCE(excluded.image_url, product_catalog.image_url),
-          updated_at = datetime('now')
-      `,
-      [
-        id,
-        trimmedName,
-        normalizedName,
-        input.brand?.trim() || null,
-        input.category?.trim() || null,
-        input.imageUrl ?? null,
-      ],
-    );
+          trimmedName,
+          normalizedName,
+          input.brand?.trim() || null,
+          input.category?.trim() || null,
+          input.imageUrl ?? null,
+        ],
+      );
 
-    const found = await this.findCatalogProductByNormalizedName('generic', normalizedName);
-    if (!found) {
-      throw new Error(`Catalog product not found after save: ${trimmedName}`);
-    }
-    return found;
+      const found = this.readCatalogProducts('catalog.kind = ? AND catalog.normalized_name = ?', ['generic', normalizedName])[0];
+      if (!found) {
+        throw new Error(`Catalog product not found after save: ${trimmedName}`);
+      }
+      return found;
+    });
   }
 
   async findCatalogProductByNormalizedName(
