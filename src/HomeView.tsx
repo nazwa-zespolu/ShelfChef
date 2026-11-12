@@ -2,6 +2,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Animated,
+  BackHandler,
   Easing,
   FlatList,
   Image,
@@ -15,8 +16,10 @@ import {
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {CalendarDays, Clock3, Package, Search} from 'lucide-react-native';
 import {InventoryItem} from './domain/types';
+import {getExpiringProducts, getExpiryUrgency} from './domain/expiry';
 import {SwipeToDeleteCard} from './components/SwipeToDeleteCard';
 import {AppToast, useAppToast} from './components/AppToast';
+import {ExpiryFilterButton} from './components/ExpiryFilterButton';
 import {ProductRepository} from './infrastructure/ProductRepository';
 import {colors} from './theme/colors';
 import {compareExpiry, formatExpiryLine} from './utils/inventory';
@@ -135,6 +138,23 @@ function getCategoryLabel(item: InventoryItem) {
   return item.category?.trim() || item.brand?.trim() || null;
 }
 
+function formatExpiryUrgency(expiryDate: string | null) {
+  const urgency = getExpiryUrgency(expiryDate);
+  if (!urgency) {
+    return null;
+  }
+  if (urgency.status === 'expired') {
+    return 'Po terminie';
+  }
+  if (urgency.status === 'today') {
+    return 'Termin dzisiaj';
+  }
+  if (urgency.status === 'tomorrow') {
+    return 'Termin jutro';
+  }
+  return `Pozostały ${urgency.daysRemaining} dni`;
+}
+
 export default function HomeView({
   refreshToken,
   shouldPlaySwipeHint = false,
@@ -146,12 +166,36 @@ export default function HomeView({
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>(rememberedSortKey);
+  const [showExpiringOnly, setShowExpiringOnly] = useState(false);
   const {toast, toastAnim, showToast} = useAppToast();
   const hintTranslateX = useRef(new Animated.Value(0)).current;
   const [swipeHintVisible, setSwipeHintVisible] = useState(false);
   const openedCount = useMemo(() => items.filter(item => item.isOpened).length, [items]);
+  const expiringItems = useMemo(() => getExpiringProducts(items), [items]);
+  const hasExpiredItems = useMemo(
+    () => expiringItems.some(item => getExpiryUrgency(item.expiryDate)?.status === 'expired'),
+    [expiringItems],
+  );
   const inventoryMeta = `${pluralizeProducts(items.length)} · ${openedProductsLabel(openedCount)}`;
+  const expiringMeta = `${pluralizeProducts(expiringItems.length)} do sprawdzenia`;
   const toastTop = useMemo(() => insets.top + 12, [insets.top]);
+
+  const showAllProducts = useCallback(() => {
+    setShowExpiringOnly(false);
+    setQuery('');
+  }, []);
+
+  useEffect(() => {
+    if (!showExpiringOnly) {
+      return;
+    }
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      showAllProducts();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [showAllProducts, showExpiringOnly]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -176,9 +220,9 @@ export default function HomeView({
 
   const filteredSorted = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = items;
+    let list = showExpiringOnly ? expiringItems : items;
     if (q) {
-      list = items.filter(i => {
+      list = list.filter(i => {
         const hay = [i.name, i.category, i.brand]
           .filter(Boolean)
           .join(' ')
@@ -187,6 +231,9 @@ export default function HomeView({
       });
     }
     const copy = [...list];
+    if (showExpiringOnly) {
+      return copy;
+    }
     if (sortKey === 'name') {
       copy.sort((a, b) => a.name.localeCompare(b.name, 'pl', {sensitivity: 'base'}));
     } else if (sortKey === 'opened') {
@@ -197,7 +244,7 @@ export default function HomeView({
       copy.sort(compareExpiry);
     }
     return copy;
-  }, [items, query, sortKey]);
+  }, [expiringItems, items, query, showExpiringOnly, sortKey]);
 
   const deleteItem = useCallback(
     async (item: InventoryItem) => {
@@ -298,6 +345,8 @@ export default function HomeView({
     ({item, index}: {item: InventoryItem; index: number}) => {
       const openedDuration = item.isOpened ? formatOpenedBadgeDuration(item.openedAt) : null;
       const categoryLabel = getCategoryLabel(item);
+      const expiryUrgency = showExpiringOnly ? getExpiryUrgency(item.expiryDate) : null;
+      const expiryUrgencyLabel = showExpiringOnly ? formatExpiryUrgency(item.expiryDate) : null;
       const playSwipeHint = index === 0 && swipeHintVisible;
 
       return (
@@ -362,10 +411,32 @@ export default function HomeView({
                   ) : null}
                   {item.expiryDate ? (
                     <View style={styles.expiryRow}>
-                      <CalendarDays color={colors.textMuted} size={17} strokeWidth={2} />
-                      <Text style={styles.metaLine}>
-                        Ważne do: <Text style={styles.metaValue}>{formatExpiryLine(item.expiryDate)}</Text>
-                      </Text>
+                      <CalendarDays
+                        color={
+                          expiryUrgency?.status === 'expired'
+                            ? colors.danger
+                            : expiryUrgency
+                              ? colors.warning
+                              : colors.textMuted
+                        }
+                        size={17}
+                        strokeWidth={2}
+                      />
+                      {expiryUrgencyLabel ? (
+                        <Text
+                          style={[
+                            styles.expiryUrgency,
+                            expiryUrgency?.status === 'expired' && styles.expiryUrgencyExpired,
+                          ]}>
+                          {expiryUrgencyLabel}
+                          <Text style={styles.metaLine}> · {formatExpiryLine(item.expiryDate)}</Text>
+                        </Text>
+                      ) : (
+                        <Text style={styles.metaLine}>
+                          Ważne do:{' '}
+                          <Text style={styles.metaValue}>{formatExpiryLine(item.expiryDate)}</Text>
+                        </Text>
+                      )}
                     </View>
                   ) : null}
                 </View>
@@ -375,14 +446,33 @@ export default function HomeView({
         </SwipeToDeleteCard>
       );
     },
-    [deleteItem, hintTranslateX, swipeHintVisible, toggleOpened],
+    [deleteItem, hintTranslateX, showExpiringOnly, swipeHintVisible, toggleOpened],
   );
 
   return (
     <View style={[styles.root, {paddingTop: insets.top + 8}]}>
       <View style={styles.topBar}>
-        <Text style={styles.screenTitle}>Spiżarnia</Text>
-        <Text style={styles.screenMeta}>{inventoryMeta}</Text>
+        <View style={styles.topBarCopy}>
+          <Text style={styles.screenTitle} numberOfLines={1}>
+            {showExpiringOnly ? 'Pilne terminy' : 'Spiżarnia'}
+          </Text>
+          <Text style={styles.screenMeta} numberOfLines={1}>
+            {showExpiringOnly ? expiringMeta : inventoryMeta}
+          </Text>
+        </View>
+        <ExpiryFilterButton
+          active={showExpiringOnly}
+          count={expiringItems.length}
+          hasExpiredItems={hasExpiredItems}
+          onPress={() => {
+            if (showExpiringOnly) {
+              showAllProducts();
+              return;
+            }
+            setShowExpiringOnly(true);
+            setQuery('');
+          }}
+        />
       </View>
 
       <View style={styles.searchWrap}>
@@ -400,28 +490,32 @@ export default function HomeView({
         </View>
       </View>
 
-      <View style={styles.sortRow}>
-        {SORT_OPTIONS.map(opt => {
-          const active = sortKey === opt.key;
-          return (
-            <Pressable
-              key={opt.key}
-              onPress={() => {
-                rememberedSortKey = opt.key;
-                setSortKey(opt.key);
-              }}
-              style={({pressed}) => [
-                styles.sortChip,
-                active && styles.sortChipActive,
-                pressed && styles.pressed,
-              ]}>
-              <Text style={[styles.sortChipText, active && styles.sortChipTextActive]} numberOfLines={1}>
-                {opt.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      {!showExpiringOnly ? (
+        <View style={styles.sortRow}>
+          {SORT_OPTIONS.map(opt => {
+            const active = sortKey === opt.key;
+            return (
+              <Pressable
+                key={opt.key}
+                onPress={() => {
+                  rememberedSortKey = opt.key;
+                  setSortKey(opt.key);
+                }}
+                style={({pressed}) => [
+                  styles.sortChip,
+                  active && styles.sortChipActive,
+                  pressed && styles.pressed,
+                ]}>
+                <Text
+                  style={[styles.sortChipText, active && styles.sortChipTextActive]}
+                  numberOfLines={1}>
+                  {opt.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
 
       {loading && items.length === 0 ? (
         <View style={styles.centerFill}>
@@ -445,9 +539,19 @@ export default function HomeView({
           }
           ListEmptyComponent={
             <View style={styles.emptyBox}>
-              <Text style={styles.emptyTitle}>Brak produktów</Text>
+              <Text style={styles.emptyTitle}>
+                {query.trim()
+                  ? 'Brak wyników'
+                  : showExpiringOnly
+                    ? 'Brak pilnych terminów'
+                    : 'Brak produktów'}
+              </Text>
               <Text style={styles.emptyHint}>
-                Dodaj produkt z poziomu zakładki skanowania, aby zobaczyć go tutaj.
+                {query.trim()
+                  ? 'Spróbuj zmienić wyszukiwaną frazę.'
+                  : showExpiringOnly
+                    ? 'Żaden produkt nie jest przeterminowany ani nie traci ważności w ciągu 2 dni.'
+                    : 'Dodaj produkt z poziomu zakładki skanowania, aby zobaczyć go tutaj.'}
               </Text>
             </View>
           }
@@ -467,6 +571,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  topBarCopy: {
+    flex: 1,
+    minWidth: 0,
   },
   screenTitle: {
     color: colors.textPrimary,
@@ -643,6 +754,14 @@ const styles = StyleSheet.create({
   metaValue: {
     color: colors.textSecondary,
     fontWeight: '900',
+  },
+  expiryUrgency: {
+    color: colors.warning,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  expiryUrgencyExpired: {
+    color: colors.danger,
   },
   swipeHintBackground: {
     ...StyleSheet.absoluteFill,
