@@ -20,6 +20,10 @@ import {getExpiringProducts, getExpiryUrgency} from './domain/expiry';
 import {SwipeToDeleteCard} from './components/SwipeToDeleteCard';
 import {AppToast, useAppToast} from './components/AppToast';
 import {ExpiryFilterButton} from './components/ExpiryFilterButton';
+import {
+  ProductDetailsModal,
+  type ProductDetailsChanges,
+} from './components/ProductDetailsModal';
 import {ProductRepository} from './infrastructure/ProductRepository';
 import {colors} from './theme/colors';
 import {compareExpiry, formatExpiryLine} from './utils/inventory';
@@ -167,6 +171,9 @@ export default function HomeView({
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>(rememberedSortKey);
   const [showExpiringOnly, setShowExpiringOnly] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
+  const [savingItem, setSavingItem] = useState(false);
+  const [saveItemError, setSaveItemError] = useState<string | null>(null);
   const {toast, toastAnim, showToast} = useAppToast();
   const hintTranslateX = useRef(new Animated.Value(0)).current;
   const [swipeHintVisible, setSwipeHintVisible] = useState(false);
@@ -292,6 +299,47 @@ export default function HomeView({
     [load, showToast],
   );
 
+  const closeProductDetails = useCallback(() => {
+    if (savingItem) {
+      return;
+    }
+    setSelectedItem(null);
+    setSaveItemError(null);
+  }, [savingItem]);
+
+  const saveProductDetails = useCallback(
+    async (changes: ProductDetailsChanges) => {
+      if (!selectedItem || savingItem) {
+        return;
+      }
+
+      setSavingItem(true);
+      setSaveItemError(null);
+      try {
+        await repo.updateInventoryItem(selectedItem.id, changes);
+        setItems(current =>
+          current.map(item =>
+            item.id === selectedItem.id
+              ? {
+                  ...item,
+                  expiryDate: changes.expiryDate,
+                  isOpened: changes.openedAt !== null,
+                  openedAt: changes.openedAt,
+                }
+              : item,
+          ),
+        );
+        setSelectedItem(null);
+        showToast(`Zapisano zmiany: ${selectedItem.name}`);
+      } catch {
+        setSaveItemError('Nie udało się zapisać zmian. Spróbuj ponownie.');
+      } finally {
+        setSavingItem(false);
+      }
+    },
+    [savingItem, selectedItem, showToast],
+  );
+
   useEffect(() => {
     if (!shouldPlaySwipeHint || loading || filteredSorted.length === 0) {
       return;
@@ -380,7 +428,15 @@ export default function HomeView({
           ) : null}
           <Animated.View
             style={playSwipeHint ? {transform: [{translateX: hintTranslateX}]} : undefined}>
-            <View style={styles.card}>
+            <Pressable
+              testID={`product-card-${item.id}`}
+              accessibilityRole="button"
+              accessibilityLabel={`Szczegóły produktu: ${item.name}`}
+              onPress={() => {
+                setSaveItemError(null);
+                setSelectedItem(item);
+              }}
+              style={({pressed}) => [styles.card, pressed && styles.cardPressed]}>
               <View style={styles.cardRow}>
                 {item.imageUrl ? (
                   <Image source={{uri: item.imageUrl}} style={styles.productImage} />
@@ -441,7 +497,7 @@ export default function HomeView({
                   ) : null}
                 </View>
               </View>
-            </View>
+            </Pressable>
           </Animated.View>
         </SwipeToDeleteCard>
       );
@@ -557,6 +613,15 @@ export default function HomeView({
           }
         />
       )}
+      <ProductDetailsModal
+        item={selectedItem}
+        busy={savingItem}
+        errorMessage={saveItemError}
+        onClose={closeProductDetails}
+        onSave={changes => {
+          saveProductDetails(changes).catch(() => {});
+        }}
+      />
       <AppToast toast={toast} animatedValue={toastAnim} top={toastTop} />
     </View>
   );
@@ -675,6 +740,9 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: {width: 0, height: 6},
     elevation: 3,
+  },
+  cardPressed: {
+    opacity: 0.82,
   },
   cardRow: {
     flexDirection: 'row',

@@ -782,6 +782,25 @@ function ProductScannerVisionContent({
     }
   };
 
+  const sheetHeader = sheetMode === 'details' && scannedProduct ? (
+    <View style={[styles.productRow, styles.sheetHeader]}>
+      {scannedProduct.imageUrl ? (
+        <Image source={{uri: scannedProduct.imageUrl}} style={styles.productImage} />
+      ) : (
+        <View style={styles.productImage} />
+      )}
+      <View style={styles.productMeta}>
+        <Text style={styles.productName}>{scannedProduct.name}</Text>
+        {scannedProduct.brand ? (
+          <Text style={styles.productProducer}>{scannedProduct.brand}</Text>
+        ) : null}
+        <Text style={styles.productEan}>EAN: {scannedProduct.ean}</Text>
+      </View>
+    </View>
+  ) : sheetMode === 'manualWithEan' || sheetMode === 'manualNoEan' ? (
+    <Text style={[styles.productName, styles.sheetHeader]}>Dodaj produkt ręcznie</Text>
+  ) : null;
+
   return (
     <View style={styles.container}>
       <Camera
@@ -817,6 +836,7 @@ function ProductScannerVisionContent({
           {paddingBottom: Math.max(insets.bottom, 12)},
         ]}
         handleStyle={styles.sheetHandleTouch}
+        handleContent={sheetHeader}
         overlay={<AppToast toast={toast} animatedValue={toastAnim} top={toastTop} />}>
         {resolving ? (
           <View style={styles.resolvingBox}>
@@ -826,21 +846,6 @@ function ProductScannerVisionContent({
         ) : null}
         {sheetMode === 'details' && scannedProduct ? (
           <View style={styles.sheetContent}>
-            <View style={styles.productRow}>
-              {scannedProduct.imageUrl ? (
-                <Image source={{uri: scannedProduct.imageUrl}} style={styles.productImage} />
-              ) : (
-                <View style={styles.productImage} />
-              )}
-              <View style={styles.productMeta}>
-                <Text style={styles.productName}>{scannedProduct.name}</Text>
-                {scannedProduct.brand ? (
-                  <Text style={styles.productProducer}>{scannedProduct.brand}</Text>
-                ) : null}
-                <Text style={styles.productEan}>EAN: {scannedProduct.ean}</Text>
-              </View>
-            </View>
-
             <View style={styles.expirationSection}>
               <Text style={styles.inputLabel}>
                 Data ważności: {expirationDate
@@ -938,7 +943,6 @@ function ProductScannerVisionContent({
             maxHeight={sheetFormMaxHeight - Math.max(insets.bottom, 12) - 14}
             keyboardVerticalOffset={sheetKeyboardOffset}
             contentBottomInset={sheetContentBottomInset}>
-            <Text style={styles.productName}>Dodaj produkt ręcznie</Text>
             <Text style={styles.inputLabel}>EAN</Text>
             <TextInput
               value={manualEan}
@@ -1048,7 +1052,6 @@ function ProductScannerVisionContent({
             maxHeight={sheetFormMaxHeight - Math.max(insets.bottom, 12) - 14}
             keyboardVerticalOffset={sheetKeyboardOffset}
             contentBottomInset={sheetContentBottomInset}>
-            <Text style={styles.productName}>Dodaj produkt ręcznie</Text>
             <Text style={styles.inputLabel}>EAN (opcjonalnie)</Text>
             <TextInput
               value={manualEan}
@@ -1277,10 +1280,15 @@ const styles = StyleSheet.create({
     minHeight: 44,
     marginHorizontal: -16,
     marginTop: -4,
-    marginBottom: -8,
+    marginBottom: 0,
     paddingHorizontal: 16,
     justifyContent: 'flex-start',
     paddingTop: 10,
+  },
+  sheetHeader: {
+    alignSelf: 'stretch',
+    marginTop: 8,
+    marginBottom: 14,
   },
   sheetContent: {
     gap: 14,

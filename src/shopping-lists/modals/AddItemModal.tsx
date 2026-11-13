@@ -63,8 +63,8 @@ export function AddItemModal({
       accessibilityLabel="Zamknij dodawanie produktu"
       onClose={onClose}
       sheetStyle={[styles.sheet, keyboardVisible && styles.sheetKeyboard]}
-      handleStyle={styles.handleTouch}>
-      <Text style={styles.title}>Dodaj produkt</Text>
+      handleStyle={styles.handleTouch}
+      handleContent={<Text style={styles.title}>Dodaj produkt</Text>}>
       <Text style={styles.subtitle}>Wpisz nazwę albo wybierz produkt z katalogu</Text>
       <InlineFeedback feedback={feedback} />
 
@@ -215,17 +215,18 @@ const styles = StyleSheet.create({
     minHeight: 44,
     marginHorizontal: -16,
     marginTop: -4,
-    marginBottom: -8,
+    marginBottom: 0,
     paddingHorizontal: 16,
     justifyContent: 'flex-start',
     paddingTop: 10,
   },
   title: {
+    alignSelf: 'stretch',
     color: colors.textPrimary,
     fontSize: 23,
     fontWeight: '900',
     textAlign: 'center',
-    marginTop: 0,
+    marginTop: 8,
     marginBottom: 4,
   },
   subtitle: {

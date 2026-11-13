@@ -57,10 +57,12 @@ export function ListFormModal({
       accessibilityLabel={isEditing ? 'Zamknij ustawienia listy' : 'Zamknij tworzenie listy'}
       onClose={onClose}
       sheetStyle={styles.sheet}
-      handleStyle={styles.handleTouch}>
-      <Text style={styles.title}>
-        {isEditing ? 'Ustawienia listy' : 'Nowa lista zakupów'}
-      </Text>
+      handleStyle={styles.handleTouch}
+      handleContent={
+        <Text style={styles.title}>
+          {isEditing ? 'Ustawienia listy' : 'Nowa lista zakupów'}
+        </Text>
+      }>
       <Text style={styles.subtitle}>
         {isEditing ? 'Zmień nazwę, ikonę i kolor listy.' : 'Nadaj nazwę i wybierz typ listy.'}
       </Text>
@@ -157,7 +159,7 @@ export function ListFormModal({
 const styles = StyleSheet.create({
   sheet: {
     paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: 4,
     paddingBottom: 16,
     maxHeight: '90%',
   },
@@ -167,15 +169,17 @@ const styles = StyleSheet.create({
     minHeight: 44,
     marginHorizontal: -16,
     marginTop: -4,
-    marginBottom: -8,
+    marginBottom: 0,
     paddingHorizontal: 16,
     justifyContent: 'flex-start',
     paddingTop: 10,
   },
   title: {
+    alignSelf: 'stretch',
     color: colors.textPrimary,
     fontSize: 26,
     fontWeight: '900',
+    marginTop: 8,
     marginBottom: 6,
   },
   subtitle: {
