@@ -11,12 +11,10 @@ export function ShoppingItemIconBubble({
   iconKey,
   iconColorKey,
   imageUrl,
-  purchased = false,
 }: {
   iconKey: ShoppingListIconKey;
   iconColorKey: ShoppingListIconColorKey;
   imageUrl?: string | null;
-  purchased?: boolean;
 }) {
   const [imageFailed, setImageFailed] = useState(false);
   const icon = getShoppingListIconDefinition(iconKey);
@@ -30,7 +28,6 @@ export function ShoppingItemIconBubble({
         styles.icon,
         {backgroundColor: iconColor.background},
         shouldShowImage && styles.imageBubble,
-        purchased && styles.purchased,
       ]}>
       {shouldShowImage ? (
         <Image
@@ -41,7 +38,7 @@ export function ShoppingItemIconBubble({
         />
       ) : (
         <Icon
-          color={purchased ? colors.success : iconColor.color}
+          color={iconColor.color}
           size={24}
           strokeWidth={2.1}
         />
@@ -68,8 +65,5 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
-  },
-  purchased: {
-    backgroundColor: colors.accentSoft,
   },
 });

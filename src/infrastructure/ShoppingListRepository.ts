@@ -10,7 +10,7 @@ import {
   ShoppingListType,
   ShoppingSuggestion,
 } from '../domain/types';
-import {normalizeProductName} from './ProductRepository';
+import {ProductRepository} from './ProductRepository';
 import {db, runInTransaction} from './db/init';
 
 export type AddShoppingItemInput = {
@@ -65,6 +65,8 @@ function mapCatalogProduct(row: Record<string, any>): CatalogProduct {
     normalizedName: row.normalized_name,
     kind: row.kind,
     productEan: row.product_ean ?? null,
+    brand: row.brand ?? null,
+    category: row.category ?? null,
     imageUrl: row.image_url ?? null,
     parentCatalogProductId: row.parent_catalog_product_id ?? null,
     createdAt: row.created_at,
@@ -108,6 +110,8 @@ function mapShoppingItem(row: Record<string, any>): ShoppingListItem {
 }
 
 export class ShoppingListRepository {
+  private readonly products = new ProductRepository();
+
   async createList(
     name: string,
     type: ShoppingListType,
@@ -257,6 +261,7 @@ export class ShoppingListRepository {
       `
         SELECT
           item.*,
+          COALESCE(definition.name, catalog.name, item.label) AS label,
           COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM shopping_list_items item
         LEFT JOIN product_catalog catalog ON item.catalog_product_id = catalog.id
@@ -276,23 +281,7 @@ export class ShoppingListRepository {
   }
 
   async getCatalogProducts(): Promise<CatalogProduct[]> {
-    const result = db.execute(
-      `
-        SELECT
-          catalog.*,
-          COALESCE(catalog.image_url, definition.image_url) AS image_url
-        FROM product_catalog catalog
-        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
-        ORDER BY catalog.kind ASC, catalog.name ASC
-      `,
-    );
-    const products: CatalogProduct[] = [];
-    if (result.rows) {
-      for (let i = 0; i < result.rows.length; i++) {
-        products.push(mapCatalogProduct(result.rows.item(i)));
-      }
-    }
-    return products;
+    return this.products.getCatalogProducts();
   }
 
   async addItem(listId: string, input: AddShoppingItemInput): Promise<ShoppingListItem> {
@@ -494,109 +483,22 @@ export class ShoppingListRepository {
     name: string,
     imageUrl?: string | null,
   ): Promise<CatalogProduct> {
-    const timestamp = nowIso();
-    const normalizedName = normalizeProductName(name);
-    const id = generateId('catalog-generic');
-    db.execute(
-      `
-        INSERT INTO product_catalog (
-          id,
-          name,
-          normalized_name,
-          kind,
-          product_ean,
-          image_url,
-          parent_catalog_product_id,
-          created_at,
-          updated_at
-        )
-        VALUES (?, ?, ?, 'generic', NULL, ?, NULL, ?, ?)
-        ON CONFLICT(kind, normalized_name) WHERE kind = 'generic' DO UPDATE SET
-          name = excluded.name,
-          image_url = COALESCE(excluded.image_url, product_catalog.image_url),
-          updated_at = excluded.updated_at
-      `,
-      [id, name.trim(), normalizedName, imageUrl ?? null, timestamp, timestamp],
-    );
-    const existing = await this.findCatalogProductByNormalizedName('generic', normalizedName);
-    if (existing) {
-      return existing;
-    }
-    return {
-      id,
-      name: name.trim(),
-      normalizedName,
-      kind: 'generic',
-      productEan: null,
-      parentCatalogProductId: null,
-      imageUrl: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
+    return this.products.saveGenericCatalogProduct({name, imageUrl});
   }
 
   async findCatalogProductById(id: string): Promise<CatalogProduct | null> {
-    const result = db.execute(
-      `
-        SELECT
-          catalog.*,
-          COALESCE(catalog.image_url, definition.image_url) AS image_url
-        FROM product_catalog catalog
-        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
-        WHERE catalog.id = ?
-      `,
-      [id],
-    );
-    if (!result.rows || result.rows.length === 0) {
-      return null;
-    }
-    return mapCatalogProduct(result.rows.item(0));
+    return this.products.findCatalogProductById(id);
   }
 
   async findCatalogProductByNormalizedName(
     kind: CatalogProductKind,
     normalizedName: string,
   ): Promise<CatalogProduct | null> {
-    const result = db.execute(
-      `
-        SELECT
-          catalog.*,
-          COALESCE(catalog.image_url, definition.image_url) AS image_url
-        FROM product_catalog catalog
-        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
-        WHERE catalog.kind = ?
-          AND catalog.normalized_name = ?
-      `,
-      [kind, normalizedName],
-    );
-    if (!result.rows || result.rows.length === 0) {
-      return null;
-    }
-    return mapCatalogProduct(result.rows.item(0));
+    return this.products.findCatalogProductByNormalizedName(kind, normalizedName);
   }
 
   async searchCatalogProducts(query: string): Promise<CatalogProduct[]> {
-    const q = `%${normalizeProductName(query)}%`;
-    const result = db.execute(
-      `
-        SELECT
-          catalog.*,
-          COALESCE(catalog.image_url, definition.image_url) AS image_url
-        FROM product_catalog catalog
-        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
-        WHERE catalog.normalized_name LIKE ?
-        ORDER BY catalog.kind ASC, catalog.name ASC
-        LIMIT 20
-      `,
-      [q],
-    );
-    const products: CatalogProduct[] = [];
-    if (result.rows) {
-      for (let i = 0; i < result.rows.length; i++) {
-        products.push(mapCatalogProduct(result.rows.item(i)));
-      }
-    }
-    return products;
+    return this.products.searchCatalogProducts(query, 20);
   }
 
   async addAllSuggestionsToManualList(
@@ -718,25 +620,25 @@ export class ShoppingListRepository {
             i.id,
             i.label,
             i.quantity,
-            i.catalog_product_id,
-            d.ean AS product_ean,
-            linked.linked_product_ean
+            COALESCE(c.id, linked_catalog.id) AS inventory_catalog_product_id,
+            COALESCE(c.product_ean, linked_catalog.product_ean) AS product_ean,
+            COALESCE(c.name, linked_catalog.name, i.label) AS inventory_name
           FROM shopping_list_items i
           LEFT JOIN product_catalog c ON i.catalog_product_id = c.id
-          LEFT JOIN product_definitions d ON c.product_ean = d.ean
           LEFT JOIN (
             SELECT
               link.item_id,
               CASE
-                WHEN COUNT(catalog.product_ean) = 1 THEN MAX(catalog.product_ean)
+                WHEN COUNT(catalog.product_ean) = 1 THEN
+                  MAX(CASE WHEN catalog.product_ean IS NOT NULL THEN catalog.id END)
+                WHEN COUNT(*) = 1 THEN MAX(catalog.id)
                 ELSE NULL
-              END AS linked_product_ean
+              END AS catalog_product_id
             FROM shopping_list_item_catalog_products link
             INNER JOIN product_catalog catalog ON catalog.id = link.catalog_product_id
-            WHERE catalog.kind = 'specific'
-              AND catalog.product_ean IS NOT NULL
             GROUP BY link.item_id
-          ) linked ON linked.item_id = i.id
+          ) linked ON linked.item_id = i.id AND i.catalog_product_id IS NULL
+          LEFT JOIN product_catalog linked_catalog ON linked.catalog_product_id = linked_catalog.id
           WHERE i.list_id = ?
             AND i.status = 'purchased'
         `,
@@ -751,11 +653,13 @@ export class ShoppingListRepository {
             const inventoryId = generateId('inv');
             inventoryIds.push(inventoryId);
             db.execute(
-              'INSERT INTO inventory (id, product_ean, custom_name, expiry_date, created_at) VALUES (?, ?, ?, ?, ?)',
+              `INSERT INTO inventory (id, catalog_product_id, product_ean, custom_name, expiry_date, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)`,
               [
                 inventoryId,
-                row.product_ean ?? row.linked_product_ean ?? null,
-                row.label,
+                row.inventory_catalog_product_id ?? null,
+                row.product_ean ?? null,
+                row.inventory_name,
                 expiryDateByItemId[row.id] ?? null,
                 nowIso(),
               ],
@@ -847,6 +751,8 @@ export class ShoppingListRepository {
           catalog.normalized_name,
           catalog.kind,
           catalog.product_ean,
+          COALESCE(definition.brand, catalog.brand) AS brand,
+          COALESCE(definition.category, catalog.category) AS category,
           COALESCE(catalog.image_url, definition.image_url) AS image_url,
           catalog.parent_catalog_product_id,
           catalog.created_at,

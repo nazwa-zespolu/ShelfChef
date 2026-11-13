@@ -18,6 +18,7 @@ erDiagram
 
     INVENTORY {
         TEXT id PK
+        TEXT catalog_product_id FK
         TEXT product_ean FK
         TEXT custom_name
         TEXT expiry_date
@@ -41,6 +42,8 @@ erDiagram
         TEXT normalized_name
         TEXT kind
         TEXT product_ean FK
+        TEXT brand
+        TEXT category
         TEXT image_url
         TEXT parent_catalog_product_id FK
         TEXT created_at
@@ -84,6 +87,7 @@ erDiagram
 
     PRODUCT_DEFINITIONS ||--o{ INVENTORY : "defines scanned product"
     PRODUCT_DEFINITIONS ||--o| PRODUCT_CATALOG : "backs specific catalog product"
+    PRODUCT_CATALOG ||--o{ INVENTORY : "identifies inventory product"
 
     PRODUCT_CATALOG ||--o{ SHOPPING_LIST_ITEMS : "used by"
     PRODUCT_CATALOG ||--o{ PRODUCT_CATALOG : "generic parent of specific"
@@ -97,10 +101,27 @@ erDiagram
 
 - Schemat jest tworzony w jednej transakcji, bez migracji i bez danych demonstracyjnych. Po zmianie schematu należy ręcznie wyczyścić dane instalacji deweloperskiej; zwykły restart zachowuje dane.
 - `inventory.created_at` jest wymagane i zapisywane zarówno przy dodawaniu produktu, jak i finalizacji zakupów. Jedna sztuka odpowiada jednemu rekordowi.
+- `inventory.catalog_product_id` wskazuje stabilne `product_catalog.id` dla produktów z EAN i bez EAN. Powiązanie jest zapisywane przy dodawaniu egzemplarza; późniejszy odczyt nie dopasowuje go po nazwie.
+- Dla produktów bez EAN wspólna nazwa i metadane pochodzą z katalogu. `inventory.custom_name` pozostaje nazwą pozycji tekstowej lub kopią nazwy z momentu dodania, bez roli identyfikatora produktu.
+- Finalizacja zakupów zapisuje identyfikator produktu wybranego bezpośrednio albo przez jednoznaczne powiązanie. Przy wielu alternatywach zachowuje dotychczasowy wybór jednego produktu z EAN, jeżeli taki jest jedyny; pozostałe niejednoznaczne pozycje pozostają tekstowe, z pustym `catalog_product_id`.
+- Pozycje zakupowe wskazujące produkt katalogowy pokazują jego aktualną nazwę. Własne etykiety pozycji tekstowych pozostają niezależne od nazw ich alternatyw.
 - Pola dietetyczne i ustawienia modelu zachowują dotychczasowe znaczenie. Początkowe `NULL` w polach dietetycznych oznacza brak klasyfikacji.
 - `inventory.product_ean` wskazuje na `product_definitions.ean`, jesli produkt pochodzi ze skanu.
 - `product_catalog.product_ean` wskazuje na `product_definitions.ean` dla produktow konkretnych (`specific`).
-- `product_catalog.image_url` przechowuje zdjecie katalogowe uzywane m.in. w listach zakupowych.
+- Dla produktów bez EAN (`generic`) marka i kategoria są zapisywane w `product_catalog.brand` i `product_catalog.category`. Dla produktów `specific` odczyty katalogowe pobierają te pola z `product_definitions`.
+- `ProductRepository.saveGenericCatalogProduct` tworzy produkt `generic` tylko dla nowej znormalizowanej nazwy (po usunięciu skrajnych spacji i zamianie liter na małe). Przy istniejącej nazwie zwraca dotychczasowy produkt bez zmiany nazwy, marki, kategorii, zdjęcia, identyfikatora i znaczników czasu, również gdy przekazano inne metadane. Tworzenie i odczyt wyniku odbywają się w jednej transakcji. `ShoppingListRepository.createGenericCatalogProduct` korzysta z tej samej operacji. Wspólne dane zmienia się przez edycję katalogu.
+- Świadoma edycja katalogu korzysta z `ProductRepository.updateCatalogProduct(id, input)` i obejmuje nazwę, markę, kategorię i zdjęcie, wspólne dla wszystkich egzemplarzy produktu. Pusta nazwa jest odrzucana; pustą markę i kategorię zapisujemy jako `NULL`. EAN, flagi dietetyczne, identyfikatory i stan egzemplarzy pozostają zachowane. Zmiany są lokalne i nie są wysyłane do Open Food Facts.
+- Pominięcie `input.imageUrl` zachowuje dotychczasowe zdjęcie, przekazanie URI je zastępuje, a `null` usuwa zdjęcie z danych produktu. Dla produktu `specific` edycja aktualizuje definicję i katalog w jednej transakcji, w tym oba pola `image_url`, aby odczyt przez `COALESCE` nie przywracał poprzedniego zdjęcia.
+- `ProductRepository.saveDefinition` tworzy definicję i wpis katalogu atomowo tylko dla nowego EAN. Dla istniejącego EAN pozostawia oba rekordy bez zmian. Dodanie kolejnego egzemplarza zapisuje nowy rekord `inventory`; wspólne dane zmienia się przez edycję katalogu.
+- Ręczne dodawanie przy pustym EAN wyszukuje dokładną znormalizowaną nazwę wyłącznie wśród produktów `generic`. Dopasowanie wczytuje markę, kategorię i zdjęcie oraz blokuje ich edycję; nazwa pozostaje edytowalna. Zmiana nazwy na niedopasowaną lub wyczyszczenie przywraca wcześniejsze metadane i zdjęcie ręcznego szkicu, zachowując ilość i termin. Niepusty EAN ma pierwszeństwo i wyłącza dopasowanie po nazwie. Nie wybieramy produktów `specific` na podstawie nazwy.
+- Oczekujący lub nieudany odczyt nazwy blokuje dodawanie; po błędzie można ponowić sprawdzenie albo zmienić nazwę. Spóźnione wyniki po zmianie nazwy/EAN lub zamknięciu formularza są pomijane. Zapis dopasowanego produktu odczytuje go ponownie po ID i dodaje wyłącznie egzemplarze. Jeżeli produkt powstał dopiero po pustym odczycie, zapis tworzący zwraca istniejący wpis, zachowując jego dane.
+- Lokalne sprawdzanie nazwy i EAN nie wyświetla komunikatów ładowania pomiędzy polami. Dopasowany produkt zmienia tytuł formularza z „Dodaj produkt ręcznie” na „Dodaj produkt z katalogu”; nagłówek ma stały obszar na dwa wiersze uwzględniający ustawioną skalę czcionki. Przycisk zatwierdzenia zachowuje napis „Zapisz i dodaj”. Komunikaty błędów odczytu i przyciski ponowienia pozostają dostępne.
+- Kolizja znormalizowanych nazw dwóch produktów `generic` daje błąd `duplicate_name`, bez scalania ich rekordów. Pusta nazwa daje `empty_name`, a brak edytowanego produktu lub definicji — `not_found`.
+- `product_catalog.image_url` przechowuje zdjęcie katalogowe używane m.in. w spiżarni i listach zakupowych. Zdjęcia wybrane z aparatu lub galerii są kopiowane do prywatnego katalogu `product-photos` aplikacji, a w bazie zapisujemy URI tej kopii.
+- Niezatwierdzone kopie zdjęć z edycji katalogu należą do szkicu. Anulowanie edycji usuwa jej kopie; zastąpienie lub wyczyszczenie zdjęcia w szkicu usuwa poprzednią niezatwierdzoną kopię. Sprzątane są też spóźnione i częściowe wyniki kopiowania. W trakcie zapisu plik pozostaje chroniony. Udany zapis zachowuje plik, a błąd zachowuje go do ponowienia, jeśli edytor jest otwarty, lub usuwa po zakończeniu zapisu, jeśli edytor został zamknięty. Dotychczasowe zdjęcie produktu i plik źródłowy nie są usuwane przez sprzątanie szkicu.
+- Ręczny formularz również używa `ProductPhotoDraft`. Zdjęcie wybrane przed dopasowaniem nazwy pozostaje częścią własnego szkicu, aby można było do niego wrócić po zmianie nazwy. Po dodaniu istniejącego produktu `generic` nieużyta kopia jest usuwana przy zamknięciu formularza; zdjęcie zapisane w katalogu pozostaje chronione także po błędzie dodawania egzemplarza.
+- Dotknięcie zdjęcia w edytorze katalogu, szczegółach egzemplarza lub formularzu dodawania otwiera pełnoekranowy podgląd z zachowaniem proporcji. Podgląd korzysta z tej samej warstwy modalnej, pozostawiając formularz i szkic zdjęcia zamontowane. „X” i systemowe Wstecz zamykają najpierw podgląd; nie zapisują danych ani nie usuwają plików. Zmiana produktu lub URI zamyka nieaktualny podgląd.
+- W podglądzie gest dwoma palcami powiększa zdjęcie do 4×; powiększone zdjęcie można przesuwać do jego krawędzi. Podwójne stuknięcie przełącza między zbliżeniem 2× w miejscu dotknięcia i całym zdjęciem. Zamknięcie podglądu, zmiana zdjęcia lub rozmiaru obszaru wyświetlania resetuje powiększenie i przesunięcie.
 - `product_catalog.parent_catalog_product_id` laczy produkt konkretny z produktem ogolnym (`generic`).
 - `shopping_list_items.list_id` wskazuje liste zakupow.
 - `shopping_list_items.catalog_product_id` jest opcjonalne, bo zwykle pozycje tekstowe nie musza miec wpisu w katalogu.
@@ -112,9 +133,28 @@ erDiagram
 - `shopping_lists.sort_order` zapisuje reczna kolejnosc list na ekranie list zakupow.
 - `app_settings` jest tabela konfiguracyjna i nie ma relacji z pozostalymi tabelami.
 
+## Odczyt katalogu
+
+- `ProductRepository.getCatalogProducts()` zwraca wszystkie produkty lokalnego katalogu, niezależnie od obecności w spiżarni.
+- `findCatalogProductById(id)` odczytuje produkt przeznaczony do edycji po stabilnym identyfikatorze.
+- `searchCatalogProducts(query, limit?)` wyszukuje fragment nazwy lub EAN. Domyślnie zwraca wszystkie dopasowania; pusty tekst zwraca cały katalog. Znaki `%`, `_` i `\` są traktowane dosłownie.
+- Metody odczytu katalogu w `ShoppingListRepository` korzystają z tego samego API. Wyszukiwanie podpowiedzi zakupowych zachowuje limit 20 wyników.
+
+## Usuwanie z katalogu
+
+- `ProductRepository.deleteCatalogProduct(id)` usuwa wyłącznie nieużywany produkt po stabilnym ID. Edytor katalogu wymaga potwierdzenia usunięcia.
+- Sprawdzenie powiązań i usunięcie odbywają się w jednej transakcji. Egzemplarze w `inventory` (także powiązane samym EAN), bezpośrednie pozycje zakupowe, alternatywy oraz produkty wskazujące ten wpis jako rodzica blokują usunięcie. Sprawdzamy wszystkie statusy pozycji zakupowych. Nie usuwamy ani nie odłączamy tych danych automatycznie.
+- Dla produktu `specific` usuwamy wpis katalogu i lokalną definicję EAN atomowo; pozostawiona definicja odtworzyłaby wpis podczas uruchamiania aplikacji. Ponowne dodanie usuniętego produktu jest możliwe, a operacja nie zmienia danych w Open Food Facts.
+- `CatalogProductDeleteError` rozróżnia `not_found`, `in_inventory`, `in_shopping_list` i `has_children`. Błąd zachowuje szkic edytora i pozwala ponowić operację. Błąd zapisu wycofuje całą transakcję.
+- Potwierdzenie usunięcia jest osobnym widokiem tego samego dolnego panelu. Anulowanie i Wstecz przywracają szkic edycji wraz ze zdjęciem. Odmowa usunięcia pozostaje widoczna w potwierdzeniu i pozwala ponowić operację albo wrócić do edycji.
+- Usunięcie produktu odrzuca jego niezatwierdzony szkic zdjęcia. Operacja nie usuwa wcześniej zapisanych plików zdjęć ani plików źródłowych; sprzątanie szkiców zachowuje dotychczasowe zasady.
+
 ## Indeksy
 
 ```sql
+CREATE INDEX IF NOT EXISTS idx_inventory_catalog_product
+ON inventory(catalog_product_id);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_product_catalog_ean
 ON product_catalog(product_ean)
 WHERE product_ean IS NOT NULL;

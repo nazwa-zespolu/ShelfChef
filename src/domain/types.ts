@@ -16,6 +16,7 @@ export interface ProductDefinition {
   
   export interface InventoryItem extends ProductDefinition {
     id: string; // UUID
+    catalogProductId: string | null;
     expiryDate: string | null; // ISO 8601 (YYYY-MM-DD) or null when unknown
     openedAt?: string | null;
     isOpened: boolean;
@@ -30,6 +31,8 @@ export interface CatalogProduct {
   normalizedName: string;
   kind: CatalogProductKind;
   productEan: string | null;
+  brand: string | null;
+  category: string | null;
   imageUrl: string | null;
   parentCatalogProductId: string | null;
   createdAt: string;

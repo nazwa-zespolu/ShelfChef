@@ -22,6 +22,8 @@ function setupShoppingListsSchema() {
         normalized_name TEXT NOT NULL,
         kind TEXT NOT NULL CHECK(kind IN ('generic', 'specific')),
         product_ean TEXT,
+        brand TEXT,
+        category TEXT,
         image_url TEXT,
         parent_catalog_product_id TEXT,
         created_at TEXT NOT NULL,
@@ -161,6 +163,7 @@ export const setupDatabase = () => runInTransaction(() => {
   db.execute(`
       CREATE TABLE IF NOT EXISTS inventory (
         id TEXT PRIMARY KEY,
+        catalog_product_id TEXT,
         product_ean TEXT,
         custom_name TEXT,
         expiry_date TEXT,
@@ -171,8 +174,13 @@ export const setupDatabase = () => runInTransaction(() => {
         is_gluten_free INTEGER,
         is_lactose_free INTEGER,
         created_at TEXT NOT NULL,
-        FOREIGN KEY(product_ean) REFERENCES product_definitions(ean)
+        FOREIGN KEY(product_ean) REFERENCES product_definitions(ean),
+        FOREIGN KEY(catalog_product_id) REFERENCES product_catalog(id)
       );
+    `);
+  db.execute(`
+      CREATE INDEX IF NOT EXISTS idx_inventory_catalog_product
+      ON inventory(catalog_product_id);
     `);
   db.execute(`
       CREATE TABLE IF NOT EXISTS app_settings (

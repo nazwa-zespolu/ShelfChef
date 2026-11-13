@@ -15,13 +15,21 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Camera as CameraIcon, ImagePlus, Trash2} from 'lucide-react-native';
 import WheelPicker from './components/WheelPicker';
-import {ProductDefinition} from './domain/types';
+import {ProductPhotoActions} from './components/ProductPhotoActions';
+import {useProductPhotoPreview} from './components/ProductPhotoPreview';
+import {CatalogProduct, ProductDefinition} from './domain/types';
+import {normalizeProductName} from './infrastructure/ProductRepository';
 import {getProductRepository, getScanToAdd} from './app/services';
 import {colors} from './theme/colors';
+import {shadowGutters, shadowInsets, shadows} from './theme/shadows';
 import {DraggableBottomSheet} from './shopping-lists/modals/DraggableBottomSheet';
 import {AppToast, useAppToast} from './components/AppToast';
+import ProductCatalogView from './ProductCatalogView';
+import {ProductPhotoDraft, type ProductPhotoSource} from './infrastructure/productPhotos';
+
+const MANUAL_HEADER_LINE_HEIGHT = 22;
+const MANUAL_HEADER_LINES = 2;
 
 const visionCamera = (() => {
   try {
@@ -31,26 +39,6 @@ const visionCamera = (() => {
     return null;
   }
 })();
-
-const imagePicker = (() => {
-  try {
-    // Runtime require keeps Jest/tests working when native module is missing.
-    return require('react-native-image-picker');
-  } catch {
-    return null;
-  }
-})();
-
-const fileSystem = (() => {
-  try {
-    // Runtime require keeps Jest/tests working when native module is missing.
-    return require('@dr.pogodin/react-native-fs');
-  } catch {
-    return null;
-  }
-})();
-
-const PRODUCT_PHOTO_DIR_NAME = 'product-photos';
 
 function getDefaultExpirationDate() {
   const date = new Date();
@@ -84,54 +72,6 @@ function formatAddSuccessMessage(name: string, amount: number) {
 
 function generateInventoryId(index: number) {
   return `inv-${Date.now()}-${index}-${Math.floor(Math.random() * 1_000_000)}`;
-}
-
-type ProductPhotoSource = 'camera' | 'library';
-
-type ImagePickerAsset = {
-  uri?: string;
-  fileName?: string;
-  type?: string;
-};
-
-type ImagePickerResponse = {
-  didCancel?: boolean;
-  errorCode?: string;
-  errorMessage?: string;
-  assets?: ImagePickerAsset[];
-};
-
-function extensionFromPhotoAsset(asset: ImagePickerAsset): string {
-  const fileName = asset.fileName?.trim();
-  const fileExtension = fileName?.match(/\.([a-zA-Z0-9]+)$/)?.[1];
-  if (fileExtension) {
-    return fileExtension.toLowerCase();
-  }
-  if (asset.type?.includes('png')) {
-    return 'png';
-  }
-  if (asset.type?.includes('webp')) {
-    return 'webp';
-  }
-  return 'jpg';
-}
-
-async function copyProductPhotoToAppStorage(asset: ImagePickerAsset): Promise<string | null> {
-  const sourceUri = asset.uri?.trim();
-  if (!sourceUri) {
-    return null;
-  }
-  if (!fileSystem?.DocumentDirectoryPath || !fileSystem?.mkdir || !fileSystem?.copyFile) {
-    return sourceUri;
-  }
-
-  const directory = `${fileSystem.DocumentDirectoryPath}/${PRODUCT_PHOTO_DIR_NAME}`;
-  const extension = extensionFromPhotoAsset(asset);
-  const fileName = `product-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}.${extension}`;
-  const destinationPath = `${directory}/${fileName}`;
-  await fileSystem.mkdir(directory);
-  await fileSystem.copyFile(sourceUri, destinationPath);
-  return `file://${destinationPath}`;
 }
 
 function isValidEAN(code: string) {
@@ -174,6 +114,7 @@ function ScannerUnavailable({onRequestClose}: {onRequestClose?: () => void}) {
 type ProductScannerViewProps = {
   onRequestClose?: () => void;
   onProductAdded?: () => void;
+  onCatalogProductUpdated?: () => void;
 };
 
 type VisionCameraModule = {
@@ -190,6 +131,22 @@ type VisionCameraModule = {
 };
 
 type SheetMode = 'none' | 'details' | 'manualWithEan' | 'manualNoEan';
+
+async function persistWithManualPhoto<T extends {imageUrl?: string | null}>(
+  draft: ProductPhotoDraft,
+  photoUri: string | null,
+  persist: () => Promise<T>,
+): Promise<T> {
+  let result: T | undefined;
+  await draft.save(async () => {
+    result = await persist();
+    return photoUri != null && result.imageUrl === photoUri;
+  });
+  if (!result) {
+    throw new Error('Manual photo draft is no longer available');
+  }
+  return result;
+}
 
 const SheetFormScrollContext = createContext<{
   lockParentScroll: (locked: boolean) => void;
@@ -227,7 +184,7 @@ function SheetScrollableForm({
           style={styles.sheetScroll}
           contentContainerStyle={[
             styles.sheetScrollContent,
-            {paddingBottom: contentBottomInset},
+            {paddingBottom: Math.max(contentBottomInset, shadowInsets.card.bottom)},
           ]}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
@@ -387,6 +344,7 @@ type ProductPhotoPickerProps = {
   onTakePhoto: () => void;
   onPickFromLibrary: () => void;
   onClear: () => void;
+  onPreview: () => void;
 };
 
 function ProductPhotoPicker({
@@ -396,41 +354,30 @@ function ProductPhotoPicker({
   onTakePhoto,
   onPickFromLibrary,
   onClear,
+  onPreview,
 }: ProductPhotoPickerProps) {
   return (
     <View style={styles.photoSection}>
-      <Text style={styles.inputLabel}>Zdjęcie produktu</Text>
+      <Text style={styles.inputLabel}>Zdjęcie produktu (opcjonalnie)</Text>
       <View style={styles.photoRow}>
         {imageUri ? (
-          <Image source={{uri: imageUri}} style={styles.manualPhotoPreview} />
+          <Pressable testID="manual-photo-preview" accessibilityRole="button" accessibilityLabel="Powiększ zdjęcie produktu" onPress={onPreview}>
+            <Image source={{uri: imageUri}} style={styles.manualPhotoPreview} />
+          </Pressable>
         ) : (
           <View style={styles.manualPhotoPlaceholder}>
             <Text style={styles.manualPhotoPlaceholderText}>Brak zdjęcia</Text>
           </View>
         )}
         <View style={styles.photoActions}>
-          <View style={styles.photoActionRow}>
-            <Pressable
-              style={[styles.photoButton, disabled && styles.buttonDisabled]}
-              onPress={onTakePhoto}
-              disabled={disabled}>
-              <CameraIcon color={colors.textPrimary} size={17} strokeWidth={2.2} />
-              <Text style={styles.photoButtonText}>{picking ? 'Wybieram…' : 'Aparat'}</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.photoButton, disabled && styles.buttonDisabled]}
-              onPress={onPickFromLibrary}
-              disabled={disabled}>
-              <ImagePlus color={colors.textPrimary} size={17} strokeWidth={2.2} />
-              <Text style={styles.photoButtonText}>Galeria</Text>
-            </Pressable>
-          </View>
-          {imageUri ? (
-            <Pressable style={styles.photoClearButton} onPress={onClear} disabled={disabled}>
-              <Trash2 color={colors.warning} size={16} strokeWidth={2.2} />
-              <Text style={styles.photoClearButtonText}>Usuń zdjęcie</Text>
-            </Pressable>
-          ) : null}
+          <ProductPhotoActions
+            hasPhoto={Boolean(imageUri)}
+            disabled={disabled}
+            picking={picking}
+            onTakePhoto={onTakePhoto}
+            onPickFromLibrary={onPickFromLibrary}
+            onClear={onClear}
+          />
         </View>
       </View>
     </View>
@@ -448,7 +395,7 @@ function ProductScannerVisionContent({
 }) {
   const {Camera, useCameraPermission, useCameraDevice, useCodeScanner} = visionModule;
   const insets = useSafeAreaInsets();
-  const {height: windowHeight} = useWindowDimensions();
+  const {height: windowHeight, fontScale} = useWindowDimensions();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const keyboardInset = Math.max(0, keyboardHeight - insets.bottom);
   const sheetContentBottomInset = keyboardInset > 0 ? keyboardInset + 24 : 8;
@@ -465,15 +412,55 @@ function ProductScannerVisionContent({
   const [manualBrand, setManualBrand] = useState('');
   const [manualCategory, setManualCategory] = useState('');
   const [manualPhotoUri, setManualPhotoUri] = useState<string | null>(null);
+  const manualPhotoDraft = useRef<ProductPhotoDraft | null>(null);
   const [expirationDate, setExpirationDate] = useState<Date | null>(null);
   const [amount, setAmount] = useState(1);
   const [resolving, setResolving] = useState(false);
   const [adding, setAdding] = useState(false);
   const [photoPicking, setPhotoPicking] = useState(false);
+  const [manualLookup, setManualLookup] = useState<{
+    ean: string;
+    status: 'loading' | 'ready' | 'error';
+    product: ProductDefinition | null;
+  } | null>(null);
+  const [manualLookupAttempt, setManualLookupAttempt] = useState(0);
+  const manualLookupRequestRef = useRef(0);
+  const [manualNameLookup, setManualNameLookup] = useState<{
+    name: string;
+    status: 'loading' | 'ready' | 'error';
+    product: CatalogProduct | null;
+  } | null>(null);
+  const [manualNameLookupAttempt, setManualNameLookupAttempt] = useState(0);
+  const manualNameLookupRequestRef = useRef(0);
+  const addingRef = useRef(false);
   const lastAcceptedScanRef = useRef<{code: string; scannedAt: number} | null>(null);
   const resolveRequestIdRef = useRef(0);
   const scanToAdd = useMemo(() => getScanToAdd(), []);
   const repo = useMemo(() => getProductRepository(), []);
+  const manualFormOpen = sheetMode === 'manualNoEan' || sheetMode === 'manualWithEan';
+  const normalizedManualEan = manualEan.trim();
+  const shouldLookupManualEan = manualFormOpen && isValidEAN(normalizedManualEan);
+  const currentManualLookup = manualLookup?.ean === normalizedManualEan ? manualLookup : null;
+  const manualLookupPending = shouldLookupManualEan && (!currentManualLookup || currentManualLookup.status === 'loading');
+  const manualLookupFailed = shouldLookupManualEan && currentManualLookup?.status === 'error';
+  const existingEanProduct = shouldLookupManualEan && currentManualLookup?.status === 'ready'
+    ? currentManualLookup.product : null;
+  const normalizedManualName = normalizeProductName(manualName);
+  const shouldLookupManualName = manualFormOpen && !normalizedManualEan && !!normalizedManualName;
+  const currentManualNameLookup = manualNameLookup?.name === normalizedManualName ? manualNameLookup : null;
+  const manualNameLookupPending = shouldLookupManualName && (!currentManualNameLookup || currentManualNameLookup.status === 'loading');
+  const manualNameLookupFailed = shouldLookupManualName && currentManualNameLookup?.status === 'error';
+  const existingGenericProduct = shouldLookupManualName && currentManualNameLookup?.status === 'ready'
+    ? currentManualNameLookup.product : null;
+  const existingManualProduct = existingEanProduct ?? existingGenericProduct;
+  const manualLookupBlocked = manualLookupPending || manualLookupFailed || manualNameLookupPending || manualNameLookupFailed;
+  const manualNameLocked = adding || resolving || photoPicking || manualLookupPending || manualLookupFailed || !!existingEanProduct;
+  const manualSharedFieldsLocked = adding || resolving || photoPicking || manualLookupBlocked || !!existingManualProduct;
+  const photoPreview = useProductPhotoPreview({
+    uri: sheetMode === 'details' ? scannedProduct?.imageUrl : existingManualProduct ? existingManualProduct.imageUrl : manualPhotoUri,
+    name: sheetMode === 'details' ? scannedProduct?.name ?? '' : existingManualProduct?.name ?? manualName,
+    ownerKey: sheetMode === 'none' ? null : `${sheetMode}:${sheetMode === 'details' ? scannedProduct?.ean : normalizedManualEan || normalizedManualName}`,
+  });
   const {toast, toastAnim, showToast} = useAppToast();
   const toastTop = useMemo(() => insets.top + 12, [insets.top]);
   const currentYear = useMemo(() => new Date().getFullYear(), []);
@@ -491,6 +478,60 @@ function ProductScannerVisionContent({
       ),
     [activeDate],
   );
+
+  useEffect(() => {
+    if (!manualFormOpen) {
+      return;
+    }
+    const draft = new ProductPhotoDraft();
+    manualPhotoDraft.current = draft;
+    return () => {
+      if (manualPhotoDraft.current === draft) {
+        manualPhotoDraft.current = null;
+      }
+      draft.dispose().catch(error => { console.warn('[ShelfChef] Photo draft cleanup failed', error); });
+    };
+  }, [manualFormOpen]);
+
+  useEffect(() => {
+    const requestId = ++manualLookupRequestRef.current;
+    if (!shouldLookupManualEan) {
+      setManualLookup(null);
+      return;
+    }
+    let active = true;
+    setManualLookup({ean: normalizedManualEan, status: 'loading', product: null});
+    repo.findDefinitionByEan(normalizedManualEan).then(product => {
+      if (active && requestId === manualLookupRequestRef.current) {
+        setManualLookup({ean: normalizedManualEan, status: 'ready', product});
+      }
+    }).catch(() => {
+      if (active && requestId === manualLookupRequestRef.current) {
+        setManualLookup({ean: normalizedManualEan, status: 'error', product: null});
+      }
+    });
+    return () => { active = false; };
+  }, [repo, shouldLookupManualEan, normalizedManualEan, manualLookupAttempt]);
+
+  useEffect(() => {
+    const requestId = ++manualNameLookupRequestRef.current;
+    if (!shouldLookupManualName) {
+      setManualNameLookup(null);
+      return;
+    }
+    let active = true;
+    setManualNameLookup({name: normalizedManualName, status: 'loading', product: null});
+    repo.findCatalogProductByNormalizedName('generic', normalizedManualName).then(product => {
+      if (active && requestId === manualNameLookupRequestRef.current) {
+        setManualNameLookup({name: normalizedManualName, status: 'ready', product});
+      }
+    }).catch(() => {
+      if (active && requestId === manualNameLookupRequestRef.current) {
+        setManualNameLookup({name: normalizedManualName, status: 'error', product: null});
+      }
+    });
+    return () => { active = false; };
+  }, [repo, shouldLookupManualName, normalizedManualName, manualNameLookupAttempt]);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -539,49 +580,65 @@ function ProductScannerVisionContent({
   };
 
   const closeBottomSheet = () => {
+    if (addingRef.current || photoPicking) {
+      return;
+    }
+    manualLookupRequestRef.current += 1;
+    manualNameLookupRequestRef.current += 1;
+    setManualLookupAttempt(attempt => attempt + 1);
+    setManualNameLookupAttempt(attempt => attempt + 1);
+    setManualLookup(null);
+    setManualNameLookup(null);
     setSheetMode('none');
     setScannedProduct(null);
   };
 
+  const changeManualEan = (value: string) => {
+    if (value.trim() !== normalizedManualEan) {
+      manualLookupRequestRef.current += 1;
+      manualNameLookupRequestRef.current += 1;
+      setManualLookupAttempt(attempt => attempt + 1);
+      setManualNameLookupAttempt(attempt => attempt + 1);
+      setManualLookup(null);
+      setManualNameLookup(null);
+    }
+    setManualEan(value);
+  };
+
+  const changeManualName = (value: string) => {
+    if (normalizeProductName(value) !== normalizedManualName) {
+      manualNameLookupRequestRef.current += 1;
+      setManualNameLookupAttempt(attempt => attempt + 1);
+      setManualNameLookup(null);
+    }
+    setManualName(value);
+  };
+
   const pickProductPhoto = async (source: ProductPhotoSource) => {
-    if (!imagePicker) {
-      showToast('Nie udało się uruchomić wyboru zdjęcia', 'error');
+    const draft = manualPhotoDraft.current;
+    if (!draft || photoPicking) {
       return;
     }
-
-    const launcher =
-      source === 'camera' ? imagePicker.launchCamera : imagePicker.launchImageLibrary;
-    if (typeof launcher !== 'function') {
-      showToast('Ten sposób dodania zdjęcia jest niedostępny', 'error');
-      return;
-    }
-
     setPhotoPicking(true);
     try {
-      const response: ImagePickerResponse = await launcher({
-        mediaType: 'photo',
-        selectionLimit: 1,
-        quality: 0.82,
-        includeBase64: false,
-      });
-      if (response.didCancel) {
-        return;
-      }
-      if (response.errorCode) {
-        showToast(response.errorMessage || 'Nie udało się dodać zdjęcia', 'error');
-        return;
-      }
-
-      const pickedAsset = response.assets?.[0];
-      const storedUri = pickedAsset ? await copyProductPhotoToAppStorage(pickedAsset) : null;
-      if (storedUri) {
+      const storedUri = await draft.select(source);
+      if (storedUri && manualPhotoDraft.current === draft) {
         setManualPhotoUri(storedUri);
       }
-    } catch {
-      showToast('Nie udało się dodać zdjęcia', 'error');
+    } catch (error) {
+      if (manualPhotoDraft.current === draft) {
+        showToast(error instanceof Error ? error.message : 'Nie udało się dodać zdjęcia', 'error');
+      }
     } finally {
-      setPhotoPicking(false);
+      if (manualPhotoDraft.current === draft) {
+        setPhotoPicking(false);
+      }
     }
+  };
+
+  const clearManualPhoto = () => {
+    manualPhotoDraft.current?.clear().catch(error => { console.warn('[ShelfChef] Photo draft cleanup failed', error); });
+    setManualPhotoUri(null);
   };
 
   const updateDatePart = (part: 'day' | 'month' | 'year', value: number) => {
@@ -686,65 +743,44 @@ function ProductScannerVisionContent({
   }
 
   const handleAddProduct = async () => {
-    if (!scannedProduct) {
+    if (!scannedProduct || addingRef.current) {
       return;
     }
+    addingRef.current = true;
     setAdding(true);
     try {
       const expiryDate = expirationDate ? formatExpiryForDb(expirationDate) : null;
       for (let i = 0; i < amount; i += 1) {
         await repo.addToInventory(generateInventoryId(i), scannedProduct.ean, null, expiryDate);
       }
+      addingRef.current = false;
       closeBottomSheet();
       onProductAdded?.();
       showToast(formatAddSuccessMessage(scannedProduct.name, amount));
     } catch {
       showToast('Nie udało się dodać produktu', 'error');
     } finally {
+      addingRef.current = false;
       setAdding(false);
     }
   };
 
-  const handleSaveManualWithEan = async () => {
-    const normalizedName = manualName.trim();
-    const normalizedEan = manualEan.trim();
+  const handleSaveManualProduct = async () => {
+    if (addingRef.current || resolving || photoPicking || manualLookupBlocked) {
+      return;
+    }
+    const photoDraft = manualPhotoDraft.current;
+    if (!photoDraft) {
+      return;
+    }
+    const normalizedName = (existingManualProduct?.name ?? manualName).trim();
+    const normalizedEan = normalizedManualEan;
     if (!normalizedName) {
       showToast('Podaj nazwę produktu', 'error');
       return;
     }
-    if (!isValidEAN(normalizedEan)) {
+    if (sheetMode === 'manualWithEan' && !isValidEAN(normalizedEan)) {
       showToast('Nie udało się zapisać bez poprawnego EAN', 'error');
-      return;
-    }
-
-    setAdding(true);
-    try {
-      await repo.saveDefinition({
-        ean: normalizedEan,
-        name: normalizedName,
-        brand: manualBrand.trim() || undefined,
-        category: manualCategory.trim() || undefined,
-        imageUrl: manualPhotoUri ?? undefined,
-      });
-      const expiryDate = expirationDate ? formatExpiryForDb(expirationDate) : null;
-      for (let i = 0; i < amount; i += 1) {
-        await repo.addToInventory(generateInventoryId(i), normalizedEan, null, expiryDate);
-      }
-      closeBottomSheet();
-      onProductAdded?.();
-      showToast(formatAddSuccessMessage(normalizedName, amount));
-    } catch {
-      showToast('Nie udało się zapisać produktu', 'error');
-    } finally {
-      setAdding(false);
-    }
-  };
-
-  const handleSaveManualNoEan = async () => {
-    const normalizedName = manualName.trim();
-    const normalizedEan = manualEan.trim();
-    if (!normalizedName) {
-      showToast('Podaj nazwę produktu', 'error');
       return;
     }
     if (normalizedEan && !isValidEAN(normalizedEan)) {
@@ -752,40 +788,92 @@ function ProductScannerVisionContent({
       return;
     }
 
+    addingRef.current = true;
     setAdding(true);
     try {
       const expiryDate = expirationDate ? formatExpiryForDb(expirationDate) : null;
+      let savedName = normalizedName;
       if (normalizedEan) {
-        await repo.saveDefinition({
-          ean: normalizedEan,
-          name: normalizedName,
-          brand: manualBrand.trim() || undefined,
-          category: manualCategory.trim() || undefined,
-          imageUrl: manualPhotoUri ?? undefined,
-        });
+        let definition = await repo.findDefinitionByEan(normalizedEan);
+        if (!definition) {
+          const input = {
+            ean: normalizedEan,
+            name: normalizedName,
+            brand: manualBrand.trim() || undefined,
+            category: manualCategory.trim() || undefined,
+            imageUrl: manualPhotoUri ?? undefined,
+          };
+          await persistWithManualPhoto(photoDraft, manualPhotoUri, async () => {
+            await repo.saveDefinition(input);
+            return input;
+          });
+          definition = await repo.findDefinitionByEan(normalizedEan);
+        }
+        if (!definition) {
+          throw new Error('Product definition not found after save');
+        }
+        savedName = definition.name;
         for (let i = 0; i < amount; i += 1) {
           await repo.addToInventory(generateInventoryId(i), normalizedEan, null, expiryDate);
         }
       } else {
-        await repo.saveGenericCatalogProduct(normalizedName, manualPhotoUri);
+        const catalog = existingGenericProduct
+          ? await repo.findCatalogProductById(existingGenericProduct.id)
+          : await persistWithManualPhoto(photoDraft, manualPhotoUri, () => repo.saveGenericCatalogProduct({
+            name: normalizedName,
+            brand: manualBrand.trim() || undefined,
+            category: manualCategory.trim() || undefined,
+            imageUrl: manualPhotoUri,
+          }));
+        if (!catalog) {
+          throw new Error('Catalog product not found before adding inventory');
+        }
+        savedName = catalog.name;
+        setManualNameLookup({name: normalizedManualName, status: 'ready', product: catalog});
         for (let i = 0; i < amount; i += 1) {
-          await repo.addToInventory(generateInventoryId(i), null, normalizedName, expiryDate);
+          await repo.addToInventory(generateInventoryId(i), null, catalog.name, expiryDate, catalog.id);
         }
       }
+      addingRef.current = false;
       closeBottomSheet();
       onProductAdded?.();
-      showToast(formatAddSuccessMessage(normalizedName, amount));
+      showToast(formatAddSuccessMessage(savedName, amount));
     } catch {
       showToast('Nie udało się dodać produktu', 'error');
     } finally {
+      addingRef.current = false;
       setAdding(false);
     }
   };
 
+  const manualLookupError = manualLookupFailed ? (
+    <View>
+      <Text style={styles.info}>Nie udało się sprawdzić EAN. Ponów sprawdzenie przed dodaniem produktu.</Text>
+      <Pressable accessibilityRole="button" onPress={() => {
+        setManualLookup(null);
+        setManualLookupAttempt(attempt => attempt + 1);
+      }}>
+        <Text style={styles.backText}>Ponów sprawdzenie EAN</Text>
+      </Pressable>
+    </View>
+  ) : manualNameLookupFailed ? (
+    <View>
+      <Text style={styles.info}>Nie udało się sprawdzić nazwy. Ponów sprawdzenie przed dodaniem produktu.</Text>
+      <Pressable accessibilityRole="button" onPress={() => {
+        setManualNameLookup(null);
+        setManualNameLookupAttempt(attempt => attempt + 1);
+      }}>
+        <Text style={styles.backText}>Ponów sprawdzenie nazwy</Text>
+      </Pressable>
+    </View>
+  ) : null;
+
   const sheetHeader = sheetMode === 'details' && scannedProduct ? (
     <View style={[styles.productRow, styles.sheetHeader]}>
       {scannedProduct.imageUrl ? (
-        <Image source={{uri: scannedProduct.imageUrl}} style={styles.productImage} />
+        <Pressable testID="scanned-photo-preview" accessibilityRole="button" accessibilityLabel="Powiększ zdjęcie produktu" onPress={photoPreview.open}>
+          <Image source={{uri: scannedProduct.imageUrl}} style={styles.productImage} />
+        </Pressable>
       ) : (
         <View style={styles.productImage} />
       )}
@@ -798,7 +886,11 @@ function ProductScannerVisionContent({
       </View>
     </View>
   ) : sheetMode === 'manualWithEan' || sheetMode === 'manualNoEan' ? (
-    <Text style={[styles.productName, styles.sheetHeader]}>Dodaj produkt ręcznie</Text>
+    <View style={[styles.sheetHeader, styles.manualHeader, {height: Math.ceil(MANUAL_HEADER_LINE_HEIGHT * MANUAL_HEADER_LINES * fontScale)}]}>
+      <Text testID="manual-product-title" accessibilityRole="header" numberOfLines={MANUAL_HEADER_LINES} style={[styles.productName, styles.manualHeaderTitle]}>
+        {existingManualProduct ? 'Dodaj produkt z katalogu' : 'Dodaj produkt ręcznie'}
+      </Text>
+    </View>
   ) : null;
 
   return (
@@ -827,7 +919,12 @@ function ProductScannerVisionContent({
       <DraggableBottomSheet
         visible={resolving || sheetMode !== 'none'}
         accessibilityLabel="Zamknij dodawanie produktu"
-        onClose={resolving || adding ? () => {} : closeBottomSheet}
+        onClose={() => {
+          if (!photoPreview.close() && !resolving && !adding) {
+            closeBottomSheet();
+          }
+        }}
+        accessibilityContentHidden={photoPreview.visible}
         sheetStyle={[
           styles.addProductSheet,
           (sheetMode === 'manualWithEan' || sheetMode === 'manualNoEan') && {
@@ -837,7 +934,7 @@ function ProductScannerVisionContent({
         ]}
         handleStyle={styles.sheetHandleTouch}
         handleContent={sheetHeader}
-        overlay={<AppToast toast={toast} animatedValue={toastAnim} top={toastTop} />}>
+        overlay={<><AppToast toast={toast} animatedValue={toastAnim} top={toastTop} />{photoPreview.overlay}</>}>
         {resolving ? (
           <View style={styles.resolvingBox}>
             <ActivityIndicator color={colors.success} />
@@ -946,38 +1043,42 @@ function ProductScannerVisionContent({
             <Text style={styles.inputLabel}>EAN</Text>
             <TextInput
               value={manualEan}
-              onChangeText={setManualEan}
               style={styles.textInput}
               editable={false}
               selectTextOnFocus={false}
             />
+            {manualLookupError}
             <Text style={styles.inputLabel}>Nazwa produktu</Text>
             <TextInput
-              value={manualName}
-              onChangeText={setManualName}
+              value={existingEanProduct ? existingEanProduct.name : manualName}
+              onChangeText={changeManualName}
+              editable={!manualNameLocked}
               style={styles.textInput}
               placeholder="Np. Makaron pełnoziarnisty"
               placeholderTextColor={colors.textMuted}
             />
             <Text style={styles.inputLabel}>Marka (opcjonalnie)</Text>
             <TextInput
-              value={manualBrand}
+              value={existingManualProduct ? existingManualProduct.brand ?? '' : manualBrand}
               onChangeText={setManualBrand}
+              editable={!manualSharedFieldsLocked}
               style={styles.textInput}
               placeholder="Np. Barilla"
               placeholderTextColor={colors.textMuted}
             />
             <Text style={styles.inputLabel}>Kategoria (opcjonalnie)</Text>
             <TextInput
-              value={manualCategory}
+              value={existingManualProduct ? existingManualProduct.category ?? '' : manualCategory}
               onChangeText={setManualCategory}
+              editable={!manualSharedFieldsLocked}
               style={styles.textInput}
               placeholder="Np. Produkty suche"
               placeholderTextColor={colors.textMuted}
             />
             <ProductPhotoPicker
-              imageUri={manualPhotoUri}
-              disabled={adding || resolving || photoPicking}
+              onPreview={photoPreview.open}
+              imageUri={existingManualProduct ? existingManualProduct.imageUrl ?? null : manualPhotoUri}
+              disabled={manualSharedFieldsLocked}
               picking={photoPicking}
               onTakePhoto={() => {
                 pickProductPhoto('camera').catch(() => {});
@@ -985,7 +1086,7 @@ function ProductScannerVisionContent({
               onPickFromLibrary={() => {
                 pickProductPhoto('library').catch(() => {});
               }}
-              onClear={() => setManualPhotoUri(null)}
+              onClear={clearManualPhoto}
             />
             <View style={styles.expirationSection}>
               <Text style={styles.inputLabel}>
@@ -1037,10 +1138,10 @@ function ProductScannerVisionContent({
               amount={amount}
               setAmount={setAmount}
               adding={adding}
-              resolving={resolving || photoPicking}
+              resolving={resolving || photoPicking || manualLookupBlocked}
               onClose={closeBottomSheet}
               onSave={() => {
-                handleSaveManualWithEan().catch(() => {});
+                handleSaveManualProduct().catch(() => {});
               }}
               saveLabel="Zapisz i dodaj"
               savingLabel="Zapisuję…"
@@ -1055,39 +1156,45 @@ function ProductScannerVisionContent({
             <Text style={styles.inputLabel}>EAN (opcjonalnie)</Text>
             <TextInput
               value={manualEan}
-              onChangeText={setManualEan}
+              onChangeText={changeManualEan}
+              editable={!adding && !photoPicking}
               style={styles.textInput}
               placeholder="Np. 5901234123457"
               placeholderTextColor={colors.textMuted}
               keyboardType="number-pad"
             />
+            {manualLookupError}
             <Text style={styles.inputLabel}>Nazwa produktu</Text>
             <TextInput
-              value={manualName}
-              onChangeText={setManualName}
+              value={existingEanProduct ? existingEanProduct.name : manualName}
+              onChangeText={changeManualName}
+              editable={!manualNameLocked}
               style={styles.textInput}
               placeholder="Np. Domowy zakwas"
               placeholderTextColor={colors.textMuted}
             />
             <Text style={styles.inputLabel}>Marka (opcjonalnie)</Text>
             <TextInput
-              value={manualBrand}
+              value={existingManualProduct ? existingManualProduct.brand ?? '' : manualBrand}
               onChangeText={setManualBrand}
+              editable={!manualSharedFieldsLocked}
               style={styles.textInput}
               placeholder="Np. Barilla"
               placeholderTextColor={colors.textMuted}
             />
             <Text style={styles.inputLabel}>Kategoria (opcjonalnie)</Text>
             <TextInput
-              value={manualCategory}
+              value={existingManualProduct ? existingManualProduct.category ?? '' : manualCategory}
               onChangeText={setManualCategory}
+              editable={!manualSharedFieldsLocked}
               style={styles.textInput}
               placeholder="Np. Produkty suche"
               placeholderTextColor={colors.textMuted}
             />
             <ProductPhotoPicker
-              imageUri={manualPhotoUri}
-              disabled={adding || resolving || photoPicking}
+              onPreview={photoPreview.open}
+              imageUri={existingManualProduct ? existingManualProduct.imageUrl ?? null : manualPhotoUri}
+              disabled={manualSharedFieldsLocked}
               picking={photoPicking}
               onTakePhoto={() => {
                 pickProductPhoto('camera').catch(() => {});
@@ -1095,7 +1202,7 @@ function ProductScannerVisionContent({
               onPickFromLibrary={() => {
                 pickProductPhoto('library').catch(() => {});
               }}
-              onClear={() => setManualPhotoUri(null)}
+              onClear={clearManualPhoto}
             />
             <View style={styles.expirationSection}>
               <Text style={styles.inputLabel}>
@@ -1147,10 +1254,10 @@ function ProductScannerVisionContent({
               amount={amount}
               setAmount={setAmount}
               adding={adding}
-              resolving={resolving || photoPicking}
+              resolving={resolving || photoPicking || manualLookupBlocked}
               onClose={closeBottomSheet}
               onSave={() => {
-                handleSaveManualNoEan().catch(() => {});
+                handleSaveManualProduct().catch(() => {});
               }}
               saveLabel="Zapisz i dodaj"
               savingLabel="Dodaję…"
@@ -1163,7 +1270,7 @@ function ProductScannerVisionContent({
   );
 }
 
-export default function ProductScannerView({onRequestClose, onProductAdded}: ProductScannerViewProps) {
+function ProductScannerContent({onRequestClose, onProductAdded}: ProductScannerViewProps) {
   if (!visionCamera) {
     return <ScannerUnavailable onRequestClose={onRequestClose} />;
   }
@@ -1198,7 +1305,39 @@ export default function ProductScannerView({onRequestClose, onProductAdded}: Pro
   );
 }
 
+export default function ProductScannerView({onRequestClose, onProductAdded, onCatalogProductUpdated}: ProductScannerViewProps) {
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const insets = useSafeAreaInsets();
+  if (catalogOpen) {
+    return <ProductCatalogView onRequestClose={() => setCatalogOpen(false)} onProductUpdated={onCatalogProductUpdated} />;
+  }
+  return (
+    <View style={styles.container}>
+      <ProductScannerContent onRequestClose={onRequestClose} onProductAdded={onProductAdded} />
+      <Pressable
+        testID="open-product-catalog"
+        accessibilityRole="button"
+        onPress={() => setCatalogOpen(true)}
+        style={[styles.catalogButton, {top: Math.max(insets.top, 12) + (onRequestClose ? 44 : 0)}]}>
+        <Text style={styles.catalogButtonText}>Katalog produktów</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  catalogButton: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 20,
+    backgroundColor: colors.surface,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  catalogButtonText: {color: colors.textPrimary, fontSize: 13, fontWeight: '700'},
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -1290,6 +1429,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 14,
   },
+  manualHeader: {
+    justifyContent: 'center',
+  },
+  manualHeaderTitle: {
+    lineHeight: MANUAL_HEADER_LINE_HEIGHT,
+    includeFontPadding: false,
+  },
   sheetContent: {
     gap: 14,
   },
@@ -1298,12 +1444,13 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   sheetScroll: {
+    ...shadowGutters.viewport,
     flexGrow: 0,
     flexShrink: 1,
   },
   sheetScrollContent: {
+    ...shadowGutters.content,
     gap: 14,
-    paddingBottom: 8,
   },
   resolvingBox: {
     minHeight: 120,
@@ -1312,6 +1459,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   productRow: {
+    ...shadows.preview,
     flexDirection: 'row',
     gap: 12,
     borderRadius: 8,
@@ -1319,11 +1467,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.surface,
     padding: 12,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: {width: 0, height: 4},
-    elevation: 2,
   },
   productImage: {
     width: 84,
@@ -1358,6 +1501,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   textInput: {
+    ...shadows.control,
     backgroundColor: colors.surface,
     borderRadius: 8,
     paddingHorizontal: 12,
@@ -1365,11 +1509,6 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     borderWidth: 1,
     borderColor: colors.border,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: {width: 0, height: 3},
-    elevation: 1,
   },
   photoSection: {
     gap: 8,
@@ -1413,53 +1552,6 @@ const styles = StyleSheet.create({
   photoActions: {
     flex: 1,
     gap: 8,
-  },
-  photoActionRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  photoButton: {
-    flex: 1,
-    minHeight: 38,
-    borderRadius: 8,
-    backgroundColor: colors.surfaceSubtle,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 8,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: {width: 0, height: 3},
-    elevation: 1,
-  },
-  photoButtonText: {
-    color: colors.textPrimary,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  photoClearButton: {
-    minHeight: 34,
-    borderRadius: 8,
-    backgroundColor: colors.warningSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 8,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: {width: 0, height: 3},
-    elevation: 1,
-  },
-  photoClearButtonText: {
-    color: colors.warning,
-    fontSize: 12,
-    fontWeight: '800',
   },
   wheelsRow: {
     flexDirection: 'row',

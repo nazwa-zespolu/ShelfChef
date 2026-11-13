@@ -46,6 +46,7 @@ jest.mock('lucide-react-native', () => {
     Clock3: MockIcon,
     Package: MockIcon,
     Search: MockIcon,
+    Check: MockIcon,
   };
 });
 
@@ -56,6 +57,7 @@ const inventoryItem = (
   overrides: Partial<InventoryItem> = {},
 ): InventoryItem => ({
   id,
+  catalogProductId: null,
   ean: '',
   name,
   expiryDate,

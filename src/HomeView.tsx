@@ -20,12 +20,14 @@ import {getExpiringProducts, getExpiryUrgency} from './domain/expiry';
 import {SwipeToDeleteCard} from './components/SwipeToDeleteCard';
 import {AppToast, useAppToast} from './components/AppToast';
 import {ExpiryFilterButton} from './components/ExpiryFilterButton';
+import {EmptyState} from './shopping-lists/components/EmptyState';
 import {
   ProductDetailsModal,
   type ProductDetailsChanges,
 } from './components/ProductDetailsModal';
 import {ProductRepository} from './infrastructure/ProductRepository';
 import {colors} from './theme/colors';
+import {shadowInsets, shadows} from './theme/shadows';
 import {compareExpiry, formatExpiryLine} from './utils/inventory';
 
 const repo = new ProductRepository();
@@ -594,22 +596,23 @@ export default function HomeView({
             />
           }
           ListEmptyComponent={
-            <View style={styles.emptyBox}>
-              <Text style={styles.emptyTitle}>
-                {query.trim()
+            <EmptyState
+              variant={query.trim() ? 'search' : showExpiringOnly ? 'complete' : 'products'}
+              title={
+                query.trim()
                   ? 'Brak wyników'
                   : showExpiringOnly
                     ? 'Brak pilnych terminów'
-                    : 'Brak produktów'}
-              </Text>
-              <Text style={styles.emptyHint}>
-                {query.trim()
+                    : 'Brak produktów'
+              }
+              description={
+                query.trim()
                   ? 'Spróbuj zmienić wyszukiwaną frazę.'
                   : showExpiringOnly
                     ? 'Żaden produkt nie jest przeterminowany ani nie traci ważności w ciągu 2 dni.'
-                    : 'Dodaj produkt z poziomu zakładki skanowania, aby zobaczyć go tutaj.'}
-              </Text>
-            </View>
+                    : 'Dodaj produkt z poziomu zakładki skanowania, aby zobaczyć go tutaj.'
+              }
+            />
           }
         />
       )}
@@ -717,7 +720,8 @@ const styles = StyleSheet.create({
     color: colors.successText,
   },
   listContent: {
-    paddingHorizontal: 16,
+    paddingTop: shadowInsets.card.top,
+    paddingHorizontal: shadowInsets.card.horizontal,
     paddingBottom: 96,
   },
   listEmpty: {
@@ -729,17 +733,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   card: {
+    ...shadows.card,
     backgroundColor: colors.surface,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderWidth: 1,
     borderColor: colors.border,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: {width: 0, height: 6},
-    elevation: 3,
   },
   cardPressed: {
     opacity: 0.82,
@@ -751,7 +751,8 @@ const styles = StyleSheet.create({
   },
   cardBody: {
     flex: 1,
-    justifyContent: 'center',
+    minHeight: 72,
+    justifyContent: 'flex-start',
     position: 'relative',
   },
   productImage: {
@@ -806,14 +807,14 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 14,
     fontWeight: '700',
-    marginTop: 5,
+    marginTop: 2,
   },
   expiryRow: {
-    minHeight: 24,
+    minHeight: 20,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 8,
+    marginTop: 4,
   },
   metaLine: {
     color: colors.textMuted,
@@ -862,22 +863,6 @@ const styles = StyleSheet.create({
   },
   swipeHintActionTextUndo: {
     color: colors.warningText,
-  },
-  emptyBox: {
-    padding: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyTitle: {
-    color: colors.textPrimary,
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  emptyHint: {
-    color: colors.textMuted,
-    textAlign: 'center',
-    lineHeight: 20,
   },
   pressed: {
     opacity: 0.78,

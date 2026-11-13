@@ -32,9 +32,11 @@ describe('ProductRepository + database integration', () => {
       'normalized_name', 'is_vegetarian', 'is_vegan', 'is_gluten_free', 'is_lactose_free',
     ]));
     expect(columns('inventory')).toEqual(expect.arrayContaining([
-      'created_at', 'opened_at', 'is_vegetarian', 'is_vegan', 'is_gluten_free', 'is_lactose_free',
+      'catalog_product_id', 'created_at', 'opened_at', 'is_vegetarian', 'is_vegan', 'is_gluten_free', 'is_lactose_free',
     ]));
-    expect(columns('product_catalog')).toContain('image_url');
+    expect(columns('product_catalog')).toEqual(expect.arrayContaining([
+      'brand', 'category', 'image_url',
+    ]));
     for (const table of ['inventory', 'product_definitions', 'product_catalog', 'app_settings', 'shopping_lists']) {
       expect(db.execute(`SELECT COUNT(*) AS count FROM ${table}`).rows!.item(0).count).toBe(0);
     }
@@ -123,7 +125,10 @@ describe('ProductRepository + database integration', () => {
   });
 
   it('zapisuje ręczny produkt bez EAN ze zdjęciem w katalogu generic', async () => {
-    await repository.saveGenericCatalogProduct('Domowy sos', 'file:///photos/domowy-sos.jpg');
+    await repository.saveGenericCatalogProduct({
+      name: 'Domowy sos',
+      imageUrl: 'file:///photos/domowy-sos.jpg',
+    });
     await repository.addToInventory('inv-sauce', null, 'Domowy sos', null);
 
     const inventoryItems = await repository.getFullInventory();
@@ -166,7 +171,7 @@ describe('ProductRepository + database integration', () => {
     });
   });
 
-  it('nie nadpisuje flag dietetycznych przy zwyklym update definicji', async () => {
+  it('preserves dietary flags and shared metadata when saving an existing EAN', async () => {
     await repository.saveDefinition({
       ean: '5901234123457',
       name: 'Mleko',
@@ -191,6 +196,7 @@ describe('ProductRepository + database integration', () => {
 
     const found = await repository.findDefinitionByEan('5901234123457');
 
+    expect(found).toMatchObject({name: 'Mleko', imageUrl: 'https://img/mleko.jpg'});
     expect(found?.dietary).toEqual({
       isVegetarian: true,
       isVegan: false,

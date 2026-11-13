@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useEffect, useState} from 'react';
 import {Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {Search} from 'lucide-react-native';
 import type {
@@ -8,12 +8,15 @@ import type {
 } from '../../domain/types';
 import {DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY} from '../../shoppingListIcons';
 import {colors} from '../../theme/colors';
+import {shadowGutters, shadows} from '../../theme/shadows';
 import {InlineFeedback, type FeedbackMessage} from '../components/InlineFeedback';
+import {EmptyState} from '../components/EmptyState';
 import {ShoppingIconAppearancePicker} from '../components/ShoppingIconAppearancePicker';
 import {ShoppingItemIconBubble} from '../components/ShoppingItemIconBubble';
 import {useKeyboardVisible} from '../hooks/useKeyboardVisible';
 import {parseQuantityInput} from '../quantity';
 import {DraggableBottomSheet} from './DraggableBottomSheet';
+import {FormScrollView} from '../../components/FormScrollView';
 
 export function AddItemModal({
   visible,
@@ -56,6 +59,13 @@ export function AddItemModal({
   const canSubmit = quantityIsValid && (selectedCatalog != null || productName.length > 0);
   const canDecrease = parsedQuantity > 1 && !busy;
   const keyboardVisible = useKeyboardVisible(!visible);
+  const [searchActivated, setSearchActivated] = useState(false);
+  useEffect(() => {
+    if (!visible) {
+      setSearchActivated(false);
+    }
+  }, [visible]);
+  const showCatalog = searchActivated || productName.length > 0 || selectedCatalog != null;
 
   return (
     <DraggableBottomSheet
@@ -65,32 +75,12 @@ export function AddItemModal({
       sheetStyle={[styles.sheet, keyboardVisible && styles.sheetKeyboard]}
       handleStyle={styles.handleTouch}
       handleContent={<Text style={styles.title}>Dodaj produkt</Text>}>
-      <Text style={styles.subtitle}>Wpisz nazwę albo wybierz produkt z katalogu</Text>
-      <InlineFeedback feedback={feedback} />
+      <FormScrollView visible={visible}>
+        <Text style={styles.subtitle}>Wpisz nazwę albo wybierz produkt z katalogu</Text>
+        <InlineFeedback feedback={feedback} />
 
-      <Text style={styles.inputLabel}>Nazwa produktu</Text>
-      <View style={styles.searchQuantityRow}>
-        <View style={[styles.searchBox, styles.searchBoxCompact]}>
-          <Search color={colors.textMuted} size={22} strokeWidth={2.1} />
-          <TextInput
-            value={catalogQuery}
-            onChangeText={onChangeCatalogQuery}
-            placeholder="Nazwa produktu"
-            placeholderTextColor={colors.textMuted}
-            style={styles.searchInput}
-          />
-        </View>
-        <QuantityStepper
-          value={parsedQuantity}
-          canDecrease={canDecrease}
-          busy={busy}
-          onDecrease={() => onChangeQuantity(String(parsedQuantity - 1))}
-          onIncrease={() => onChangeQuantity(String(parsedQuantity + 1))}
-        />
-      </View>
-
-      {!keyboardVisible ? (
         <ShoppingIconAppearancePicker
+          compact={keyboardVisible}
           label="Ikona produktu"
           colorAccessibilityLabel="Kolor ikony produktu"
           iconKey={iconKey}
@@ -98,64 +88,97 @@ export function AddItemModal({
           onChangeIconKey={onChangeIconKey}
           onChangeIconColorKey={onChangeIconColorKey}
         />
-      ) : null}
 
-      <Text style={styles.sectionTitle}>Wyniki z katalogu</Text>
-      {catalogResults.length > 0 ? (
-        <ScrollView style={styles.results} keyboardShouldPersistTaps="handled">
-          {catalogResults.map(product => {
-            const active = selectedCatalog?.id === product.id;
-            return (
-              <View key={product.id} style={[styles.catalogCard, active && styles.catalogCardActive]}>
-                <ShoppingItemIconBubble
-                  iconKey="box"
-                  iconColorKey={DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY}
-                  imageUrl={product.imageUrl}
-                />
-                <View style={styles.productText}>
-                  <Text style={styles.productName} numberOfLines={1}>{product.name}</Text>
-                  <Text style={styles.productMeta}>
-                    {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt z katalogu'}
-                  </Text>
-                </View>
-                <Pressable
-                  disabled={busy}
-                  onPress={() => onSelectCatalog(product)}
-                  style={({pressed}) => [
-                    styles.selectButton,
-                    active && styles.selectButtonActive,
-                    busy && styles.disabled,
-                    pressed && styles.pressed,
-                  ]}>
-                  <Text style={[styles.selectButtonText, active && styles.selectButtonTextActive]}>
-                    {active ? 'Wybrano' : 'Wybierz'}
-                  </Text>
-                </Pressable>
-              </View>
-            );
-          })}
-        </ScrollView>
-      ) : (
-        <View style={styles.emptyResults}>
-          <Text style={styles.emptyText}>
-            {productName ? 'Brak wyników katalogu' : 'Wpisz nazwę produktu'}
-          </Text>
+        <Text style={styles.inputLabel}>Nazwa produktu</Text>
+        <View style={styles.searchQuantityRow}>
+          <View style={[styles.searchBox, styles.searchBoxCompact]}>
+            <Search color={colors.textMuted} size={22} strokeWidth={2.1} />
+            <TextInput
+              value={catalogQuery}
+              onFocus={() => setSearchActivated(true)}
+              onChangeText={value => {
+                setSearchActivated(true);
+                onChangeCatalogQuery(value);
+              }}
+              placeholder="Nazwa produktu"
+              placeholderTextColor={colors.textMuted}
+              style={styles.searchInput}
+            />
+          </View>
+          <QuantityStepper
+            value={parsedQuantity}
+            canDecrease={canDecrease}
+            busy={busy}
+            onDecrease={() => onChangeQuantity(String(parsedQuantity - 1))}
+            onIncrease={() => onChangeQuantity(String(parsedQuantity + 1))}
+          />
         </View>
-      )}
 
-      {!quantityIsValid ? (
-        <Text style={styles.fieldError}>Ilość musi być liczbą większą od 0</Text>
-      ) : null}
-      <Pressable
-        disabled={busy || !canSubmit}
-        onPress={onSubmit}
-        style={({pressed}) => [
-          styles.submitButton,
-          (busy || !canSubmit) && styles.disabled,
-          pressed && styles.pressed,
-        ]}>
-        <Text style={styles.submitButtonText}>Dodaj produkt</Text>
-      </Pressable>
+        {showCatalog ? (
+          <>
+            <Text style={styles.sectionTitle}>Wyniki z katalogu</Text>
+            {catalogResults.length > 0 ? (
+              <ScrollView
+                style={[styles.results, shadowGutters.viewport]}
+                contentContainerStyle={shadowGutters.content}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled">
+                {catalogResults.map(product => {
+                  const active = selectedCatalog?.id === product.id;
+                  return (
+                    <View key={product.id} style={[styles.catalogCard, active && styles.catalogCardActive]}>
+                      <ShoppingItemIconBubble
+                        iconKey="box"
+                        iconColorKey={DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY}
+                        imageUrl={product.imageUrl}
+                      />
+                      <View style={styles.productText}>
+                        <Text style={styles.productName} numberOfLines={1}>{product.name}</Text>
+                        <Text style={styles.productMeta}>
+                          {product.kind === 'specific' ? 'Produkt z EAN' : 'Produkt z katalogu'}
+                        </Text>
+                      </View>
+                      <Pressable
+                        disabled={busy}
+                        onPress={() => onSelectCatalog(product)}
+                        style={({pressed}) => [
+                          styles.selectButton,
+                          active && styles.selectButtonActive,
+                          busy && styles.disabled,
+                          pressed && styles.pressed,
+                        ]}>
+                        <Text style={[styles.selectButtonText, active && styles.selectButtonTextActive]}>
+                          {active ? 'Wybrano' : 'Wybierz'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            ) : (
+              <EmptyState
+                compact
+                variant={productName ? 'search' : 'products'}
+                title={productName ? 'Brak wyników katalogu' : 'Wpisz nazwę produktu'}
+              />
+            )}
+          </>
+        ) : null}
+
+        {!quantityIsValid ? (
+          <Text style={styles.fieldError}>Ilość musi być liczbą większą od 0</Text>
+        ) : null}
+        <Pressable
+          disabled={busy || !canSubmit}
+          onPress={onSubmit}
+          style={({pressed}) => [
+            styles.submitButton,
+            (busy || !canSubmit) && styles.disabled,
+            pressed && styles.pressed,
+          ]}>
+          <Text style={styles.submitButtonText}>Dodaj produkt</Text>
+        </Pressable>
+      </FormScrollView>
     </DraggableBottomSheet>
   );
 }
@@ -248,6 +271,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   searchBox: {
+    ...shadows.control,
     minHeight: 52,
     borderRadius: 8,
     borderWidth: 1,
@@ -258,11 +282,6 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 12,
     marginBottom: 12,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: {width: 0, height: 3},
-    elevation: 1,
   },
   searchBoxCompact: {
     flex: 1,
@@ -281,9 +300,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   results: {
-    maxHeight: 430,
+    maxHeight: 260,
   },
   catalogCard: {
+    ...shadows.card,
     minHeight: 72,
     borderRadius: 8,
     borderWidth: 1,
@@ -295,11 +315,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: {width: 0, height: 4},
-    elevation: 2,
   },
   catalogCardActive: {
     borderColor: colors.accent,
@@ -338,22 +353,6 @@ const styles = StyleSheet.create({
   },
   selectButtonTextActive: {
     color: colors.accent,
-  },
-  emptyResults: {
-    minHeight: 48,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSubtle,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    marginBottom: 12,
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: '700',
   },
   quantityStepper: {
     height: 52,

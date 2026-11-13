@@ -25,6 +25,8 @@ const milk = {
   normalizedName: "mleko",
   kind: "specific" as const,
   productEan: "111",
+  brand: null,
+  category: null,
   imageUrl: null,
   parentCatalogProductId: null,
   createdAt: "2026-05-27T00:00:00.000Z",
@@ -37,6 +39,8 @@ const genericMilk = {
   normalizedName: "mleko",
   kind: "generic" as const,
   productEan: null,
+  brand: null,
+  category: null,
   imageUrl: null,
   parentCatalogProductId: null,
   createdAt: "2026-05-27T00:00:00.000Z",
@@ -49,6 +53,8 @@ const lactoseFreeMilk = {
   normalizedName: "mleko bez laktozy",
   kind: "specific" as const,
   productEan: "222",
+  brand: null,
+  category: null,
   imageUrl: null,
   parentCatalogProductId: null,
   createdAt: "2026-05-27T00:00:00.000Z",
@@ -94,6 +100,7 @@ function createRepositories(items = [milkItem]) {
       {
         id: "inv-1",
         ean: "111",
+        catalogProductId: "catalog-specific-111",
         name: "Mleko",
         expiryDate: "2999-01-01" as string | null,
         isOpened: false,
@@ -216,6 +223,7 @@ describe("UC-06: ShoppingList - domain rules", () => {
       ...Array.from({length: 7}, (_, index) => ({
         id: `inv-no-expiry-${index}`,
         ean: "111",
+        catalogProductId: "catalog-specific-111",
         name: "Mleko",
         expiryDate: null,
         isOpened: false,
@@ -223,6 +231,7 @@ describe("UC-06: ShoppingList - domain rules", () => {
       {
         id: "inv-with-expiry",
         ean: "111",
+        catalogProductId: "catalog-specific-111",
         name: "Mleko",
         expiryDate: "03.06.2999",
         isOpened: false,
@@ -291,6 +300,7 @@ describe("UC-06: ShoppingList - domain rules", () => {
       {
         id: "inv-lactose-free",
         ean: "222",
+        catalogProductId: "catalog-specific-222",
         name: "Mleko bez laktozy",
         expiryDate: "2999-01-01",
         isOpened: false,

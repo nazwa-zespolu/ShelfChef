@@ -41,6 +41,11 @@ export class ScanToAdd {
     }
 
     await this.databaseService.saveDefinition(fetchedDefinition);
-    return fetchedDefinition;
+    // A local product may have been saved while the network request was pending.
+    const savedDefinition = await this.databaseService.findDefinitionByEan(input.ean);
+    if (!savedDefinition) {
+      throw new Error('Product definition not found after save');
+    }
+    return savedDefinition;
   }
 }

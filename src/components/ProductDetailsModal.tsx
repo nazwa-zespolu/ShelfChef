@@ -3,8 +3,10 @@ import {AppState, Image, Pressable, ScrollView, StyleSheet, Text, View} from 're
 import {CalendarDays, Package} from 'lucide-react-native';
 import type {InventoryItem} from '../domain/types';
 import {colors} from '../theme/colors';
+import {shadowGutters, shadows} from '../theme/shadows';
 import {DraggableBottomSheet} from '../shopping-lists/modals/DraggableBottomSheet';
 import WheelPicker from './WheelPicker';
+import {useProductPhotoPreview} from './ProductPhotoPreview';
 
 export type ProductDetailsChanges = {
   expiryDate: string | null;
@@ -134,6 +136,7 @@ export function ProductDetailsModal({
   const [openingDatePickerVisible, setOpeningDatePickerVisible] = useState(false);
   const [scrollEnabled, setScrollEnabled] = useState(true);
   const [today, setToday] = useState(() => new Date());
+  const photoPreview = useProductPhotoPreview({uri: item?.imageUrl, name: item?.name ?? '', ownerKey: item?.id ?? null});
 
   useEffect(() => {
     if (!item) {
@@ -252,6 +255,9 @@ export function ProductDetailsModal({
   };
 
   const close = () => {
+    if (photoPreview.close()) {
+      return;
+    }
     if (!busy) {
       onClose();
     }
@@ -276,20 +282,24 @@ export function ProductDetailsModal({
       visible={item != null}
       accessibilityLabel="Zamknij szczegóły produktu"
       onClose={close}
+      overlay={photoPreview.overlay}
+      accessibilityContentHidden={photoPreview.visible}
       sheetStyle={styles.sheet}
       handleStyle={styles.handleTouch}
       handleContent={<Text style={styles.title}>Szczegóły produktu</Text>}>
       {item ? (
         <View style={styles.content}>
           <ScrollView
-            style={styles.scroll}
+            style={[styles.scroll, shadowGutters.viewport]}
             contentContainerStyle={styles.scrollContent}
             nestedScrollEnabled
             scrollEnabled={scrollEnabled}
             showsVerticalScrollIndicator={false}>
             <View style={styles.productHeader}>
               {item.imageUrl ? (
-                <Image source={{uri: item.imageUrl}} style={styles.productImage} />
+                <Pressable testID="product-details-photo-preview" accessibilityRole="button" accessibilityLabel="Powiększ zdjęcie produktu" onPress={photoPreview.open}>
+                  <Image source={{uri: item.imageUrl}} style={styles.productImage} />
+                </Pressable>
               ) : (
                 <View style={styles.productImagePlaceholder}>
                   <Package color={colors.textMuted} size={30} strokeWidth={2} />
@@ -301,7 +311,7 @@ export function ProductDetailsModal({
                 </Text>
                 {metadata ? <Text style={styles.productMetadata}>{metadata}</Text> : null}
                 <Text style={styles.productEan}>
-                  {item.ean ? `EAN: ${item.ean}` : 'Produkt dodany ręcznie'}
+                  {item.ean ? `EAN: ${item.ean}` : 'Produkt bez EAN'}
                 </Text>
               </View>
             </View>
@@ -493,9 +503,10 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   scrollContent: {
-    paddingBottom: 8,
+    ...shadowGutters.content,
   },
   productHeader: {
+    ...shadows.preview,
     minHeight: 92,
     flexDirection: 'row',
     alignItems: 'center',

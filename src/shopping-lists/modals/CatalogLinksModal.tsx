@@ -4,7 +4,9 @@ import {Search} from 'lucide-react-native';
 import type {AutoShoppingListItemState, CatalogProduct} from '../../domain/types';
 import {DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY} from '../../shoppingListIcons';
 import {colors} from '../../theme/colors';
+import {shadowGutters, shadows} from '../../theme/shadows';
 import {InlineFeedback, type FeedbackMessage} from '../components/InlineFeedback';
+import {EmptyState} from '../components/EmptyState';
 import {ShoppingItemIconBubble} from '../components/ShoppingItemIconBubble';
 import {useKeyboardVisible} from '../hooks/useKeyboardVisible';
 import {DraggableBottomSheet} from './DraggableBottomSheet';
@@ -67,7 +69,9 @@ export function CatalogLinksModal({
           <Text style={styles.sectionTitle}>Wyniki</Text>
           {availableResults.length > 0 ? (
             <ScrollView
-              style={[styles.results, keyboardVisible && styles.resultsKeyboard]}
+              style={[styles.results, shadowGutters.viewport, keyboardVisible && styles.resultsKeyboard]}
+              contentContainerStyle={shadowGutters.content}
+              nestedScrollEnabled
               keyboardShouldPersistTaps="handled">
               {availableResults.map(product => (
                 <CatalogLinkCard
@@ -83,7 +87,7 @@ export function CatalogLinksModal({
               ))}
             </ScrollView>
           ) : (
-            <EmptyResults label="Brak wyników" />
+            <EmptyState compact variant="search" title="Brak wyników" />
           )}
         </>
       ) : (
@@ -100,7 +104,7 @@ export function CatalogLinksModal({
               />
             ))
           ) : (
-            <EmptyResults label="Brak powiązanych produktów" />
+            <EmptyState compact title="Brak powiązanych produktów" />
           )}
         </>
       )}
@@ -146,14 +150,6 @@ function CatalogLinkCard({
   );
 }
 
-function EmptyResults({label}: {label: string}) {
-  return (
-    <View style={styles.empty}>
-      <Text style={styles.emptyText}>{label}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   sheet: {
     paddingTop: 4,
@@ -190,6 +186,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   searchBox: {
+    ...shadows.control,
     minHeight: 52,
     borderRadius: 8,
     borderWidth: 1,
@@ -220,6 +217,7 @@ const styles = StyleSheet.create({
     maxHeight: 430,
   },
   card: {
+    ...shadows.card,
     minHeight: 72,
     borderRadius: 8,
     borderWidth: 1,
@@ -231,11 +229,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.07,
-    shadowRadius: 12,
-    shadowOffset: {width: 0, height: 5},
-    elevation: 3,
   },
   cardText: {
     flex: 1,
@@ -265,22 +258,6 @@ const styles = StyleSheet.create({
     color: colors.success,
     fontSize: 14,
     fontWeight: '900',
-  },
-  empty: {
-    minHeight: 46,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSubtle,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    marginBottom: 12,
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: '700',
   },
   pressed: {
     opacity: 0.78,

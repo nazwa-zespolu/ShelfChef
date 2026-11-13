@@ -10,19 +10,22 @@ export type FeedbackMessage = {
   tone: FeedbackTone;
 };
 
-export function InlineFeedback({feedback}: {feedback: FeedbackMessage | null}) {
+export function InlineFeedback({feedback, numberOfLines = 1}: {
+  feedback: FeedbackMessage | null;
+  numberOfLines?: number;
+}) {
   if (!feedback) {
     return null;
   }
 
   return (
-    <View style={[styles.feedback, feedback.tone === 'error' && styles.error]}>
+    <View accessibilityRole="alert" style={[styles.feedback, numberOfLines === 0 && styles.multiline, feedback.tone === 'error' && styles.error]}>
       {feedback.tone === 'error' ? (
         <X color={colors.danger} size={16} strokeWidth={3} />
       ) : (
         <Check color={colors.success} size={16} strokeWidth={3} />
       )}
-      <Text style={styles.text} numberOfLines={1}>
+      <Text style={styles.text} numberOfLines={numberOfLines}>
         {feedback.message}
       </Text>
     </View>
@@ -45,6 +48,9 @@ const styles = StyleSheet.create({
   },
   error: {
     borderColor: colors.danger,
+  },
+  multiline: {
+    paddingVertical: 10,
   },
   text: {
     flexShrink: 1,
