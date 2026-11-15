@@ -5,6 +5,6 @@
 /* eslint-env jest */
 jest.mock('react-native-quick-sqlite', () => ({
   open: () => ({
-    execute: jest.fn(),
+    execute: jest.fn(() => ({rows: {length: 0, item: () => undefined}})),
   }),
 }));

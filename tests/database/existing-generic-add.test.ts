@@ -194,10 +194,14 @@ describe('Adding copies of an existing product without EAN', () => {
     await products.saveGenericCatalogProduct(original);
     const before = rows('product_catalog');
     const execute = sqlite.execute.bind(sqlite);
+    let inserted = false;
     const failingRead = jest
       .spyOn(sqlite, 'execute')
       .mockImplementation((sql, params) => {
-        if (sql.includes('FROM product_catalog catalog')) {
+        if (sql.includes('INSERT INTO product_catalog')) {
+          inserted = true;
+        }
+        if (inserted && sql.includes('FROM product_catalog catalog')) {
           throw new Error('catalog read failed');
         }
         return execute(sql, params);

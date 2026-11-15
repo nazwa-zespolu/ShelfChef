@@ -1,5 +1,6 @@
 import { db, runInTransaction } from './db/init';
 import {normalizeProductName} from '../domain/productNames';
+import {assertProductPhotoWritable, cleanupUnusedProductPhotos} from './productPhotoFiles';
 import { CatalogProduct, DietaryFlags, ProductDefinition, InventoryItem, InventoryItemChanges } from '../domain/types';
 import { DietPreference } from '../features/recipe-generator/domain/recipeGenerationTypes';
 import {
@@ -97,6 +98,7 @@ export class ProductRepository {
       if (existing.rows?.length) {
         return;
       }
+      assertProductPhotoWritable(def.imageUrl);
       const dietary = def.dietary;
       db.execute(
         `INSERT INTO product_definitions (
@@ -144,6 +146,11 @@ export class ProductRepository {
     // Reusing a name adds copies; shared data is edited only through the catalog.
     const trimmedName = input.name.trim();
     const normalizedName = normalizeProductName(trimmedName);
+    const existing = this.readCatalogProducts('catalog.kind = ? AND catalog.normalized_name = ?', ['generic', normalizedName])[0];
+    if (existing) {
+      return existing;
+    }
+    assertProductPhotoWritable(input.imageUrl);
     const id = `catalog-generic-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
     db.execute(
       `
@@ -221,12 +228,14 @@ export class ProductRepository {
     const brand = input.brand?.trim() || null;
     const category = input.category?.trim() || null;
 
-    return runInTransaction(() => {
+    const result = runInTransaction(() => {
       const product = this.readCatalogProducts('catalog.id = ?', [id])[0];
       if (!product) {
         throw new CatalogProductUpdateError('not_found', `Catalog product not found: ${id}`);
       }
+      const previousPhotos = this.readStoredProductPhotos(id, product.productEan);
       const imageUrl = input.imageUrl === undefined ? product.imageUrl : input.imageUrl;
+      assertProductPhotoWritable(imageUrl);
       if (product.kind === 'generic') {
         const duplicate = this.readCatalogProducts(
           "catalog.kind = 'generic' AND catalog.normalized_name = ? AND catalog.id <> ?",
@@ -261,12 +270,14 @@ export class ProductRepository {
           [name, new Date().toISOString(), id],
         );
       }
-      return this.readCatalogProducts('catalog.id = ?', [id])[0];
+      return {product: this.readCatalogProducts('catalog.id = ?', [id])[0], previousPhotos};
     });
+    await cleanupUnusedProductPhotos(result.previousPhotos);
+    return result.product;
   }
 
   async deleteCatalogProduct(id: string): Promise<void> {
-    runInTransaction(() => {
+    const previousPhotos = runInTransaction(() => {
       const product = this.readCatalogProducts('catalog.id = ?', [id])[0];
       if (!product) {
         throw new CatalogProductDeleteError('not_found', `Catalog product not found: ${id}`);
@@ -293,12 +304,24 @@ export class ProductRepository {
       ).rows?.length) {
         throw new CatalogProductDeleteError('has_children', 'Product has catalog children');
       }
+      const photos = this.readStoredProductPhotos(id, product.productEan);
       db.execute('DELETE FROM product_catalog WHERE id = ?', [id]);
       if (product.productEan) {
         // Leaving the definition would recreate the catalog row on startup.
         db.execute('DELETE FROM product_definitions WHERE ean = ?', [product.productEan]);
       }
+      return photos;
     });
+    await cleanupUnusedProductPhotos(previousPhotos);
+  }
+
+  private readStoredProductPhotos(id: string, ean: string | null): Array<string | null> {
+    const result = db.execute(
+      `SELECT image_url FROM product_catalog WHERE id = ?
+       UNION ALL SELECT image_url FROM product_definitions WHERE ean = ?`,
+      [id, ean],
+    );
+    return Array.from({length: result.rows?.length ?? 0}, (_, index) => result.rows!.item(index).image_url);
   }
 
   async searchDefinitions(query: string): Promise<ProductDefinition[]> {

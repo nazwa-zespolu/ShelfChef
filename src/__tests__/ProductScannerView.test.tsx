@@ -789,6 +789,22 @@ describe('UI: ProductScannerView product adding', () => {
     expect(onProductAdded).toHaveBeenCalledTimes(1);
   });
 
+  it('cleans the unused manual photo when an EAN definition wins the race during saving', async () => {
+    jest.mocked(launchImageLibrary).mockResolvedValue({assets: [{uri: 'file:///temporary/draft.jpg'}]});
+    saveDefinition.mockImplementation(async () => { findDefinition.mockResolvedValue(existing); });
+    await openForm();
+    await press('Galeria');
+    const path = jest.mocked(copyFile).mock.calls[0][1];
+    await changeInput('Np. 5901234123457', existing.ean);
+    await press('Zapisz i dodaj');
+
+    expect(saveDefinition).toHaveBeenCalledWith(expect.objectContaining({imageUrl: `file://${path}`}));
+    expect(addToInventoryBatch).toHaveBeenCalledWith([expect.any(String)], existing.ean, null, null);
+    expect(unlink).toHaveBeenCalledTimes(1);
+    expect(unlink).toHaveBeenCalledWith(path);
+    expect(onProductAdded).toHaveBeenCalledTimes(1);
+  });
+
   it('cleans the unused photo if a generic product was created after the lookup and kept its own photo', async () => {
     jest.mocked(launchImageLibrary).mockResolvedValue({assets: [{uri: 'file:///temporary/draft.jpg'}]});
     await openForm();

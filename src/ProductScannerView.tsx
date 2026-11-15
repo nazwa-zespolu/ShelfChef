@@ -803,11 +803,14 @@ function ProductScannerVisionContent({
             category: manualCategory.trim() || undefined,
             imageUrl: manualPhotoUri ?? undefined,
           };
-          await persistWithManualPhoto(photoDraft, manualPhotoUri, async () => {
+          definition = await persistWithManualPhoto(photoDraft, manualPhotoUri, async () => {
             await repo.saveDefinition(input);
-            return input;
+            const saved = await repo.findDefinitionByEan(normalizedEan);
+            if (!saved) {
+              throw new Error('Product definition not found after save');
+            }
+            return saved;
           });
-          definition = await repo.findDefinitionByEan(normalizedEan);
         }
         if (!definition) {
           throw new Error('Product definition not found after save');
