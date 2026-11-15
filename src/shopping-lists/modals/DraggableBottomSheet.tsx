@@ -19,6 +19,7 @@ export function DraggableBottomSheet({
   handleStyle,
   handleContent,
   overlay,
+  accessibilityContentHidden = false,
   children,
 }: {
   visible: boolean;
@@ -28,6 +29,7 @@ export function DraggableBottomSheet({
   handleStyle?: StyleProp<ViewStyle>;
   handleContent?: React.ReactNode;
   overlay?: React.ReactNode;
+  accessibilityContentHidden?: boolean;
   children: React.ReactNode;
 }) {
   const translateY = useRef(new Animated.Value(0)).current;
@@ -83,11 +85,16 @@ export function DraggableBottomSheet({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <Pressable
+          accessibilityElementsHidden={accessibilityContentHidden}
+          importantForAccessibility={accessibilityContentHidden ? 'no-hide-descendants' : 'auto'}
           accessibilityLabel={accessibilityLabel}
           onPress={onClose}
           style={StyleSheet.absoluteFill}
         />
-        <Animated.View style={[styles.sheet, sheetStyle, {transform: [{translateY}]}]}>
+        <Animated.View
+          accessibilityElementsHidden={accessibilityContentHidden}
+          importantForAccessibility={accessibilityContentHidden ? 'no-hide-descendants' : 'auto'}
+          style={[styles.sheet, sheetStyle, {transform: [{translateY}]}]}>
           <View style={[styles.handleTouch, handleStyle]} {...dragResponder.panHandlers}>
             <View style={styles.handle} />
             {handleContent}

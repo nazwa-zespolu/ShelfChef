@@ -46,6 +46,7 @@ jest.mock('lucide-react-native', () => {
     Clock3: MockIcon,
     Package: MockIcon,
     Search: MockIcon,
+    Check: MockIcon,
   };
 });
 
@@ -56,6 +57,7 @@ const inventoryItem = (
   overrides: Partial<InventoryItem> = {},
 ): InventoryItem => ({
   id,
+  catalogProductId: null,
   ean: '',
   name,
   expiryDate,
@@ -296,7 +298,7 @@ describe('UI: HomeView', () => {
 
     expect(updateInventoryItem).toHaveBeenCalledWith('1', {
       expiryDate: '2026-04-15',
-      openedAt: expect.any(String),
+      opening: {isOpened: true, openedAt: expect.any(String)},
     });
   });
 
@@ -325,7 +327,7 @@ describe('UI: HomeView', () => {
 
     expect(updateInventoryItem).toHaveBeenCalledWith('1', {
       expiryDate: null,
-      openedAt: null,
+      opening: {isOpened: false, openedAt: null},
     });
   });
 
@@ -372,7 +374,7 @@ describe('UI: HomeView', () => {
 
     expect(updateInventoryItem).toHaveBeenCalledWith('1', {
       expiryDate: '2026-05-01',
-      openedAt: expectedOpenedAt.toISOString(),
+      opening: {isOpened: true, openedAt: expectedOpenedAt.toISOString()},
     });
   });
 
@@ -395,8 +397,53 @@ describe('UI: HomeView', () => {
 
     expect(updateInventoryItem).toHaveBeenCalledWith('1', {
       expiryDate: null,
-      openedAt,
     });
+    expect(displayedItems()[0]).toMatchObject({isOpened: true, openedAt});
+  });
+
+  it.each([
+    ['missing', null],
+    ['undefined', undefined],
+    ['invalid', 'not-a-date'],
+    ['future', '2099-01-01T10:00:00.000Z'],
+  ] as const)('preserves the opened state and %s date in the pantry after an expiry-only save', async (_, openedAt) => {
+    const selected = inventoryItem('1', 'Jogurt', '2026-04-09', {isOpened: true, openedAt});
+    const other = inventoryItem('2', 'Jogurt', '2026-04-20', {isOpened: true, openedAt: '2026-04-07T09:00:00.000Z'});
+    await renderHome([selected, other]);
+    await press('product-card-1');
+    expect(displayedTexts()).toContain('Brak daty otwarcia');
+    await changeExpiryDay(15);
+    await press('product-details-save');
+
+    expect(updateInventoryItem).toHaveBeenCalledWith('1', {expiryDate: '2026-04-15'});
+    expect(displayedItems().find(item => item.id === '1')).toEqual({...selected, expiryDate: '2026-04-15'});
+    expect(displayedItems().find(item => item.id === '2')).toEqual(other);
+    await press('product-card-1');
+    expect(displayedTexts()).toContain('Brak daty otwarcia');
+    expect(renderer!.root.findByProps({testID: 'product-opening-date-field'})).toBeDefined();
+  });
+
+  it('updates the pantry when the user explicitly sets a previously missing opening date', async () => {
+    await renderHome([inventoryItem('1', 'Jogurt', '2026-04-09', {isOpened: true, openedAt: null})]);
+    await press('product-card-1');
+    await press('product-opening-date-field');
+    await press('product-details-save');
+    expect(updateInventoryItem).toHaveBeenCalledWith('1', {
+      expiryDate: '2026-04-09', opening: {isOpened: true, openedAt: new Date().toISOString()},
+    });
+    expect(displayedItems()[0]).toMatchObject({isOpened: true, openedAt: new Date().toISOString()});
+  });
+
+  it('discards a newly chosen opening date when the user cancels', async () => {
+    const selected = inventoryItem('1', 'Jogurt', '2026-04-09', {isOpened: true, openedAt: null});
+    await renderHome([selected]);
+    await press('product-card-1');
+    await press('product-opening-date-field');
+    await press('product-details-cancel');
+    expect(updateInventoryItem).not.toHaveBeenCalled();
+    expect(displayedItems()).toEqual([selected]);
+    await press('product-card-1');
+    expect(displayedTexts()).toContain('Brak daty otwarcia');
   });
 
   it('preserves the draft and inventory after a failed save and allows retrying', async () => {
@@ -429,14 +476,14 @@ describe('UI: HomeView', () => {
       await retrySave.promise;
     });
 
-    const changes = {expiryDate: '2026-04-15', openedAt};
+    const changes = {expiryDate: '2026-04-15', opening: {isOpened: true, openedAt}};
     expect(updateInventoryItem).toHaveBeenCalledTimes(2);
     expect(updateInventoryItem).toHaveBeenNthCalledWith(1, '1', changes);
     expect(updateInventoryItem).toHaveBeenNthCalledWith(2, '1', changes);
     expect(renderer!.root.findAllByProps({testID: 'product-details-save'})).toHaveLength(0);
     expect(displayedTexts()).not.toContain('Nie udało się zapisać zmian. Spróbuj ponownie.');
     expect(displayedItems()).toEqual([
-      {...items[0], ...changes, isOpened: true},
+      {...items[0], expiryDate: changes.expiryDate, ...changes.opening},
     ]);
   });
 
@@ -579,7 +626,7 @@ describe('UI: HomeView', () => {
 
     expect(updateInventoryItem).toHaveBeenCalledWith('1', {
       expiryDate: '2026-04-15',
-      openedAt: new Date().toISOString(),
+      opening: {isOpened: true, openedAt: new Date().toISOString()},
     });
     expect(displayedItems()).toHaveLength(2);
     expect(displayedItems().find(item => item.id === '1')).toMatchObject({

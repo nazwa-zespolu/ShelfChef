@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import {colors} from '../theme/colors';
+import {shadows} from '../theme/shadows';
 
 const WHEEL_ITEM_HEIGHT = 34;
 const WHEEL_VISIBLE_ROWS = 3;
@@ -54,29 +55,31 @@ export default function WheelPicker({
   return (
     <View style={styles.wheelColumn}>
       <Text style={styles.wheelLabel}>{label}</Text>
-      <View style={styles.wheelFrame}>
-        <View pointerEvents="none" style={styles.wheelSelectionLine} />
-        <ScrollView
-          ref={scrollRef}
-          showsVerticalScrollIndicator={false}
-          snapToInterval={WHEEL_ITEM_HEIGHT}
-          decelerationRate="fast"
-          nestedScrollEnabled
-          onScrollBeginDrag={() => onInteractionStart?.()}
-          onMomentumScrollEnd={handleScrollEnd}
-          onScrollEndDrag={handleScrollEnd}
-          contentContainerStyle={styles.wheelContent}>
-          {values.map(value => {
-            const isSelected = value === selectedValue;
-            return (
-              <View key={`${label}-${value}`} style={styles.wheelItem}>
-                <Text style={[styles.wheelItemText, isSelected && styles.wheelItemTextSelected]}>
-                  {String(value).padStart(2, '0')}
-                </Text>
-              </View>
-            );
-          })}
-        </ScrollView>
+      <View style={styles.wheelSurface}>
+        <View style={styles.wheelFrame}>
+          <View pointerEvents="none" style={styles.wheelSelectionLine} />
+          <ScrollView
+            ref={scrollRef}
+            showsVerticalScrollIndicator={false}
+            snapToInterval={WHEEL_ITEM_HEIGHT}
+            decelerationRate="fast"
+            nestedScrollEnabled
+            onScrollBeginDrag={() => onInteractionStart?.()}
+            onMomentumScrollEnd={handleScrollEnd}
+            onScrollEndDrag={handleScrollEnd}
+            contentContainerStyle={styles.wheelContent}>
+            {values.map(value => {
+              const isSelected = value === selectedValue;
+              return (
+                <View key={`${label}-${value}`} style={styles.wheelItem}>
+                  <Text style={[styles.wheelItemText, isSelected && styles.wheelItemTextSelected]}>
+                    {String(value).padStart(2, '0')}
+                  </Text>
+                </View>
+              );
+            })}
+          </ScrollView>
+        </View>
       </View>
     </View>
   );
@@ -90,6 +93,11 @@ const styles = StyleSheet.create({
   wheelLabel: {
     color: colors.textSecondary,
     fontSize: 12,
+  },
+  wheelSurface: {
+    ...shadows.control,
+    borderRadius: 10,
+    backgroundColor: colors.surfaceMuted,
   },
   wheelFrame: {
     height: WHEEL_HEIGHT,

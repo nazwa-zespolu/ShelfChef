@@ -1,5 +1,7 @@
-import { db } from './db/init';
-import { CatalogProduct, DietaryFlags, ProductDefinition, InventoryItem } from '../domain/types';
+import { db, runInTransaction } from './db/init';
+import {normalizeProductName} from '../domain/productNames';
+import {assertProductPhotoWritable, cleanupUnusedProductPhotos} from './productPhotoFiles';
+import { CatalogProduct, DietaryFlags, ProductDefinition, InventoryItem, InventoryItemChanges } from '../domain/types';
 import { DietPreference } from '../features/recipe-generator/domain/recipeGenerationTypes';
 import {
   DietaryCategorizationCandidate,
@@ -7,9 +9,7 @@ import {
   matchesDietPreference,
 } from '../features/recipe-generator/domain/dietaryCategorizationTypes';
 
-export function normalizeProductName(name: string): string {
-  return name.trim().toLowerCase();
-}
+export {normalizeProductName};
 
 function mapCatalogProduct(row: Record<string, any>): CatalogProduct {
   return {
@@ -18,6 +18,8 @@ function mapCatalogProduct(row: Record<string, any>): CatalogProduct {
     normalizedName: row.normalized_name,
     kind: row.kind,
     productEan: row.product_ean ?? null,
+    brand: row.brand ?? null,
+    category: row.category ?? null,
     imageUrl: row.image_url ?? null,
     parentCatalogProductId: row.parent_catalog_product_id ?? null,
     createdAt: row.created_at,
@@ -31,9 +33,41 @@ export interface ProductRepositoryDebugSnapshot {
   appSettings: Record<string, unknown>[];
 }
 
-export interface UpdateInventoryItemInput {
-  expiryDate: string | null;
-  openedAt: string | null;
+export type UpdateInventoryItemInput = InventoryItemChanges;
+
+export interface SaveGenericCatalogProductInput {
+  name: string;
+  brand?: string | null;
+  category?: string | null;
+  imageUrl?: string | null;
+}
+
+export interface UpdateCatalogProductInput {
+  name: string;
+  brand: string | null;
+  category: string | null;
+  // Omitted keeps the current photo; null explicitly removes it.
+  imageUrl?: string | null;
+}
+
+export class CatalogProductUpdateError extends Error {
+  constructor(
+    readonly code: 'empty_name' | 'duplicate_name' | 'not_found',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'CatalogProductUpdateError';
+  }
+}
+
+export class CatalogProductDeleteError extends Error {
+  constructor(
+    readonly code: 'not_found' | 'in_inventory' | 'in_shopping_list' | 'has_children',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'CatalogProductDeleteError';
+  }
 }
 
 export class ProductRepository {
@@ -57,76 +91,66 @@ export class ProductRepository {
   }
 
   async saveDefinition(def: ProductDefinition): Promise<void> {
-    const dietary = def.dietary;
-    db.execute(
-      `INSERT INTO product_definitions (
-         ean, name, brand, image_url, category,
-         is_vegetarian, is_vegan, is_gluten_free, is_lactose_free
-       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(ean) DO UPDATE SET
-         name = excluded.name,
-         brand = excluded.brand,
-         image_url = COALESCE(excluded.image_url, product_definitions.image_url),
-         category = excluded.category,
-         is_vegetarian = COALESCE(excluded.is_vegetarian, product_definitions.is_vegetarian),
-         is_vegan = COALESCE(excluded.is_vegan, product_definitions.is_vegan),
-         is_gluten_free = COALESCE(excluded.is_gluten_free, product_definitions.is_gluten_free),
-         is_lactose_free = COALESCE(excluded.is_lactose_free, product_definitions.is_lactose_free)`,
-      [
-        def.ean,
-        def.name,
-        def.brand,
-        def.imageUrl,
-        def.category,
-        dietary?.isVegetarian ?? null,
-        dietary?.isVegan ?? null,
-        dietary?.isGlutenFree ?? null,
-        dietary?.isLactoseFree ?? null,
-      ],
-    );
-    db.execute(
-      `
-        INSERT OR REPLACE INTO product_catalog (
-          id,
-          name,
-          normalized_name,
-          kind,
-          product_ean,
-          image_url,
-          parent_catalog_product_id,
-          created_at,
-          updated_at
-        )
-        VALUES (
-          COALESCE((SELECT id FROM product_catalog WHERE product_ean = ?), ?),
-          ?,
-          ?,
-          'specific',
-          ?,
-          COALESCE(?, (SELECT image_url FROM product_catalog WHERE product_ean = ?)),
-          COALESCE((SELECT parent_catalog_product_id FROM product_catalog WHERE product_ean = ?), NULL),
-          COALESCE((SELECT created_at FROM product_catalog WHERE product_ean = ?), datetime('now')),
-          datetime('now')
-        )
-      `,
-      [
-        def.ean,
-        `catalog-specific-${def.ean}`,
-        def.name,
-        normalizeProductName(def.name),
-        def.ean,
-        def.imageUrl ?? null,
-        def.ean,
-        def.ean,
-        def.ean,
-      ],
-    );
+    runInTransaction(() => {
+      // Adding another copy must never edit the shared product definition.
+      // Existing products are edited explicitly through updateCatalogProduct.
+      const existing = db.execute('SELECT ean FROM product_definitions WHERE ean = ?', [def.ean]);
+      if (existing.rows?.length) {
+        return;
+      }
+      assertProductPhotoWritable(def.imageUrl);
+      const dietary = def.dietary;
+      db.execute(
+        `INSERT INTO product_definitions (
+           ean, name, brand, image_url, category,
+           is_vegetarian, is_vegan, is_gluten_free, is_lactose_free
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(ean) DO NOTHING`,
+        [
+          def.ean,
+          def.name,
+          def.brand,
+          def.imageUrl,
+          def.category,
+          dietary?.isVegetarian ?? null,
+          dietary?.isVegan ?? null,
+          dietary?.isGlutenFree ?? null,
+          dietary?.isLactoseFree ?? null,
+        ],
+      );
+      db.execute(
+        `INSERT INTO product_catalog (
+           id, name, normalized_name, kind, product_ean, image_url,
+           parent_catalog_product_id, created_at, updated_at
+         )
+         VALUES (?, ?, ?, 'specific', ?, ?, NULL, datetime('now'), datetime('now'))
+         ON CONFLICT(product_ean) WHERE product_ean IS NOT NULL DO NOTHING`,
+        [
+          `catalog-specific-${def.ean}`,
+          def.name,
+          normalizeProductName(def.name),
+          def.ean,
+          def.imageUrl ?? null,
+        ],
+      );
+    });
   }
 
-  async saveGenericCatalogProduct(name: string, imageUrl?: string | null): Promise<CatalogProduct> {
-    const trimmedName = name.trim();
+  async saveGenericCatalogProduct(input: SaveGenericCatalogProductInput): Promise<CatalogProduct> {
+    return runInTransaction(() => this.saveGenericCatalogProductInTransaction(input));
+  }
+
+  // The caller owns the transaction so catalog creation can commit with inventory writes.
+  saveGenericCatalogProductInTransaction(input: SaveGenericCatalogProductInput): CatalogProduct {
+    // Reusing a name adds copies; shared data is edited only through the catalog.
+    const trimmedName = input.name.trim();
     const normalizedName = normalizeProductName(trimmedName);
+    const existing = this.readCatalogProducts('catalog.kind = ? AND catalog.normalized_name = ?', ['generic', normalizedName])[0];
+    if (existing) {
+      return existing;
+    }
+    assertProductPhotoWritable(input.imageUrl);
     const id = `catalog-generic-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
     db.execute(
       `
@@ -136,21 +160,27 @@ export class ProductRepository {
           normalized_name,
           kind,
           product_ean,
+          brand,
+          category,
           image_url,
           parent_catalog_product_id,
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, 'generic', NULL, ?, NULL, datetime('now'), datetime('now'))
-        ON CONFLICT(kind, normalized_name) WHERE kind = 'generic' DO UPDATE SET
-          name = excluded.name,
-          image_url = COALESCE(excluded.image_url, product_catalog.image_url),
-          updated_at = datetime('now')
+        VALUES (?, ?, ?, 'generic', NULL, ?, ?, ?, NULL, datetime('now'), datetime('now'))
+        ON CONFLICT(kind, normalized_name) WHERE kind = 'generic' DO NOTHING
       `,
-      [id, trimmedName, normalizedName, imageUrl ?? null],
+      [
+        id,
+        trimmedName,
+        normalizedName,
+        input.brand?.trim() || null,
+        input.category?.trim() || null,
+        input.imageUrl ?? null,
+      ],
     );
 
-    const found = await this.findCatalogProductByNormalizedName('generic', normalizedName);
+    const found = this.readCatalogProducts('catalog.kind = ? AND catalog.normalized_name = ?', ['generic', normalizedName])[0];
     if (!found) {
       throw new Error(`Catalog product not found after save: ${trimmedName}`);
     }
@@ -161,40 +191,137 @@ export class ProductRepository {
     kind: CatalogProduct['kind'],
     normalizedName: string,
   ): Promise<CatalogProduct | null> {
-    const result = db.execute(
-      `
-        SELECT
-          catalog.*,
-          COALESCE(catalog.image_url, definition.image_url) AS image_url
-        FROM product_catalog catalog
-        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
-        WHERE catalog.kind = ?
-          AND catalog.normalized_name = ?
-      `,
-      [kind, normalizedName],
-    );
-    if (!result.rows || result.rows.length === 0) {
-      return null;
-    }
-    return mapCatalogProduct(result.rows.item(0));
+    return this.readCatalogProducts('catalog.kind = ? AND catalog.normalized_name = ?', [kind, normalizedName])[0] ?? null;
   }
 
   async findCatalogProductByEan(ean: string): Promise<CatalogProduct | null> {
-    const result = db.execute(
-      `
-        SELECT
-          catalog.*,
-          COALESCE(catalog.image_url, definition.image_url) AS image_url
-        FROM product_catalog catalog
-        LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
-        WHERE catalog.product_ean = ?
-      `,
-      [ean],
-    );
-    if (!result.rows || result.rows.length === 0) {
-      return null;
+    return this.readCatalogProducts('catalog.product_ean = ?', [ean])[0] ?? null;
+  }
+
+  async findCatalogProductById(id: string): Promise<CatalogProduct | null> {
+    return this.readCatalogProducts('catalog.id = ?', [id])[0] ?? null;
+  }
+
+  async getCatalogProducts(): Promise<CatalogProduct[]> {
+    return this.readCatalogProducts('1 = 1');
+  }
+
+  async searchCatalogProducts(query: string, limit?: number): Promise<CatalogProduct[]> {
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+      throw new Error('Catalog search limit must be a positive integer');
     }
-    return mapCatalogProduct(result.rows.item(0));
+    const escapedQuery = normalizeProductName(query).replace(/[\\%_]/g, character => `\\${character}`);
+    const pattern = `%${escapedQuery}%`;
+    return this.readCatalogProducts(
+      "catalog.normalized_name LIKE ? ESCAPE '\\' OR catalog.product_ean LIKE ? ESCAPE '\\'",
+      [pattern, pattern],
+      limit,
+    );
+  }
+
+  async updateCatalogProduct(id: string, input: UpdateCatalogProductInput): Promise<CatalogProduct> {
+    const name = input.name.trim();
+    if (!name) {
+      throw new CatalogProductUpdateError('empty_name', 'Product name cannot be empty');
+    }
+    const normalizedName = normalizeProductName(name);
+    const brand = input.brand?.trim() || null;
+    const category = input.category?.trim() || null;
+
+    const result = runInTransaction(() => {
+      const product = this.readCatalogProducts('catalog.id = ?', [id])[0];
+      if (!product) {
+        throw new CatalogProductUpdateError('not_found', `Catalog product not found: ${id}`);
+      }
+      const previousPhotos = this.readStoredProductPhotos(id, product.productEan);
+      const imageUrl = input.imageUrl === undefined ? product.imageUrl : input.imageUrl;
+      assertProductPhotoWritable(imageUrl);
+      if (product.kind === 'generic') {
+        const duplicate = this.readCatalogProducts(
+          "catalog.kind = 'generic' AND catalog.normalized_name = ? AND catalog.id <> ?",
+          [normalizedName, id],
+        )[0];
+        if (duplicate) {
+          throw new CatalogProductUpdateError('duplicate_name', 'A generic product with this name already exists');
+        }
+        db.execute(
+          `UPDATE product_catalog
+           SET name = ?, normalized_name = ?, brand = ?, category = ?, image_url = ?, updated_at = datetime('now')
+           WHERE id = ?`,
+          [name, normalizedName, brand, category, imageUrl, id],
+        );
+      } else {
+        const definition = db.execute('SELECT ean FROM product_definitions WHERE ean = ?', [product.productEan]);
+        if (!definition.rows?.length) {
+          throw new CatalogProductUpdateError('not_found', `Product definition not found: ${product.productEan}`);
+        }
+        db.execute(
+          'UPDATE product_definitions SET name = ?, brand = ?, category = ?, image_url = ? WHERE ean = ?',
+          [name, brand, category, imageUrl, product.productEan],
+        );
+        db.execute(
+          `UPDATE product_catalog SET name = ?, normalized_name = ?, image_url = ?, updated_at = datetime('now') WHERE id = ?`,
+          [name, normalizedName, imageUrl, id],
+        );
+      }
+      if (product.name !== name) {
+        db.execute(
+          'UPDATE shopping_list_items SET label = ?, updated_at = ? WHERE catalog_product_id = ?',
+          [name, new Date().toISOString(), id],
+        );
+      }
+      return {product: this.readCatalogProducts('catalog.id = ?', [id])[0], previousPhotos};
+    });
+    await cleanupUnusedProductPhotos(result.previousPhotos);
+    return result.product;
+  }
+
+  async deleteCatalogProduct(id: string): Promise<void> {
+    const previousPhotos = runInTransaction(() => {
+      const product = this.readCatalogProducts('catalog.id = ?', [id])[0];
+      if (!product) {
+        throw new CatalogProductDeleteError('not_found', `Catalog product not found: ${id}`);
+      }
+      // Check references explicitly: native SQLite does not enable foreign keys.
+      // EAN also protects inventory rows without a catalog link.
+      if (db.execute(
+        'SELECT 1 FROM inventory WHERE catalog_product_id = ? OR product_ean = ? LIMIT 1',
+        [id, product.productEan],
+      ).rows?.length) {
+        throw new CatalogProductDeleteError('in_inventory', 'Product has inventory copies');
+      }
+      if (db.execute(
+        `SELECT 1 FROM shopping_list_items WHERE catalog_product_id = ?
+         UNION ALL
+         SELECT 1 FROM shopping_list_item_catalog_products WHERE catalog_product_id = ?
+         LIMIT 1`,
+        [id, id],
+      ).rows?.length) {
+        throw new CatalogProductDeleteError('in_shopping_list', 'Product is linked to a shopping list');
+      }
+      if (db.execute(
+        'SELECT 1 FROM product_catalog WHERE parent_catalog_product_id = ? LIMIT 1', [id],
+      ).rows?.length) {
+        throw new CatalogProductDeleteError('has_children', 'Product has catalog children');
+      }
+      const photos = this.readStoredProductPhotos(id, product.productEan);
+      db.execute('DELETE FROM product_catalog WHERE id = ?', [id]);
+      if (product.productEan) {
+        // Leaving the definition would recreate the catalog row on startup.
+        db.execute('DELETE FROM product_definitions WHERE ean = ?', [product.productEan]);
+      }
+      return photos;
+    });
+    await cleanupUnusedProductPhotos(previousPhotos);
+  }
+
+  private readStoredProductPhotos(id: string, ean: string | null): Array<string | null> {
+    const result = db.execute(
+      `SELECT image_url FROM product_catalog WHERE id = ?
+       UNION ALL SELECT image_url FROM product_definitions WHERE ean = ?`,
+      [id, ean],
+    );
+    return Array.from({length: result.rows?.length ?? 0}, (_, index) => result.rows!.item(index).image_url);
   }
 
   async searchDefinitions(query: string): Promise<ProductDefinition[]> {
@@ -242,20 +369,30 @@ export class ProductRepository {
   }
 
   async countFreshInventoryByCustomName(name: string, todayIso: string): Promise<number> {
+    const normalizedName = normalizeProductName(name);
     const result = db.execute(
       `
-        SELECT COUNT(*) AS count
-        FROM inventory
-        WHERE product_ean IS NULL
-          AND lower(trim(custom_name)) = ?
-          AND (expiry_date IS NULL OR expiry_date >= ?)
+        SELECT catalog.normalized_name, i.custom_name
+        FROM inventory i
+        LEFT JOIN product_catalog catalog ON i.catalog_product_id = catalog.id
+        WHERE i.product_ean IS NULL
+          AND (i.expiry_date IS NULL OR i.expiry_date >= ?)
       `,
-      [normalizeProductName(name), todayIso],
+      [todayIso],
     );
-    if (!result.rows || result.rows.length === 0) {
-      return 0;
+    let count = 0;
+    if (result.rows) {
+      for (let i = 0; i < result.rows.length; i++) {
+        const row = result.rows.item(i);
+        const candidate = row.normalized_name ?? (
+          row.custom_name == null ? null : normalizeProductName(row.custom_name)
+        );
+        if (candidate === normalizedName) {
+          count += 1;
+        }
+      }
     }
-    return Number(result.rows.item(0).count ?? 0);
+    return count;
   }
 
   async addToInventory(
@@ -263,17 +400,68 @@ export class ProductRepository {
     ean: string | null,
     customName: string | null,
     expiryDate: string | null,
+    catalogProductId?: string,
   ): Promise<void> {
-    db.execute(
-      `INSERT INTO inventory (
-        id,
-        product_ean,
-        custom_name,
-        expiry_date,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?)`,
-      [id, ean, customName, expiryDate, new Date().toISOString()],
-    );
+    return this.addToInventoryBatch([id], ean, customName, expiryDate, catalogProductId);
+  }
+
+  async addToInventoryBatch(
+    ids: readonly string[],
+    ean: string | null,
+    customName: string | null,
+    expiryDate: string | null,
+    catalogProductId?: string,
+  ): Promise<void> {
+    if (ids.length === 0) {
+      throw new Error('At least one inventory ID is required');
+    }
+    runInTransaction(() => {
+      const resolvedCatalogId = this.resolveInventoryCatalogProductId(ean, customName, catalogProductId);
+      const createdAt = new Date().toISOString();
+      for (const id of ids) {
+        db.execute(
+          `INSERT INTO inventory (
+            id,
+            catalog_product_id,
+            product_ean,
+            custom_name,
+            expiry_date,
+            created_at
+          ) VALUES (?, ?, ?, ?, ?, ?)`,
+          [id, resolvedCatalogId, ean, customName, expiryDate, createdAt],
+        );
+      }
+    });
+  }
+
+  private resolveInventoryCatalogProductId(
+    ean: string | null,
+    customName: string | null,
+    catalogProductId?: string,
+  ): string | null {
+    if (catalogProductId !== undefined) {
+      const result = db.execute('SELECT id, product_ean FROM product_catalog WHERE id = ?', [catalogProductId]);
+      const catalog = result.rows?.length ? result.rows.item(0) : null;
+      if (!catalog) {
+        throw new Error(`Catalog product not found: ${catalogProductId}`);
+      }
+      if ((catalog.product_ean ?? null) !== ean) {
+        throw new Error('Inventory EAN does not match the catalog product');
+      }
+      return catalog.id;
+    }
+    if (ean) {
+      const result = db.execute('SELECT id FROM product_catalog WHERE product_ean = ?', [ean]);
+      return result.rows?.length ? result.rows.item(0).id : null;
+    }
+    if (customName) {
+      const result = db.execute(
+        "SELECT id FROM product_catalog WHERE kind = 'generic' AND normalized_name = ?",
+        [normalizeProductName(customName)],
+      );
+      return result.rows?.length ? result.rows.item(0).id : null;
+    }
+    return null;
   }
 
   async countItemsPendingDietaryCategorization(): Promise<number> {
@@ -281,13 +469,14 @@ export class ProductRepository {
       `SELECT COUNT(*) AS count
        FROM inventory i
        LEFT JOIN product_definitions d ON i.product_ean = d.ean
+       LEFT JOIN product_catalog catalog ON i.catalog_product_id = catalog.id
        WHERE (
          i.product_ean IS NOT NULL
          AND TRIM(COALESCE(d.name, '')) <> ''
          AND d.is_vegetarian IS NULL
        ) OR (
          i.product_ean IS NULL
-         AND TRIM(COALESCE(i.custom_name, '')) <> ''
+         AND TRIM(COALESCE(catalog.name, i.custom_name, '')) <> ''
          AND i.is_vegetarian IS NULL
        )`,
     );
@@ -306,16 +495,18 @@ export class ProductRepository {
   ): Promise<DietaryCategorizationCandidate[]> {
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 50;
     const result = db.execute(
-      `SELECT i.id AS inventory_id, i.product_ean, i.custom_name, d.name AS definition_name
+      `SELECT i.id AS inventory_id, i.product_ean,
+              COALESCE(catalog.name, i.custom_name) AS custom_name, d.name AS definition_name
        FROM inventory i
        LEFT JOIN product_definitions d ON i.product_ean = d.ean
+       LEFT JOIN product_catalog catalog ON i.catalog_product_id = catalog.id
        WHERE (
          i.product_ean IS NOT NULL
          AND TRIM(COALESCE(d.name, '')) <> ''
          AND d.is_vegetarian IS NULL
        ) OR (
          i.product_ean IS NULL
-         AND TRIM(COALESCE(i.custom_name, '')) <> ''
+         AND TRIM(COALESCE(catalog.name, i.custom_name, '')) <> ''
          AND i.is_vegetarian IS NULL
        )
        ORDER BY i.id
@@ -422,7 +613,7 @@ export class ProductRepository {
   async getRecipeIngredientNames(diet: DietPreference = 'none'): Promise<string[]> {
     const result = db.execute(
       `SELECT
-         i.custom_name,
+         COALESCE(catalog.name, i.custom_name) AS custom_name,
          d.name AS definition_name,
          COALESCE(i.is_vegetarian, d.is_vegetarian) AS is_vegetarian,
          COALESCE(i.is_vegan, d.is_vegan) AS is_vegan,
@@ -430,6 +621,7 @@ export class ProductRepository {
          COALESCE(i.is_lactose_free, d.is_lactose_free) AS is_lactose_free
        FROM inventory i
        LEFT JOIN product_definitions d ON i.product_ean = d.ean
+       LEFT JOIN product_catalog catalog ON i.catalog_product_id = catalog.id
        ORDER BY i.expiry_date ASC`,
     );
 
@@ -475,7 +667,7 @@ export class ProductRepository {
     );
     const inventory = this.rowsToArray(
       db.execute(
-        `SELECT id, product_ean, custom_name, expiry_date, is_opened, opened_at,
+        `SELECT id, catalog_product_id, product_ean, custom_name, expiry_date, is_opened, opened_at,
                 is_vegetarian, is_vegan, is_gluten_free, is_lactose_free
          FROM inventory
          ORDER BY expiry_date ASC
@@ -503,18 +695,15 @@ export class ProductRepository {
   async getFullInventory(): Promise<InventoryItem[]> {
     const query = `
       SELECT 
-        i.id, i.expiry_date, i.opened_at, i.is_opened, i.custom_name, i.created_at,
+        i.id, i.catalog_product_id, i.expiry_date, i.opened_at, i.is_opened, i.custom_name, i.created_at,
         COALESCE(d.ean, i.product_ean) AS ean,
-        d.name, d.brand,
-        COALESCE(specific_catalog.image_url, generic_catalog.image_url, d.image_url) AS image_url,
-        d.category
+        COALESCE(d.name, catalog.name, i.custom_name) AS name,
+        COALESCE(d.brand, catalog.brand) AS brand,
+        COALESCE(catalog.image_url, d.image_url) AS image_url,
+        COALESCE(d.category, catalog.category) AS category
       FROM inventory i
       LEFT JOIN product_definitions d ON i.product_ean = d.ean
-      LEFT JOIN product_catalog specific_catalog ON i.product_ean = specific_catalog.product_ean
-      LEFT JOIN product_catalog generic_catalog
-        ON i.product_ean IS NULL
-       AND generic_catalog.kind = 'generic'
-       AND generic_catalog.normalized_name = lower(trim(i.custom_name))
+      LEFT JOIN product_catalog catalog ON i.catalog_product_id = catalog.id
       ORDER BY i.expiry_date ASC
     `;
 
@@ -526,6 +715,7 @@ export class ProductRepository {
         const row = result.rows.item(i);
         items.push({
           id: row.id,
+          catalogProductId: row.catalog_product_id ?? null,
           ean: row.ean || '',
           name: row.name || row.custom_name,
           brand: row.brand,
@@ -550,11 +740,15 @@ export class ProductRepository {
   }
 
   async updateInventoryItem(id: string, input: UpdateInventoryItemInput): Promise<void> {
+    if (!input.opening) {
+      db.execute('UPDATE inventory SET expiry_date = ? WHERE id = ?', [input.expiryDate, id]);
+      return;
+    }
     db.execute(
       `UPDATE inventory
        SET expiry_date = ?, is_opened = ?, opened_at = ?
        WHERE id = ?`,
-      [input.expiryDate, input.openedAt === null ? 0 : 1, input.openedAt, id],
+      [input.expiryDate, input.opening.isOpened ? 1 : 0, input.opening.isOpened ? input.opening.openedAt : null, id],
     );
   }
 
@@ -583,6 +777,32 @@ export class ProductRepository {
       'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
       [ProductRepository.RECIPE_MODEL_CONSENT_KEY, granted ? '1' : '0'],
     );
+  }
+
+  private readCatalogProducts(
+    condition: string,
+    params: (string | number)[] = [],
+    limit?: number,
+  ): CatalogProduct[] {
+    const result = db.execute(
+      `SELECT catalog.*,
+              COALESCE(definition.brand, catalog.brand) AS brand,
+              COALESCE(definition.category, catalog.category) AS category,
+              COALESCE(catalog.image_url, definition.image_url) AS image_url
+       FROM product_catalog catalog
+       LEFT JOIN product_definitions definition ON catalog.product_ean = definition.ean
+       WHERE ${condition}
+       ORDER BY catalog.kind ASC, catalog.name ASC, catalog.id ASC
+       ${limit === undefined ? '' : 'LIMIT ?'}`,
+      limit === undefined ? params : [...params, limit],
+    );
+    const products: CatalogProduct[] = [];
+    if (result.rows) {
+      for (let index = 0; index < result.rows.length; index++) {
+        products.push(mapCatalogProduct(result.rows.item(index)));
+      }
+    }
+    return products;
   }
 
   private readDietaryFlagsFromRow(

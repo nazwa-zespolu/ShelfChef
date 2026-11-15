@@ -1,4 +1,5 @@
 import { open } from 'react-native-quick-sqlite';
+import {normalizeProductName} from '../../domain/productNames';
 
 // Otwarcie bazy danych
 export const db = open({ name: 'shelfchef.db' });
@@ -22,6 +23,8 @@ function setupShoppingListsSchema() {
         normalized_name TEXT NOT NULL,
         kind TEXT NOT NULL CHECK(kind IN ('generic', 'specific')),
         product_ean TEXT,
+        brand TEXT,
+        category TEXT,
         image_url TEXT,
         parent_catalog_product_id TEXT,
         created_at TEXT NOT NULL,
@@ -95,30 +98,31 @@ function setupShoppingListsSchema() {
 
   createShoppingListItemCatalogProductsTable();
 
-  db.execute(`
-      INSERT OR IGNORE INTO product_catalog (
-        id,
-        name,
-        normalized_name,
-        kind,
-        product_ean,
-        image_url,
-        parent_catalog_product_id,
-        created_at,
-        updated_at
-      )
-      SELECT
-        'catalog-specific-' || ean,
-        name,
-        lower(trim(name)),
-        'specific',
-        ean,
-        image_url,
-        NULL,
-        datetime('now'),
-        datetime('now')
-      FROM product_definitions;
-    `);
+  const definitions = db.execute(`
+    SELECT definition.ean, definition.name, definition.image_url
+    FROM product_definitions definition
+    WHERE NOT EXISTS (
+      SELECT 1 FROM product_catalog catalog WHERE catalog.product_ean = definition.ean
+    )
+  `);
+  if (definitions.rows) {
+    for (let i = 0; i < definitions.rows.length; i++) {
+      const definition = definitions.rows.item(i);
+      db.execute(
+        `INSERT OR IGNORE INTO product_catalog (
+          id, name, normalized_name, kind, product_ean, image_url,
+          parent_catalog_product_id, created_at, updated_at
+        ) VALUES (?, ?, ?, 'specific', ?, ?, NULL, datetime('now'), datetime('now'))`,
+        [
+          `catalog-specific-${definition.ean}`,
+          definition.name,
+          normalizeProductName(definition.name),
+          definition.ean,
+          definition.image_url ?? null,
+        ],
+      );
+    }
+  }
 }
 
 function createShoppingListItemCatalogProductsTable() {
@@ -161,6 +165,7 @@ export const setupDatabase = () => runInTransaction(() => {
   db.execute(`
       CREATE TABLE IF NOT EXISTS inventory (
         id TEXT PRIMARY KEY,
+        catalog_product_id TEXT,
         product_ean TEXT,
         custom_name TEXT,
         expiry_date TEXT,
@@ -171,8 +176,13 @@ export const setupDatabase = () => runInTransaction(() => {
         is_gluten_free INTEGER,
         is_lactose_free INTEGER,
         created_at TEXT NOT NULL,
-        FOREIGN KEY(product_ean) REFERENCES product_definitions(ean)
+        FOREIGN KEY(product_ean) REFERENCES product_definitions(ean),
+        FOREIGN KEY(catalog_product_id) REFERENCES product_catalog(id)
       );
+    `);
+  db.execute(`
+      CREATE INDEX IF NOT EXISTS idx_inventory_catalog_product
+      ON inventory(catalog_product_id);
     `);
   db.execute(`
       CREATE TABLE IF NOT EXISTS app_settings (

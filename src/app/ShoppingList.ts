@@ -11,6 +11,7 @@ import {
   ShoppingSuggestion,
 } from '../domain/types';
 import type {ProductRepository} from '../infrastructure/ProductRepository';
+import {normalizeProductName} from '../domain/productNames';
 import type {
   AddAllSuggestionsSummary,
   AddShoppingItemInput,
@@ -474,8 +475,13 @@ export class ShoppingList {
     catalogProduct: CatalogProduct,
     catalogIndex: CatalogIndex,
   ): boolean {
+    if (item.catalogProductId === catalogProduct.id) {
+      return true;
+    }
+
     if (catalogProduct.kind === 'specific') {
-      return catalogProduct.productEan != null && item.ean === catalogProduct.productEan;
+      return !item.catalogProductId &&
+        catalogProduct.productEan != null && item.ean === catalogProduct.productEan;
     }
 
     if (item.ean) {
@@ -485,7 +491,10 @@ export class ShoppingList {
       }
     }
 
-    return normalizeProductName(item.name) === catalogProduct.normalizedName;
+    // Generic products with an explicit link retain their identity after a rename.
+    // Keep name matching for text entries and specific variants of generic groups.
+    return (!item.catalogProductId || Boolean(item.ean)) &&
+      normalizeProductName(item.name) === catalogProduct.normalizedName;
   }
 
   private inventoryMatchesShoppingItem(
@@ -536,8 +545,4 @@ export class ShoppingList {
     }
     return this.productRepository as ProductRepository;
   }
-}
-
-function normalizeProductName(name: string): string {
-  return name.trim().toLowerCase();
 }

@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Pressable,
   RefreshControl,
@@ -12,6 +13,7 @@ import {ShoppingBag} from 'lucide-react-native';
 import type {ShoppingListSummary, ShoppingSuggestion} from '../../domain/types';
 import {DEFAULT_SHOPPING_LIST_ICON_COLOR_KEY} from '../../shoppingListIcons';
 import {colors} from '../../theme/colors';
+import {shadowInsets, shadows} from '../../theme/shadows';
 import {EmptyState} from '../components/EmptyState';
 import {ShoppingItemIconBubble} from '../components/ShoppingItemIconBubble';
 
@@ -123,10 +125,18 @@ export function ReplenishmentSuggestionsScreen({
           </View>
         )}
         ListEmptyComponent={
-          <EmptyState
-            title="Wszystko uzupełnione"
-            description="Braki z aktywnych list auto pojawią się tutaj."
-          />
+          loading ? (
+            <View style={styles.loading}>
+              <ActivityIndicator color={colors.success} />
+              <Text style={styles.loadingText}>Wczytuję braki…</Text>
+            </View>
+          ) : (
+            <EmptyState
+              variant="complete"
+              title="Wszystko uzupełnione"
+              description="Braki z aktywnych list auto pojawią się tutaj."
+            />
+          )
         }
       />
     </View>
@@ -134,6 +144,8 @@ export function ReplenishmentSuggestionsScreen({
 }
 
 const styles = StyleSheet.create({
+  loading: {alignItems: 'center', gap: 12, padding: 28},
+  loadingText: {color: colors.textSecondary, fontSize: 14},
   content: {
     flex: 1,
   },
@@ -225,10 +237,12 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   suggestionsContent: {
-    paddingHorizontal: 16,
+    paddingTop: shadowInsets.card.top,
+    paddingHorizontal: shadowInsets.card.horizontal,
     paddingBottom: 24,
   },
   suggestionItemCard: {
+    ...shadows.card,
     minHeight: 92,
     borderRadius: 8,
     backgroundColor: colors.surface,
@@ -239,11 +253,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: {width: 0, height: 6},
-    elevation: 3,
     marginBottom: 12,
   },
   suggestionItemText: {

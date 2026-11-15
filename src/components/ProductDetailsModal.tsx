@@ -1,15 +1,14 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {AppState, Image, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {CalendarDays, Package} from 'lucide-react-native';
-import type {InventoryItem} from '../domain/types';
+import type {InventoryItem, InventoryItemChanges} from '../domain/types';
 import {colors} from '../theme/colors';
+import {shadowGutters, shadows} from '../theme/shadows';
 import {DraggableBottomSheet} from '../shopping-lists/modals/DraggableBottomSheet';
 import WheelPicker from './WheelPicker';
+import {useProductPhotoPreview} from './ProductPhotoPreview';
 
-export type ProductDetailsChanges = {
-  expiryDate: string | null;
-  openedAt: string | null;
-};
+export type ProductDetailsChanges = InventoryItemChanges;
 
 type DatePart = 'day' | 'month' | 'year';
 
@@ -129,11 +128,13 @@ export function ProductDetailsModal({
   onSave: (changes: ProductDetailsChanges) => void;
 }) {
   const [expiryDate, setExpiryDate] = useState<Date | null>(null);
+  const [isOpened, setIsOpened] = useState(false);
   const [openedAt, setOpenedAt] = useState<string | null>(null);
   const [datePickerVisible, setDatePickerVisible] = useState(false);
   const [openingDatePickerVisible, setOpeningDatePickerVisible] = useState(false);
   const [scrollEnabled, setScrollEnabled] = useState(true);
   const [today, setToday] = useState(() => new Date());
+  const photoPreview = useProductPhotoPreview({uri: item?.imageUrl, name: item?.name ?? '', ownerKey: item?.id ?? null});
 
   useEffect(() => {
     if (!item) {
@@ -166,10 +167,8 @@ export function ProductDetailsModal({
       return;
     }
     setExpiryDate(parseExpiryDate(item.expiryDate));
-    const storedOpenedAt = parseTimestamp(item.openedAt);
-    const now = new Date();
-    const initialOpenedAt = storedOpenedAt && storedOpenedAt <= now ? storedOpenedAt : now;
-    setOpenedAt(item.isOpened ? initialOpenedAt.toISOString() : null);
+    setIsOpened(item.isOpened);
+    setOpenedAt(item.openedAt ?? null);
     setDatePickerVisible(false);
     setOpeningDatePickerVisible(false);
     setScrollEnabled(true);
@@ -194,7 +193,8 @@ export function ProductDetailsModal({
       ),
     [activeMonth, selectedYear],
   );
-  const openingDate = useMemo(() => parseTimestamp(openedAt), [openedAt]);
+  const parsedOpeningDate = parseTimestamp(openedAt);
+  const openingDate = parsedOpeningDate && parsedOpeningDate.getTime() <= Date.now() ? parsedOpeningDate : null;
   const openingSelectedYear = openingDate?.getFullYear() ?? currentYear;
   const openingYears = useMemo(() => {
     const firstYear = Math.min(currentYear - 5, openingSelectedYear);
@@ -232,7 +232,8 @@ export function ProductDetailsModal({
   const updateOpeningDatePart = (part: DatePart, value: number) => {
     setOpenedAt(current => {
       const now = new Date();
-      const base = parseTimestamp(current) ?? now;
+      const storedDate = parseTimestamp(current);
+      const base = storedDate ?? now;
       const nextYear = part === 'year' ? value : base.getFullYear();
       const requestedMonth = part === 'month' ? value : base.getMonth() + 1;
       const nextMonth =
@@ -247,24 +248,35 @@ export function ProductDetailsModal({
       const requestedDay = part === 'day' ? value : base.getDate();
       const next = new Date(base);
       next.setFullYear(nextYear, nextMonth - 1, Math.min(requestedDay, allowedLastDay));
-      return (next.getTime() > now.getTime() ? now : next).toISOString();
+      const clamped = next.getTime() > now.getTime() ? now : next;
+      return storedDate && clamped.getTime() === storedDate.getTime() ? current : clamped.toISOString();
     });
   };
 
   const close = () => {
+    if (photoPreview.close()) {
+      return;
+    }
     if (!busy) {
       onClose();
     }
   };
 
   const submit = () => {
-    if (busy) {
+    if (busy || !item) {
       return;
     }
-    onSave({
+    const changes: ProductDetailsChanges = {
       expiryDate: expiryDate ? formatExpiryForDatabase(expiryDate) : null,
-      openedAt,
-    });
+    };
+    const storedDate = parseTimestamp(item.openedAt);
+    const sameOpeningDate = openedAt === (item.openedAt ?? null) || Boolean(
+      parsedOpeningDate && storedDate && parsedOpeningDate.getTime() === storedDate.getTime(),
+    );
+    if (isOpened !== item.isOpened || !sameOpeningDate) {
+      changes.opening = {isOpened, openedAt: isOpened ? openedAt : null};
+    }
+    onSave(changes);
   };
 
   const metadata = item
@@ -276,20 +288,24 @@ export function ProductDetailsModal({
       visible={item != null}
       accessibilityLabel="Zamknij szczegóły produktu"
       onClose={close}
+      overlay={photoPreview.overlay}
+      accessibilityContentHidden={photoPreview.visible}
       sheetStyle={styles.sheet}
       handleStyle={styles.handleTouch}
       handleContent={<Text style={styles.title}>Szczegóły produktu</Text>}>
       {item ? (
         <View style={styles.content}>
           <ScrollView
-            style={styles.scroll}
+            style={[styles.scroll, shadowGutters.viewport]}
             contentContainerStyle={styles.scrollContent}
             nestedScrollEnabled
             scrollEnabled={scrollEnabled}
             showsVerticalScrollIndicator={false}>
             <View style={styles.productHeader}>
               {item.imageUrl ? (
-                <Image source={{uri: item.imageUrl}} style={styles.productImage} />
+                <Pressable testID="product-details-photo-preview" accessibilityRole="button" accessibilityLabel="Powiększ zdjęcie produktu" onPress={photoPreview.open}>
+                  <Image source={{uri: item.imageUrl}} style={styles.productImage} />
+                </Pressable>
               ) : (
                 <View style={styles.productImagePlaceholder}>
                   <Package color={colors.textMuted} size={30} strokeWidth={2} />
@@ -301,7 +317,7 @@ export function ProductDetailsModal({
                 </Text>
                 {metadata ? <Text style={styles.productMetadata}>{metadata}</Text> : null}
                 <Text style={styles.productEan}>
-                  {item.ean ? `EAN: ${item.ean}` : 'Produkt dodany ręcznie'}
+                  {item.ean ? `EAN: ${item.ean}` : 'Produkt bez EAN'}
                 </Text>
               </View>
             </View>
@@ -358,18 +374,21 @@ export function ProductDetailsModal({
                 testID="product-state-closed"
                 disabled={busy}
                 onPress={() => {
-                  setOpenedAt(null);
+                  if (isOpened) {
+                    setIsOpened(false);
+                    setOpenedAt(null);
+                  }
                   setOpeningDatePickerVisible(false);
                 }}
                 style={({pressed}) => [
                   styles.stateButton,
-                  openedAt === null && styles.stateButtonSelected,
+                  !isOpened && styles.stateButtonSelected,
                   pressed && styles.pressed,
                 ]}>
                 <Text
                   style={[
                     styles.stateButtonText,
-                    openedAt === null && styles.stateButtonTextSelected,
+                    !isOpened && styles.stateButtonTextSelected,
                   ]}>
                   Zamknięty
                 </Text>
@@ -377,42 +396,54 @@ export function ProductDetailsModal({
               <Pressable
                 testID="product-state-opened"
                 disabled={busy}
-                onPress={() => setOpenedAt(current => current ?? new Date().toISOString())}
+                onPress={() => {
+                  if (!isOpened) {
+                    setIsOpened(true);
+                    const now = new Date();
+                    setToday(now);
+                    setOpenedAt(now.toISOString());
+                  }
+                }}
                 style={({pressed}) => [
                   styles.stateButton,
-                  openedAt !== null && styles.stateButtonSelected,
+                  isOpened && styles.stateButtonSelected,
                   pressed && styles.pressed,
                 ]}>
                 <Text
                   style={[
                     styles.stateButtonText,
-                    openedAt !== null && styles.stateButtonTextSelected,
+                    isOpened && styles.stateButtonTextSelected,
                   ]}>
                   Otwarty
                 </Text>
               </Pressable>
             </View>
 
-            {openingDate ? (
+            {isOpened ? (
               <>
                 <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>Data otwarcia</Text>
                 <Pressable
                   testID="product-opening-date-field"
                   disabled={busy}
                   onPress={() => {
+                    if (!openingDate) {
+                      const now = new Date();
+                      setToday(now);
+                      setOpenedAt(now.toISOString());
+                    }
                     setOpeningDatePickerVisible(current => !current);
                     setDatePickerVisible(false);
                   }}
                   style={({pressed}) => [styles.dateField, pressed && styles.pressed]}>
                   <CalendarDays color={colors.accent} size={22} strokeWidth={2.2} />
                   <View style={styles.dateCopy}>
-                    <Text style={styles.dateLabel}>Otwarty od</Text>
-                    <Text style={styles.dateValue}>{formatDateForDisplay(openingDate)}</Text>
+                    <Text style={styles.dateLabel}>{openingDate ? 'Otwarty od' : 'Brak daty otwarcia'}</Text>
+                    <Text style={styles.dateValue}>{openingDate ? formatDateForDisplay(openingDate) : 'Ustaw datę otwarcia'}</Text>
                   </View>
-                  <Text style={styles.dateAction}>Zmień</Text>
+                  <Text style={styles.dateAction}>{openingDate ? 'Zmień' : 'Ustaw'}</Text>
                 </Pressable>
 
-                {openingDatePickerVisible ? (
+                {openingDate && openingDatePickerVisible ? (
                   <DateWheels
                     testID="product-opening-date-picker"
                     date={openingDate}
@@ -493,9 +524,10 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   scrollContent: {
-    paddingBottom: 8,
+    ...shadowGutters.content,
   },
   productHeader: {
+    ...shadows.preview,
     minHeight: 92,
     flexDirection: 'row',
     alignItems: 'center',

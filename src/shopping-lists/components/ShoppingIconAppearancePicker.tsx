@@ -1,18 +1,21 @@
 import React from 'react';
-import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {Keyboard, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import type {ShoppingListIconColorKey, ShoppingListIconKey} from '../../domain/types';
 import {
   getShoppingListIconColorDefinition,
+  getShoppingListIconDefinition,
   SHOPPING_LIST_ICON_COLORS,
   SHOPPING_LIST_ICONS,
 } from '../../shoppingListIcons';
 import {colors} from '../../theme/colors';
+import {shadowGutters, shadowInsets} from '../../theme/shadows';
 
 export function ShoppingIconAppearancePicker({
   label,
   colorAccessibilityLabel,
   iconKey,
   iconColorKey,
+  compact,
   onChangeIconKey,
   onChangeIconColorKey,
 }: {
@@ -20,10 +23,30 @@ export function ShoppingIconAppearancePicker({
   colorAccessibilityLabel: string;
   iconKey: ShoppingListIconKey;
   iconColorKey: ShoppingListIconColorKey;
+  compact: boolean;
   onChangeIconKey: (iconKey: ShoppingListIconKey) => void;
   onChangeIconColorKey: (iconColorKey: ShoppingListIconColorKey) => void;
 }) {
   const selectedColor = getShoppingListIconColorDefinition(iconColorKey);
+  const selectedIcon = getShoppingListIconDefinition(iconKey);
+  const SelectedIcon = selectedIcon.Icon;
+
+  if (compact) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Zmień ikonę i kolor. ${label}: ${selectedIcon.label}. ${colorAccessibilityLabel}: ${selectedColor.label}`}
+        onPress={() => Keyboard.dismiss()}
+        style={({pressed}) => [styles.compactButton, pressed && styles.pressed]}>
+        <View
+          testID="compact-appearance-icon"
+          style={[styles.compactIcon, {backgroundColor: selectedColor.background}]}>
+          <SelectedIcon color={selectedColor.color} size={18} strokeWidth={2.1} />
+        </View>
+        <Text style={styles.changeText}>Zmień ikonę i kolor</Text>
+      </Pressable>
+    );
+  }
 
   return (
     <>
@@ -31,6 +54,8 @@ export function ShoppingIconAppearancePicker({
         <Text style={styles.headerLabel}>{label}</Text>
         <ScrollView
           horizontal
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.colorPickerRow}
           style={styles.colorPicker}>
@@ -64,6 +89,9 @@ export function ShoppingIconAppearancePicker({
       </View>
       <ScrollView
         horizontal
+        style={shadowGutters.viewport}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.iconPickerRow}>
         {SHOPPING_LIST_ICONS.map(icon => {
@@ -111,6 +139,28 @@ export function ShoppingIconAppearancePicker({
 }
 
 const styles = StyleSheet.create({
+  compactButton: {
+    minHeight: 44,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
+    marginBottom: 12,
+  },
+  compactIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  changeText: {
+    color: colors.accent,
+    fontSize: 14,
+    fontWeight: '800',
+  },
   headerRow: {
     minHeight: 36,
     flexDirection: 'row',
@@ -131,8 +181,9 @@ const styles = StyleSheet.create({
   colorPickerRow: {
     alignItems: 'center',
     gap: 8,
-    paddingVertical: 4,
-    paddingRight: 2,
+    paddingTop: shadowInsets.control.top,
+    paddingBottom: shadowInsets.control.bottom,
+    paddingHorizontal: shadowInsets.control.horizontal,
   },
   colorSwatchShadow: {
     width: 32,
@@ -166,10 +217,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   iconPickerRow: {
+    ...shadowGutters.content,
     gap: 10,
-    paddingTop: 2,
-    paddingBottom: 6,
-    paddingRight: 16,
   },
   iconChoiceShadow: {
     width: 68,
