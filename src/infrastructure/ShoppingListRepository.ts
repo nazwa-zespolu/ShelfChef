@@ -46,6 +46,8 @@ export type CompletePurchaseResult = {
   storedItemIds: string[];
 };
 
+type ShoppingSuggestionTarget = Pick<ShoppingListItem, 'id' | 'quantity' | 'status'>;
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -95,7 +97,7 @@ function mapShoppingItem(row: Record<string, any>): ShoppingListItem {
     listId: row.list_id,
     catalogProductId: row.catalog_product_id ?? null,
     linkedCatalogProducts: [],
-    label: row.label,
+    label: row.catalog_name ?? row.label,
     iconKey: row.icon_key ?? 'box',
     iconColorKey: row.icon_color_key ?? 'green',
     imageUrl: row.image_url ?? null,
@@ -107,6 +109,10 @@ function mapShoppingItem(row: Record<string, any>): ShoppingListItem {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function mapShoppingSuggestionTarget(row: Record<string, any>): ShoppingSuggestionTarget {
+  return {id: row.id, quantity: Number(row.quantity), status: row.status};
 }
 
 export class ShoppingListRepository {
@@ -260,8 +266,20 @@ export class ShoppingListRepository {
     const result = db.execute(
       `
         SELECT
-          item.*,
-          COALESCE(definition.name, catalog.name, item.label) AS label,
+          item.id,
+          item.list_id,
+          item.catalog_product_id,
+          item.label,
+          item.icon_key,
+          item.icon_color_key,
+          item.quantity,
+          item.sort_order,
+          item.status,
+          item.source,
+          item.stored_at,
+          item.created_at,
+          item.updated_at,
+          COALESCE(definition.name, catalog.name) AS catalog_name,
           COALESCE(catalog.image_url, definition.image_url) AS image_url
         FROM shopping_list_items item
         LEFT JOIN product_catalog catalog ON item.catalog_product_id = catalog.id
@@ -707,11 +725,11 @@ export class ShoppingListRepository {
   private findTargetItemForSuggestion(
     listId: string,
     suggestion: ShoppingSuggestion,
-  ): ShoppingListItem | null {
+  ): ShoppingSuggestionTarget | null {
     if (suggestion.catalogProductId) {
       const byCatalog = db.execute(
         `
-          SELECT *
+          SELECT id, quantity, status
           FROM shopping_list_items
           WHERE list_id = ?
             AND catalog_product_id = ?
@@ -721,13 +739,13 @@ export class ShoppingListRepository {
         [listId, suggestion.catalogProductId],
       );
       if (byCatalog.rows && byCatalog.rows.length > 0) {
-        return mapShoppingItem(byCatalog.rows.item(0));
+        return mapShoppingSuggestionTarget(byCatalog.rows.item(0));
       }
     }
 
     const byName = db.execute(
       `
-        SELECT *
+        SELECT id, quantity, status
         FROM shopping_list_items
         WHERE list_id = ?
           AND catalog_product_id IS NULL
@@ -738,7 +756,7 @@ export class ShoppingListRepository {
       [listId, suggestion.normalizedName],
     );
     if (byName.rows && byName.rows.length > 0) {
-      return mapShoppingItem(byName.rows.item(0));
+      return mapShoppingSuggestionTarget(byName.rows.item(0));
     }
     return null;
   }

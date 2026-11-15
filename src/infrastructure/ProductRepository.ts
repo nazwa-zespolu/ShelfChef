@@ -259,6 +259,12 @@ export class ProductRepository {
           [name, normalizedName, imageUrl, id],
         );
       }
+      if (product.name !== name) {
+        db.execute(
+          'UPDATE shopping_list_items SET label = ?, updated_at = ? WHERE catalog_product_id = ?',
+          [name, new Date().toISOString(), id],
+        );
+      }
       return this.readCatalogProducts('catalog.id = ?', [id])[0];
     });
   }
