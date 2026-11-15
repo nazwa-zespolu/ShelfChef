@@ -70,8 +70,10 @@ function formatAddSuccessMessage(name: string, amount: number) {
   return `Dodano ${amount} szt.: ${name}`;
 }
 
-function generateInventoryId(index: number) {
-  return `inv-${Date.now()}-${index}-${Math.floor(Math.random() * 1_000_000)}`;
+function generateInventoryIds(amount: number) {
+  return Array.from({length: amount}, (_, index) =>
+    `inv-${Date.now()}-${index}-${Math.floor(Math.random() * 1_000_000)}`,
+  );
 }
 
 function isValidEAN(code: string) {
@@ -750,9 +752,7 @@ function ProductScannerVisionContent({
     setAdding(true);
     try {
       const expiryDate = expirationDate ? formatExpiryForDb(expirationDate) : null;
-      for (let i = 0; i < amount; i += 1) {
-        await repo.addToInventory(generateInventoryId(i), scannedProduct.ean, null, expiryDate);
-      }
+      await repo.addToInventoryBatch(generateInventoryIds(amount), scannedProduct.ean, null, expiryDate);
       addingRef.current = false;
       closeBottomSheet();
       onProductAdded?.();
@@ -813,9 +813,7 @@ function ProductScannerVisionContent({
           throw new Error('Product definition not found after save');
         }
         savedName = definition.name;
-        for (let i = 0; i < amount; i += 1) {
-          await repo.addToInventory(generateInventoryId(i), normalizedEan, null, expiryDate);
-        }
+        await repo.addToInventoryBatch(generateInventoryIds(amount), normalizedEan, null, expiryDate);
       } else {
         const catalog = existingGenericProduct
           ? await repo.findCatalogProductById(existingGenericProduct.id)
@@ -830,9 +828,7 @@ function ProductScannerVisionContent({
         }
         savedName = catalog.name;
         setManualNameLookup({name: normalizedManualName, status: 'ready', product: catalog});
-        for (let i = 0; i < amount; i += 1) {
-          await repo.addToInventory(generateInventoryId(i), null, catalog.name, expiryDate, catalog.id);
-        }
+        await repo.addToInventoryBatch(generateInventoryIds(amount), null, catalog.name, expiryDate, catalog.id);
       }
       addingRef.current = false;
       closeBottomSheet();

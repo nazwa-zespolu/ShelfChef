@@ -56,7 +56,7 @@ describe('UI: ProductScannerView product adding', () => {
   let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
   const saveGeneric = jest.spyOn(ProductRepository.prototype, 'saveGenericCatalogProduct');
   const saveDefinition = jest.spyOn(ProductRepository.prototype, 'saveDefinition');
-  const addToInventory = jest.spyOn(ProductRepository.prototype, 'addToInventory');
+  const addToInventoryBatch = jest.spyOn(ProductRepository.prototype, 'addToInventoryBatch');
   const getCatalog = jest.spyOn(ProductRepository.prototype, 'getCatalogProducts');
   const findDefinition = jest.spyOn(ProductRepository.prototype, 'findDefinitionByEan');
   const findByName = jest.spyOn(ProductRepository.prototype, 'findCatalogProductByNormalizedName');
@@ -82,7 +82,7 @@ describe('UI: ProductScannerView product adding', () => {
     findById.mockReset().mockResolvedValue(null);
     jest.mocked(launchImageLibrary).mockReset().mockResolvedValue({didCancel: true});
     saveDefinition.mockReset().mockResolvedValue();
-    addToInventory.mockReset();
+    addToInventoryBatch.mockReset();
     scan.mockReset().mockResolvedValue({fallback: 'manual', ean: existing.ean});
     saveGeneric.mockReset().mockImplementation(async value => ({
       id: 'catalog-sauce',
@@ -97,7 +97,7 @@ describe('UI: ProductScannerView product adding', () => {
       createdAt: '2026-10-22T10:00:00.000Z',
       updatedAt: '2026-10-22T10:00:00.000Z',
     }));
-    addToInventory.mockResolvedValue();
+    addToInventoryBatch.mockResolvedValue();
   });
 
   afterEach(async () => {
@@ -108,7 +108,7 @@ describe('UI: ProductScannerView product adding', () => {
   afterAll(() => {
     saveGeneric.mockRestore();
     saveDefinition.mockRestore();
-    addToInventory.mockRestore();
+    addToInventoryBatch.mockRestore();
     getCatalog.mockRestore();
     findDefinition.mockRestore();
     findByName.mockRestore();
@@ -181,9 +181,10 @@ describe('UI: ProductScannerView product adding', () => {
     await act(async () => { renderer!.root.findByProps({testID: 'scanned-photo-preview'}).props.onPress(); });
     expect(renderer!.root.findByProps({testID: 'product-photo-preview-image'}).props.source.uri).toBe(existing.imageUrl);
     await act(async () => { renderer!.root.findByType(DraggableBottomSheet).props.onClose(); });
-    expect(addToInventory).not.toHaveBeenCalled();
+    expect(addToInventoryBatch).not.toHaveBeenCalled();
     await press('Dodaj');
-    expect(addToInventory).toHaveBeenCalledTimes(2);
+    expect(addToInventoryBatch).toHaveBeenCalledTimes(1);
+    expect(addToInventoryBatch).toHaveBeenCalledWith([expect.any(String), expect.any(String)], existing.ean, null, null);
   });
 
   it('passes the brand, category and stored photo to the catalog when adding an inventory item', async () => {
@@ -209,7 +210,7 @@ describe('UI: ProductScannerView product adding', () => {
       category: 'Przetwory warzywne',
       imageUrl: `file://${photoDestination}`,
     });
-    expect(addToInventory).toHaveBeenCalledWith(expect.any(String), null, 'Domowy sos', null, 'catalog-sauce');
+    expect(addToInventoryBatch).toHaveBeenCalledWith([expect.any(String)], null, 'Domowy sos', null, 'catalog-sauce');
     expect(saveDefinition).not.toHaveBeenCalled();
     expect(onProductAdded).toHaveBeenCalledTimes(1);
   });
@@ -227,7 +228,7 @@ describe('UI: ProductScannerView product adding', () => {
       category: undefined,
       imageUrl: null,
     });
-    expect(addToInventory).toHaveBeenCalledTimes(1);
+    expect(addToInventoryBatch).toHaveBeenCalledTimes(1);
     expect(onProductAdded).toHaveBeenCalledTimes(1);
   });
 
@@ -264,9 +265,8 @@ describe('UI: ProductScannerView product adding', () => {
 
     expect(saveDefinition).not.toHaveBeenCalled();
     expect(saveGeneric).not.toHaveBeenCalled();
-    expect(addToInventory).toHaveBeenCalledTimes(2);
-    expect(addToInventory).toHaveBeenNthCalledWith(1, expect.any(String), existing.ean, null, expect.any(String));
-    expect(addToInventory).toHaveBeenNthCalledWith(2, expect.any(String), existing.ean, null, expect.any(String));
+    expect(addToInventoryBatch).toHaveBeenCalledTimes(1);
+    expect(addToInventoryBatch).toHaveBeenCalledWith([expect.any(String), expect.any(String)], existing.ean, null, expect.any(String));
     expect(onProductAdded).toHaveBeenCalledTimes(1);
   });
 
@@ -281,7 +281,7 @@ describe('UI: ProductScannerView product adding', () => {
     expectSharedFields({name: existing.name}, false);
     await press('Zapisz i dodaj');
 
-    expect(addToInventory).toHaveBeenCalledWith(expect.any(String), existing.ean, null, null);
+    expect(addToInventoryBatch).toHaveBeenCalledWith([expect.any(String)], existing.ean, null, null);
     expect(saveDefinition).not.toHaveBeenCalled();
     expect(onProductAdded).toHaveBeenCalledTimes(1);
   });
@@ -307,7 +307,7 @@ describe('UI: ProductScannerView product adding', () => {
         expect(saveGeneric).toHaveBeenCalledWith({
           name: 'Domowy sos', brand: 'Draft brand', category: 'Draft category', imageUrl: draftImage,
         });
-        expect(addToInventory).toHaveBeenCalledWith(expect.any(String), null, 'Domowy sos', null, 'catalog-sauce');
+        expect(addToInventoryBatch).toHaveBeenCalledWith([expect.any(String)], null, 'Domowy sos', null, 'catalog-sauce');
       }
     },
   );
@@ -322,7 +322,7 @@ describe('UI: ProductScannerView product adding', () => {
       await changeInput('Np. 5901234123457', existing.ean);
       expect(button('Zapisz i dodaj').props.disabled).toBe(true);
       await press('Zapisz i dodaj');
-      expect(addToInventory).not.toHaveBeenCalled();
+      expect(addToInventoryBatch).not.toHaveBeenCalled();
       await changeInput('Np. 5901234123457', second.ean);
       expectSharedFields(second, false);
 
@@ -334,7 +334,7 @@ describe('UI: ProductScannerView product adding', () => {
       expectSharedFields(second, false);
       expect(button('Zapisz i dodaj').props.disabled).toBe(false);
       await press('Zapisz i dodaj');
-      expect(addToInventory).toHaveBeenCalledWith(expect.any(String), second.ean, null, null);
+      expect(addToInventoryBatch).toHaveBeenCalledWith([expect.any(String)], second.ean, null, null);
     },
   );
 
@@ -367,7 +367,7 @@ describe('UI: ProductScannerView product adding', () => {
     expect(button('Zapisz i dodaj').props.disabled).toBe(true);
     await press('Zapisz i dodaj');
     expect(saveDefinition).not.toHaveBeenCalled();
-    expect(addToInventory).not.toHaveBeenCalled();
+    expect(addToInventoryBatch).not.toHaveBeenCalled();
     await press('Ponów sprawdzenie EAN');
     expectSharedFields(existing, false);
     await changeInput('Np. 5901234123457', '');
@@ -396,7 +396,7 @@ describe('UI: ProductScannerView product adding', () => {
     await press('Zapisz i dodaj');
 
     expect(saveDefinition).toHaveBeenCalledWith(saved);
-    expect(addToInventory).toHaveBeenCalledWith(expect.any(String), existing.ean, null, null);
+    expect(addToInventoryBatch).toHaveBeenCalledWith([expect.any(String)], existing.ean, null, null);
     expect(saveGeneric).not.toHaveBeenCalled();
     expect(onProductAdded).toHaveBeenCalledTimes(1);
   });
@@ -408,20 +408,20 @@ describe('UI: ProductScannerView product adding', () => {
     await press('Zapisz i dodaj');
 
     expect(saveDefinition).not.toHaveBeenCalled();
-    expect(addToInventory).toHaveBeenCalledWith(expect.any(String), existing.ean, null, null);
+    expect(addToInventoryBatch).toHaveBeenCalledWith([expect.any(String)], existing.ean, null, null);
     expect(mockShowToast).toHaveBeenLastCalledWith(expect.stringContaining(existing.name));
   });
 
   it('guards duplicate saves and dismissal during an inventory write', async () => {
     const pending = deferred<void>();
     findDefinition.mockResolvedValue(existing);
-    addToInventory.mockReturnValue(pending.promise);
+    addToInventoryBatch.mockReturnValue(pending.promise);
     await openForm();
     await changeInput('Np. 5901234123457', existing.ean);
     const save = button('Zapisz i dodaj').props.onPress;
     await act(async () => { save(); save(); });
 
-    expect(addToInventory).toHaveBeenCalledTimes(1);
+    expect(addToInventoryBatch).toHaveBeenCalledTimes(1);
     expect(input('Np. 5901234123457').props.editable).toBe(false);
     await press('Zamknij');
     expect(input('Np. 5901234123457')).toBeDefined();
@@ -432,7 +432,7 @@ describe('UI: ProductScannerView product adding', () => {
 
   it('preserves the form after a failed write and allows retry', async () => {
     findDefinition.mockResolvedValue(existing);
-    addToInventory.mockRejectedValueOnce(new Error('write failed')).mockResolvedValue(undefined);
+    addToInventoryBatch.mockRejectedValueOnce(new Error('write failed')).mockResolvedValue(undefined);
     await openForm();
     await changeInput('Np. 5901234123457', existing.ean);
     await press('Zapisz i dodaj');
@@ -442,10 +442,63 @@ describe('UI: ProductScannerView product adding', () => {
     expect(mockShowToast).toHaveBeenLastCalledWith('Nie udało się dodać produktu', 'error');
     expect(onProductAdded).not.toHaveBeenCalled();
     await press('Zapisz i dodaj');
-    expect(addToInventory).toHaveBeenCalledTimes(2);
+    expect(addToInventoryBatch).toHaveBeenCalledTimes(2);
     expect(saveDefinition).not.toHaveBeenCalled();
     expect(onProductAdded).toHaveBeenCalledTimes(1);
   });
+
+  it.each(['scanned', 'manual EAN', 'manual generic'])(
+    'submits one five-copy batch and preserves quantity and expiry after a failed %s save',
+    async source => {
+      if (source === 'scanned') {
+        scan.mockResolvedValue(existing);
+        await act(async () => { renderer = ReactTestRenderer.create(<ProductScannerView onProductAdded={onProductAdded} />); });
+        const scanner = jest.mocked(useCodeScanner).mock.calls.at(-1)![0];
+        await act(async () => { scanner.onCodeScanned([{type: 'ean-13', value: existing.ean}], {width: 100, height: 100}); });
+      } else {
+        if (source === 'manual EAN') {
+          findDefinition.mockResolvedValue(existing);
+        } else {
+          matchGeneric();
+        }
+        await openForm();
+        await changeInput(
+          source === 'manual EAN' ? 'Np. 5901234123457' : 'Np. Domowy zakwas',
+          source === 'manual EAN' ? existing.ean : generic.name,
+        );
+      }
+      for (let i = 0; i < 4; i += 1) {
+        await press('+');
+      }
+      await press('Ustaw datę');
+      addToInventoryBatch.mockRejectedValueOnce(new Error('batch write failed')).mockResolvedValue(undefined);
+      const submitLabel = source === 'scanned' ? 'Dodaj' : 'Zapisz i dodaj';
+      await press(submitLabel);
+
+      expect(addToInventoryBatch).toHaveBeenCalledTimes(1);
+      const first = addToInventoryBatch.mock.calls[0];
+      expect(first[0]).toHaveLength(5);
+      expect(new Set(first[0]).size).toBe(5);
+      expect(first[1]).toBe(source === 'manual generic' ? null : existing.ean);
+      expect(first[2]).toBe(source === 'manual generic' ? generic.name : null);
+      expect(first[3]).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(first[4]).toBe(source === 'manual generic' ? generic.id : undefined);
+      expect(mockShowToast).toHaveBeenLastCalledWith('Nie udało się dodać produktu', 'error');
+      expect(onProductAdded).not.toHaveBeenCalled();
+      expect(button(submitLabel).props.disabled).toBe(false);
+
+      await press(submitLabel);
+      expect(addToInventoryBatch).toHaveBeenCalledTimes(2);
+      const retry = addToInventoryBatch.mock.calls[1];
+      expect(retry[0]).toHaveLength(5);
+      expect(new Set(retry[0]).size).toBe(5);
+      expect(retry.slice(1)).toEqual(first.slice(1));
+      expect(saveDefinition).not.toHaveBeenCalled();
+      expect(saveGeneric).not.toHaveBeenCalled();
+      expect(onProductAdded).toHaveBeenCalledTimes(1);
+      expect(mockShowToast).toHaveBeenLastCalledWith(expect.stringContaining('5'));
+    },
+  );
 
   it('preserves new product metadata after a definition write fails and retries the save', async () => {
     saveDefinition.mockRejectedValueOnce(new Error('definition write failed'));
@@ -456,7 +509,7 @@ describe('UI: ProductScannerView product adding', () => {
 
     expectSharedFields({name: '  Domowy sos  ', brand: 'Draft brand'}, true);
     expect(button('Zapisz i dodaj').props.disabled).toBe(false);
-    expect(addToInventory).not.toHaveBeenCalled();
+    expect(addToInventoryBatch).not.toHaveBeenCalled();
     expect(onProductAdded).not.toHaveBeenCalled();
     saveDefinition.mockImplementation(async () => {
       findDefinition.mockResolvedValue({...existing, name: 'Domowy sos', brand: 'Draft brand'});
@@ -464,7 +517,7 @@ describe('UI: ProductScannerView product adding', () => {
     await press('Zapisz i dodaj');
 
     expect(saveDefinition).toHaveBeenCalledTimes(2);
-    expect(addToInventory).toHaveBeenCalledTimes(1);
+    expect(addToInventoryBatch).toHaveBeenCalledTimes(1);
     expect(onProductAdded).toHaveBeenCalledTimes(1);
   });
 
@@ -476,7 +529,7 @@ describe('UI: ProductScannerView product adding', () => {
     expect(findDefinition).not.toHaveBeenCalled();
     expect(saveDefinition).not.toHaveBeenCalled();
     expect(saveGeneric).not.toHaveBeenCalled();
-    expect(addToInventory).not.toHaveBeenCalled();
+    expect(addToInventoryBatch).not.toHaveBeenCalled();
     expect(mockShowToast).toHaveBeenLastCalledWith('Popraw EAN albo zostaw to pole puste', 'error');
   });
 
@@ -492,7 +545,7 @@ describe('UI: ProductScannerView product adding', () => {
     expect(fields.every(field => field.props.editable === false)).toBe(true);
     await press('Zapisz i dodaj');
     expect(saveDefinition).not.toHaveBeenCalled();
-    expect(addToInventory).toHaveBeenCalledWith(expect.any(String), existing.ean, null, null);
+    expect(addToInventoryBatch).toHaveBeenCalledWith([expect.any(String)], existing.ean, null, null);
   });
 
   it('loads an exact generic name and adds copies by ID without saving shared metadata or resetting quantity and expiry', async () => {
@@ -512,9 +565,8 @@ describe('UI: ProductScannerView product adding', () => {
     expect(findById).toHaveBeenCalledWith(generic.id);
     expect(saveGeneric).not.toHaveBeenCalled();
     expect(saveDefinition).not.toHaveBeenCalled();
-    expect(addToInventory).toHaveBeenCalledTimes(2);
-    expect(addToInventory).toHaveBeenNthCalledWith(1, expect.any(String), null, generic.name, expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), generic.id);
-    expect(addToInventory.mock.calls[1].slice(1)).toEqual(addToInventory.mock.calls[0].slice(1));
+    expect(addToInventoryBatch).toHaveBeenCalledTimes(1);
+    expect(addToInventoryBatch).toHaveBeenCalledWith([expect.any(String), expect.any(String)], null, generic.name, expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), generic.id);
   });
 
   it('restores manual metadata and the selected photo when a matching name is extended or cleared', async () => {
@@ -638,7 +690,7 @@ describe('UI: ProductScannerView product adding', () => {
     expect(button('Zapisz i dodaj').props.disabled).toBe(true);
     await press('Zapisz i dodaj');
     expect(saveGeneric).not.toHaveBeenCalled();
-    expect(addToInventory).not.toHaveBeenCalled();
+    expect(addToInventoryBatch).not.toHaveBeenCalled();
     await press('Ponów sprawdzenie nazwy');
     expectGenericFields();
     expect(button('Zapisz i dodaj').props.disabled).toBe(false);
@@ -678,10 +730,10 @@ describe('UI: ProductScannerView product adding', () => {
     findById.mockResolvedValueOnce(null);
     await press('Zapisz i dodaj');
     expect(saveGeneric).not.toHaveBeenCalled();
-    expect(addToInventory).not.toHaveBeenCalled();
+    expect(addToInventoryBatch).not.toHaveBeenCalled();
     expectGenericFields();
     await press('Zapisz i dodaj');
-    expect(addToInventory).toHaveBeenCalledWith(expect.any(String), null, generic.name, null, generic.id);
+    expect(addToInventoryBatch).toHaveBeenCalledWith([expect.any(String)], null, generic.name, null, generic.id);
   });
 
   it('uses the stored catalog data when a generic product appeared after an empty lookup', async () => {
@@ -690,15 +742,18 @@ describe('UI: ProductScannerView product adding', () => {
     const stored = {...generic, name: 'DOMOWY SOS', normalizedName: 'domowy sos'};
     saveGeneric.mockResolvedValue(stored);
     await press('Zapisz i dodaj');
-    expect(addToInventory).toHaveBeenCalledWith(expect.any(String), null, stored.name, null, stored.id);
+    expect(addToInventoryBatch).toHaveBeenCalledWith([expect.any(String)], null, stored.name, null, stored.id);
     expect(mockShowToast).toHaveBeenLastCalledWith(expect.stringContaining(stored.name));
   });
 
   it('protects a persisted generic photo after an inventory write fails and retries without saving the catalog again', async () => {
     jest.mocked(launchImageLibrary).mockResolvedValue({assets: [{uri: 'file:///temporary/draft.jpg'}]});
-    addToInventory.mockRejectedValueOnce(new Error('write failed')).mockResolvedValue(undefined);
+    addToInventoryBatch.mockRejectedValueOnce(new Error('write failed')).mockResolvedValue(undefined);
     await openForm();
     await press('Galeria');
+    for (let i = 0; i < 4; i += 1) {
+      await press('+');
+    }
     await press('Zapisz i dodaj');
     const stored = await saveGeneric.mock.results[0].value as CatalogProduct;
     findById.mockResolvedValue(stored);
@@ -706,8 +761,32 @@ describe('UI: ProductScannerView product adding', () => {
     expect(input('Np. Barilla').props.editable).toBe(false);
     await press('Zapisz i dodaj');
     expect(saveGeneric).toHaveBeenCalledTimes(1);
-    expect(addToInventory).toHaveBeenCalledTimes(2);
+    expect(addToInventoryBatch).toHaveBeenCalledTimes(2);
+    expect(addToInventoryBatch.mock.calls.map(([ids]) => ids.length)).toEqual([5, 5]);
     expect(unlink).not.toHaveBeenCalled();
+  });
+
+  it('protects a new EAN photo after a failed batch and retries without saving its definition again', async () => {
+    jest.mocked(launchImageLibrary).mockResolvedValue({assets: [{uri: 'file:///temporary/draft.jpg'}]});
+    saveDefinition.mockImplementation(async definition => { findDefinition.mockResolvedValue(definition); });
+    addToInventoryBatch.mockRejectedValueOnce(new Error('batch write failed')).mockResolvedValue(undefined);
+    await openForm();
+    await press('Galeria');
+    await changeInput('Np. 5901234123457', existing.ean);
+    for (let i = 0; i < 4; i += 1) {
+      await press('+');
+    }
+    await press('Zapisz i dodaj');
+    expect(saveDefinition).toHaveBeenCalledTimes(1);
+    expect(saveDefinition.mock.calls[0][0].imageUrl).toMatch(/^file:\/\/\/documents\/product-photos\//);
+    expect(unlink).not.toHaveBeenCalled();
+    expect(onProductAdded).not.toHaveBeenCalled();
+
+    await press('Zapisz i dodaj');
+    expect(saveDefinition).toHaveBeenCalledTimes(1);
+    expect(addToInventoryBatch.mock.calls.map(([ids]) => ids.length)).toEqual([5, 5]);
+    expect(unlink).not.toHaveBeenCalled();
+    expect(onProductAdded).toHaveBeenCalledTimes(1);
   });
 
   it('cleans the unused photo if a generic product was created after the lookup and kept its own photo', async () => {
@@ -718,7 +797,7 @@ describe('UI: ProductScannerView product adding', () => {
     const stored = {...generic, name: 'Domowy sos', normalizedName: 'domowy sos'};
     saveGeneric.mockResolvedValue(stored);
     await press('Zapisz i dodaj');
-    expect(addToInventory).toHaveBeenCalledWith(expect.any(String), null, stored.name, null, stored.id);
+    expect(addToInventoryBatch).toHaveBeenCalledWith([expect.any(String)], null, stored.name, null, stored.id);
     expect(unlink).toHaveBeenCalledTimes(1);
     expect(unlink).toHaveBeenCalledWith(path);
   });

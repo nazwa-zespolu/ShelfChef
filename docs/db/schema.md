@@ -101,6 +101,7 @@ erDiagram
 
 - Schemat jest tworzony w jednej transakcji, bez migracji i bez danych demonstracyjnych. Po zmianie schematu należy ręcznie wyczyścić dane instalacji deweloperskiej; zwykły restart zachowuje dane.
 - `inventory.created_at` jest wymagane i zapisywane zarówno przy dodawaniu produktu, jak i finalizacji zakupów. Jedna sztuka odpowiada jednemu rekordowi.
+- Dodawanie wielu sztuk po skanowaniu i w formularzu ręcznym korzysta z `ProductRepository.addToInventoryBatch`. Powiązanie katalogowe jest ustalane raz, a wszystkie sztuki są zapisywane w jednej synchronicznej transakcji. Błąd wycofuje cały zestaw, więc ponowienie nie powiela częściowo zapisanych sztuk. Pojedynczy zapis `addToInventory` korzysta z tej samej operacji. Definicja produktu i jej zdjęcie są zatwierdzane wcześniej i pozostają w katalogu również po błędzie dodawania egzemplarzy.
 - `inventory.catalog_product_id` wskazuje stabilne `product_catalog.id` dla produktów z EAN i bez EAN. Powiązanie jest zapisywane przy dodawaniu egzemplarza; późniejszy odczyt nie dopasowuje go po nazwie.
 - Dla produktów bez EAN wspólna nazwa i metadane pochodzą z katalogu. `inventory.custom_name` pozostaje nazwą pozycji tekstowej lub kopią nazwy z momentu dodania, bez roli identyfikatora produktu.
 - Finalizacja zakupów zapisuje identyfikator produktu wybranego bezpośrednio albo przez jednoznaczne powiązanie. Przy wielu alternatywach zachowuje dotychczasowy wybór jednego produktu z EAN, jeżeli taki jest jedyny; pozostałe niejednoznaczne pozycje pozostają tekstowe, z pustym `catalog_product_id`.

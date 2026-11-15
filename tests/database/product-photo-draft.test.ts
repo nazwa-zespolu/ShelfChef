@@ -123,6 +123,52 @@ describe('Product photo draft ownership with real files and SQLite', () => {
     expect(await exists(pathFor(uri))).toBe(false);
   });
 
+  it.each(['generic', 'specific'] as const)('protects a newly committed %s photo after a failed inventory batch and disposal', async kind => {
+    const draft = new ProductPhotoDraft();
+    const uri = await choose(draft);
+    const ean = kind === 'specific' ? '5901234123457' : null;
+    await draft.save(async () => {
+      if (ean) {
+        await products.saveDefinition({...metadata, ean, imageUrl: uri});
+      } else {
+        await products.saveGenericCatalogProduct({...metadata, imageUrl: uri});
+      }
+      return true;
+    });
+    const product = ean
+      ? (await products.findCatalogProductByEan(ean))!
+      : (await products.findCatalogProductByNormalizedName('generic', 'żurek'))!;
+    const ids = ['copy-1', 'copy-2', 'copy-3', 'copy-4', 'copy-5'];
+    const execute = sqlite.execute.bind(sqlite);
+    let inserts = 0;
+    const failure = jest.spyOn(sqlite, 'execute').mockImplementation((sql, params) => {
+      if (sql.includes('INSERT INTO inventory') && ++inserts === 3) {
+        throw new Error('third inventory insert failed');
+      }
+      return execute(sql, params);
+    });
+    try {
+      await expect(products.addToInventoryBatch(ids, ean, metadata.name, null, product.id))
+        .rejects.toThrow('third inventory insert failed');
+    } finally {
+      failure.mockRestore();
+    }
+    await draft.dispose();
+    sqlite.reopen();
+    setupDatabase();
+    expect(await products.getFullInventory()).toEqual([]);
+    expect(await products.findCatalogProductById(product.id)).toMatchObject({...metadata, imageUrl: uri});
+    expect(await exists(pathFor(uri))).toBe(true);
+    expect(await exists(source)).toBe(true);
+
+    await products.addToInventoryBatch(ids, ean, metadata.name, null, product.id);
+    sqlite.reopen();
+    setupDatabase();
+    expect(await products.getFullInventory()).toHaveLength(5);
+    expect((await products.getFullInventory()).every(copy => copy.imageUrl === uri)).toBe(true);
+    expect(await exists(pathFor(uri))).toBe(true);
+  });
+
   it.each(['generic', 'specific'] as const)('keeps a failed %s save retryable and protects the committed photo after reopening', async kind => {
     const product = await createProduct(kind);
     const draft = new ProductPhotoDraft();

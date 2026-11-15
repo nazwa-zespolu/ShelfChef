@@ -368,7 +368,43 @@ export class ProductRepository {
     expiryDate: string | null,
     catalogProductId?: string,
   ): Promise<void> {
-    let resolvedCatalogId: string | null = null;
+    return this.addToInventoryBatch([id], ean, customName, expiryDate, catalogProductId);
+  }
+
+  async addToInventoryBatch(
+    ids: readonly string[],
+    ean: string | null,
+    customName: string | null,
+    expiryDate: string | null,
+    catalogProductId?: string,
+  ): Promise<void> {
+    if (ids.length === 0) {
+      throw new Error('At least one inventory ID is required');
+    }
+    runInTransaction(() => {
+      const resolvedCatalogId = this.resolveInventoryCatalogProductId(ean, customName, catalogProductId);
+      const createdAt = new Date().toISOString();
+      for (const id of ids) {
+        db.execute(
+          `INSERT INTO inventory (
+            id,
+            catalog_product_id,
+            product_ean,
+            custom_name,
+            expiry_date,
+            created_at
+          ) VALUES (?, ?, ?, ?, ?, ?)`,
+          [id, resolvedCatalogId, ean, customName, expiryDate, createdAt],
+        );
+      }
+    });
+  }
+
+  private resolveInventoryCatalogProductId(
+    ean: string | null,
+    customName: string | null,
+    catalogProductId?: string,
+  ): string | null {
     if (catalogProductId !== undefined) {
       const result = db.execute('SELECT id, product_ean FROM product_catalog WHERE id = ?', [catalogProductId]);
       const catalog = result.rows?.length ? result.rows.item(0) : null;
@@ -378,26 +414,20 @@ export class ProductRepository {
       if ((catalog.product_ean ?? null) !== ean) {
         throw new Error('Inventory EAN does not match the catalog product');
       }
-      resolvedCatalogId = catalog.id;
-    } else if (ean) {
-      resolvedCatalogId = (await this.findCatalogProductByEan(ean))?.id ?? null;
-    } else if (customName) {
-      resolvedCatalogId = (await this.findCatalogProductByNormalizedName(
-        'generic', normalizeProductName(customName),
-      ))?.id ?? null;
+      return catalog.id;
     }
-
-    db.execute(
-      `INSERT INTO inventory (
-        id,
-        catalog_product_id,
-        product_ean,
-        custom_name,
-        expiry_date,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, resolvedCatalogId, ean, customName, expiryDate, new Date().toISOString()],
-    );
+    if (ean) {
+      const result = db.execute('SELECT id FROM product_catalog WHERE product_ean = ?', [ean]);
+      return result.rows?.length ? result.rows.item(0).id : null;
+    }
+    if (customName) {
+      const result = db.execute(
+        "SELECT id FROM product_catalog WHERE kind = 'generic' AND normalized_name = ?",
+        [normalizeProductName(customName)],
+      );
+      return result.rows?.length ? result.rows.item(0).id : null;
+    }
+    return null;
   }
 
   async countItemsPendingDietaryCategorization(): Promise<number> {
