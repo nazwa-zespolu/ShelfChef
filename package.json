@@ -8,8 +8,11 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "node --experimental-sqlite node_modules/jest/bin/jest.js",
-    "test:watch": "npm test -- --watch",
+    "test": "node -e \"const {spawnSync} = require('node:child_process'); let failed = false; for (const suite of ['test:logic', 'test:ui']) { const result = spawnSync(process.execPath, [process.env.npm_execpath, 'run', suite, '--', ...process.argv.slice(1)], {stdio: 'inherit'}); if (result.error) console.error(result.error); if (result.status !== 0) failed = true; } process.exitCode = failed ? 1 : 0;\" --",
+    "test:logic": "node --experimental-sqlite node_modules/jest/bin/jest.js --runInBand --coverageDirectory=src/coverage/logic",
+    "test:ui": "npm --prefix src test -- --runInBand --coverageDirectory=coverage/ui",
+    "test:watch": "npm run test:logic -- --watch",
+    "test:watch:ui": "npm run test:ui -- --watch",
     "test:coverage": "npm test -- --coverage"
   },
   "repository": {

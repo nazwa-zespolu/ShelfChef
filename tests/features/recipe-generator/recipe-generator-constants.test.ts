@@ -10,7 +10,7 @@ describe('recipeGeneratorConstants', () => {
       topP: 0.9,
     });
     expect(LLM_SAMPLING_BY_KIND['recipe-generation']).toEqual({
-      temperature: 0.5,
+      temperature: 0.45,
       topP: 0.9,
     });
     expect(getGenerationConfigForKind('dietary-categorization')).toMatchObject({
@@ -20,7 +20,7 @@ describe('recipeGeneratorConstants', () => {
       batchTimeInterval: 500,
     });
     expect(getGenerationConfigForKind('recipe-generation')).toMatchObject({
-      temperature: 0.5,
+      temperature: 0.45,
       topP: 0.9,
       outputTokenBatchSize: 32,
       batchTimeInterval: 500,

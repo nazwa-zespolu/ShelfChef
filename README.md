@@ -46,6 +46,32 @@ _Uwaga: Komendy `run-android` nie musisz już powtarzać, chyba że zainstalujes
 
 ## 🧪 Testy i Logika
 
+Wszystkie poniższe komendy uruchamiaj z głównego katalogu repozytorium.
+Przed pierwszym uruchomieniem zainstaluj zależności obu pakietów:
+
+```bash
+npm ci
+npm --prefix src ci
+```
+
+Uruchomienie wszystkich testów:
+
 ```bash
 npm test
 ```
+
+Poszczególne zestawy można uruchomić osobno:
+
+```bash
+npm run test:logic
+npm run test:ui
+```
+
+Raporty pokrycia dla obu zestawów generuje:
+
+```bash
+npm run test:coverage
+```
+
+Raporty HTML znajdują się w `src/coverage/logic/lcov-report/index.html` oraz
+`src/coverage/ui/lcov-report/index.html`.
