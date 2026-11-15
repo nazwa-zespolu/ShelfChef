@@ -19,7 +19,7 @@ import WheelPicker from './components/WheelPicker';
 import {ProductPhotoActions} from './components/ProductPhotoActions';
 import {useProductPhotoPreview} from './components/ProductPhotoPreview';
 import {CatalogProduct, ProductDefinition} from './domain/types';
-import {normalizeProductName} from './infrastructure/ProductRepository';
+import {normalizeProductName} from './domain/productNames';
 import {getProductRepository, getScanToAdd} from './app/services';
 import {colors} from './theme/colors';
 import {shadowGutters, shadowInsets, shadows} from './theme/shadows';

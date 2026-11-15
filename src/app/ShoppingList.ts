@@ -11,6 +11,7 @@ import {
   ShoppingSuggestion,
 } from '../domain/types';
 import type {ProductRepository} from '../infrastructure/ProductRepository';
+import {normalizeProductName} from '../domain/productNames';
 import type {
   AddAllSuggestionsSummary,
   AddShoppingItemInput,
@@ -544,8 +545,4 @@ export class ShoppingList {
     }
     return this.productRepository as ProductRepository;
   }
-}
-
-function normalizeProductName(name: string): string {
-  return name.trim().toLowerCase();
 }

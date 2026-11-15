@@ -1,4 +1,5 @@
 import { db, runInTransaction } from './db/init';
+import {normalizeProductName} from '../domain/productNames';
 import { CatalogProduct, DietaryFlags, ProductDefinition, InventoryItem, InventoryItemChanges } from '../domain/types';
 import { DietPreference } from '../features/recipe-generator/domain/recipeGenerationTypes';
 import {
@@ -7,9 +8,7 @@ import {
   matchesDietPreference,
 } from '../features/recipe-generator/domain/dietaryCategorizationTypes';
 
-export function normalizeProductName(name: string): string {
-  return name.trim().toLowerCase();
-}
+export {normalizeProductName};
 
 function mapCatalogProduct(row: Record<string, any>): CatalogProduct {
   return {
@@ -347,21 +346,30 @@ export class ProductRepository {
   }
 
   async countFreshInventoryByCustomName(name: string, todayIso: string): Promise<number> {
+    const normalizedName = normalizeProductName(name);
     const result = db.execute(
       `
-        SELECT COUNT(*) AS count
+        SELECT catalog.normalized_name, i.custom_name
         FROM inventory i
         LEFT JOIN product_catalog catalog ON i.catalog_product_id = catalog.id
         WHERE i.product_ean IS NULL
-          AND COALESCE(catalog.normalized_name, lower(trim(i.custom_name))) = ?
           AND (i.expiry_date IS NULL OR i.expiry_date >= ?)
       `,
-      [normalizeProductName(name), todayIso],
+      [todayIso],
     );
-    if (!result.rows || result.rows.length === 0) {
-      return 0;
+    let count = 0;
+    if (result.rows) {
+      for (let i = 0; i < result.rows.length; i++) {
+        const row = result.rows.item(i);
+        const candidate = row.normalized_name ?? (
+          row.custom_name == null ? null : normalizeProductName(row.custom_name)
+        );
+        if (candidate === normalizedName) {
+          count += 1;
+        }
+      }
     }
-    return Number(result.rows.item(0).count ?? 0);
+    return count;
   }
 
   async addToInventory(

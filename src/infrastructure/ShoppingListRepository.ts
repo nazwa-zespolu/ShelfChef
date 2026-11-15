@@ -11,6 +11,7 @@ import {
   ShoppingSuggestion,
 } from '../domain/types';
 import {ProductRepository} from './ProductRepository';
+import {normalizeProductName} from '../domain/productNames';
 import {db, runInTransaction} from './db/init';
 
 export type AddShoppingItemInput = {
@@ -745,18 +746,22 @@ export class ShoppingListRepository {
 
     const byName = db.execute(
       `
-        SELECT id, quantity, status
+        SELECT id, label, quantity, status
         FROM shopping_list_items
         WHERE list_id = ?
           AND catalog_product_id IS NULL
-          AND lower(trim(label)) = ?
         ORDER BY sort_order ASC, created_at ASC
-        LIMIT 1
       `,
-      [listId, suggestion.normalizedName],
+      [listId],
     );
-    if (byName.rows && byName.rows.length > 0) {
-      return mapShoppingSuggestionTarget(byName.rows.item(0));
+    const normalizedName = normalizeProductName(suggestion.normalizedName);
+    if (byName.rows) {
+      for (let i = 0; i < byName.rows.length; i++) {
+        const row = byName.rows.item(i);
+        if (normalizeProductName(row.label) === normalizedName) {
+          return mapShoppingSuggestionTarget(row);
+        }
+      }
     }
     return null;
   }
