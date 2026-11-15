@@ -23,6 +23,15 @@ export interface ProductDefinition {
     createdAt: string;
   }
 
+export interface InventoryItemChanges {
+  expiryDate: string | null;
+  // Omitted preserves both stored opening fields.
+  opening?: {
+    isOpened: boolean;
+    openedAt: string | null;
+  };
+}
+
 export type CatalogProductKind = 'generic' | 'specific';
 
 export interface CatalogProduct {

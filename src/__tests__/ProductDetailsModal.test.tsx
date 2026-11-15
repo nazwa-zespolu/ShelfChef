@@ -1,5 +1,5 @@
 import React from 'react';
-import {AppState} from 'react-native';
+import {AppState, Text} from 'react-native';
 import ReactTestRenderer, {act} from 'react-test-renderer';
 import {ProductDetailsModal} from '../components/ProductDetailsModal';
 import type {InventoryItem} from '../domain/types';
@@ -23,7 +23,7 @@ jest.mock('lucide-react-native', () => {
   return {CalendarDays: MockIcon, Package: MockIcon};
 });
 
-const inventoryItem = (openedAt: string): InventoryItem => ({
+const inventoryItem = (openedAt: InventoryItem['openedAt']): InventoryItem => ({
   id: '1',
   catalogProductId: null,
   ean: '',
@@ -118,7 +118,7 @@ describe('UI: ProductDetailsModal opening date limits', () => {
 
     expect(openingWheel('Rok').props.values.at(-1)).toBe(after.getFullYear());
     await press('product-details-save');
-    expect(onSave).toHaveBeenCalledWith({expiryDate: '2026-05-20', openedAt});
+    expect(onSave).toHaveBeenCalledWith({expiryDate: '2026-05-20'});
 
     if (before.getFullYear() !== after.getFullYear()) {
       await act(() => openingWheel('Rok').props.onValueChange(after.getFullYear()));
@@ -150,6 +150,70 @@ describe('UI: ProductDetailsModal opening date limits', () => {
 
     expect(openingWheel('Miesiąc').props.values.at(-1)).toBe(5);
     await press('product-details-save');
-    expect(onSave).toHaveBeenCalledWith({expiryDate: '2026-05-11', openedAt});
+    expect(onSave).toHaveBeenCalledWith({expiryDate: '2026-05-11'});
+  });
+
+  it.each([
+    ['missing', null],
+    ['undefined', undefined],
+    ['invalid', 'not-a-date'],
+    ['future', '2099-01-01T10:00:00.000Z'],
+  ] as const)('keeps an opened item with a %s date unchanged when only expiry is edited', async (_, openedAt) => {
+    jest.setSystemTime(new Date(2026, 3, 8, 12));
+    await renderModal(inventoryItem(openedAt));
+    expect(renderer!.root.findAllByType(Text).map(node => node.props.children)).toContain('Brak daty otwarcia');
+    expect(renderer!.root.findByProps({testID: 'product-opening-date-field'})).toBeDefined();
+    await press('product-state-opened');
+    await press('product-expiry-field');
+    await act(() => renderer!.root.findByProps({testID: 'product-expiry-picker'})
+      .findByProps({label: 'Dzień'}).props.onValueChange(11));
+    await press('product-details-save');
+    expect(onSave).toHaveBeenCalledWith({expiryDate: '2026-05-11'});
+  });
+
+  it.each([null, 'not-a-date'])('sets a missing or invalid opening date only after an explicit choice: %s', async openedAt => {
+    const now = new Date(2026, 3, 8, 12);
+    jest.setSystemTime(now);
+    await renderModal(inventoryItem(openedAt));
+    await press('product-opening-date-field');
+    expect(openingWheel('Dzień').props.values.at(-1)).toBe(8);
+    expect(openingWheel('Miesiąc').props.values.at(-1)).toBe(4);
+    await act(() => openingWheel('Dzień').props.onValueChange(5));
+    await press('product-details-save');
+    const selected = new Date(now);
+    selected.setDate(5);
+    expect(onSave).toHaveBeenCalledWith({
+      expiryDate: '2026-05-20', opening: {isOpened: true, openedAt: selected.toISOString()},
+    });
+  });
+
+  it('does not normalize or write an unchanged timestamp when a wheel reports the selected day', async () => {
+    jest.setSystemTime(new Date(2026, 3, 8, 12));
+    const openedAt = '2026-04-07T09:30:45.123+02:00';
+    await renderModal(inventoryItem(openedAt));
+    await press('product-opening-date-field');
+    await act(() => openingWheel('Dzień').props.onValueChange(7));
+    await press('product-details-save');
+    expect(onSave).toHaveBeenCalledWith({expiryDate: '2026-05-20'});
+  });
+
+  it('closes an opened item without a date only after the user changes its state', async () => {
+    await renderModal(inventoryItem(null));
+    await press('product-state-closed');
+    expect(renderer!.root.findAllByProps({testID: 'product-opening-date-field'})).toHaveLength(0);
+    await press('product-details-save');
+    expect(onSave).toHaveBeenCalledWith({
+      expiryDate: '2026-05-20', opening: {isOpened: false, openedAt: null},
+    });
+  });
+
+  it('preserves the original timestamp when the user changes the date and then restores it', async () => {
+    jest.setSystemTime(new Date(2026, 3, 8, 12));
+    await renderModal(inventoryItem('2026-04-07T09:30:45.123+02:00'));
+    await press('product-opening-date-field');
+    await act(() => openingWheel('Dzień').props.onValueChange(5));
+    await act(() => openingWheel('Dzień').props.onValueChange(7));
+    await press('product-details-save');
+    expect(onSave).toHaveBeenCalledWith({expiryDate: '2026-05-20'});
   });
 });

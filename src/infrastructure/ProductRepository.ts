@@ -1,5 +1,5 @@
 import { db, runInTransaction } from './db/init';
-import { CatalogProduct, DietaryFlags, ProductDefinition, InventoryItem } from '../domain/types';
+import { CatalogProduct, DietaryFlags, ProductDefinition, InventoryItem, InventoryItemChanges } from '../domain/types';
 import { DietPreference } from '../features/recipe-generator/domain/recipeGenerationTypes';
 import {
   DietaryCategorizationCandidate,
@@ -33,10 +33,7 @@ export interface ProductRepositoryDebugSnapshot {
   appSettings: Record<string, unknown>[];
 }
 
-export interface UpdateInventoryItemInput {
-  expiryDate: string | null;
-  openedAt: string | null;
-}
+export type UpdateInventoryItemInput = InventoryItemChanges;
 
 export interface SaveGenericCatalogProductInput {
   name: string;
@@ -712,11 +709,15 @@ export class ProductRepository {
   }
 
   async updateInventoryItem(id: string, input: UpdateInventoryItemInput): Promise<void> {
+    if (!input.opening) {
+      db.execute('UPDATE inventory SET expiry_date = ? WHERE id = ?', [input.expiryDate, id]);
+      return;
+    }
     db.execute(
       `UPDATE inventory
        SET expiry_date = ?, is_opened = ?, opened_at = ?
        WHERE id = ?`,
-      [input.expiryDate, input.openedAt === null ? 0 : 1, input.openedAt, id],
+      [input.expiryDate, input.opening.isOpened ? 1 : 0, input.opening.isOpened ? input.opening.openedAt : null, id],
     );
   }
 

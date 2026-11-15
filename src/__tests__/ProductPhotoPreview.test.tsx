@@ -196,7 +196,7 @@ describe('UI: Product photo preview in the existing native modal', () => {
       expect(isOpen()).toBe(false);
       expect(onClose).not.toHaveBeenCalled();
       await press('product-details-save');
-      expect(onSave).toHaveBeenCalledWith({ expiryDate: null, openedAt: null });
+      expect(onSave).toHaveBeenCalledWith({ expiryDate: null });
       await back();
       expect(onClose).toHaveBeenCalledTimes(1);
     },

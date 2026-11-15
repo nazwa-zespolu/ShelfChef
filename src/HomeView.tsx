@@ -325,8 +325,10 @@ export default function HomeView({
               ? {
                   ...item,
                   expiryDate: changes.expiryDate,
-                  isOpened: changes.openedAt !== null,
-                  openedAt: changes.openedAt,
+                  ...(changes.opening ? {
+                    isOpened: changes.opening.isOpened,
+                    openedAt: changes.opening.isOpened ? changes.opening.openedAt : null,
+                  } : {}),
                 }
               : item,
           ),
