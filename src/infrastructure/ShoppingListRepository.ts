@@ -620,6 +620,7 @@ export class ShoppingListRepository {
             i.id,
             i.label,
             i.quantity,
+            (i.catalog_product_id IS NULL AND linked.item_id IS NULL) AS needs_generic_product,
             COALESCE(c.id, linked_catalog.id) AS inventory_catalog_product_id,
             COALESCE(c.product_ean, linked_catalog.product_ean) AS product_ean,
             COALESCE(c.name, linked_catalog.name, i.label) AS inventory_name
@@ -649,6 +650,13 @@ export class ShoppingListRepository {
         for (let i = 0; i < result.rows.length; i++) {
           const row = result.rows.item(i);
           const quantity = Number(row.quantity);
+          let catalogProductId = row.inventory_catalog_product_id ?? null;
+          let inventoryName = row.inventory_name;
+          if (row.needs_generic_product) {
+            const product = this.products.saveGenericCatalogProductInTransaction({name: row.label});
+            catalogProductId = product.id;
+            inventoryName = product.name;
+          }
           for (let n = 0; n < quantity; n++) {
             const inventoryId = generateId('inv');
             inventoryIds.push(inventoryId);
@@ -657,9 +665,9 @@ export class ShoppingListRepository {
                VALUES (?, ?, ?, ?, ?, ?)`,
               [
                 inventoryId,
-                row.inventory_catalog_product_id ?? null,
+                catalogProductId,
                 row.product_ean ?? null,
-                row.inventory_name,
+                inventoryName,
                 expiryDateByItemId[row.id] ?? null,
                 nowIso(),
               ],

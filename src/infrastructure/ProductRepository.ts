@@ -140,45 +140,48 @@ export class ProductRepository {
   }
 
   async saveGenericCatalogProduct(input: SaveGenericCatalogProductInput): Promise<CatalogProduct> {
-    // Reusing a name adds copies; shared data is edited only through the catalog.
-    return runInTransaction(() => {
-      const trimmedName = input.name.trim();
-      const normalizedName = normalizeProductName(trimmedName);
-      const id = `catalog-generic-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
-      db.execute(
-        `
-          INSERT INTO product_catalog (
-            id,
-            name,
-            normalized_name,
-            kind,
-            product_ean,
-            brand,
-            category,
-            image_url,
-            parent_catalog_product_id,
-            created_at,
-            updated_at
-          )
-          VALUES (?, ?, ?, 'generic', NULL, ?, ?, ?, NULL, datetime('now'), datetime('now'))
-          ON CONFLICT(kind, normalized_name) WHERE kind = 'generic' DO NOTHING
-        `,
-        [
-          id,
-          trimmedName,
-          normalizedName,
-          input.brand?.trim() || null,
-          input.category?.trim() || null,
-          input.imageUrl ?? null,
-        ],
-      );
+    return runInTransaction(() => this.saveGenericCatalogProductInTransaction(input));
+  }
 
-      const found = this.readCatalogProducts('catalog.kind = ? AND catalog.normalized_name = ?', ['generic', normalizedName])[0];
-      if (!found) {
-        throw new Error(`Catalog product not found after save: ${trimmedName}`);
-      }
-      return found;
-    });
+  // The caller owns the transaction so catalog creation can commit with inventory writes.
+  saveGenericCatalogProductInTransaction(input: SaveGenericCatalogProductInput): CatalogProduct {
+    // Reusing a name adds copies; shared data is edited only through the catalog.
+    const trimmedName = input.name.trim();
+    const normalizedName = normalizeProductName(trimmedName);
+    const id = `catalog-generic-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+    db.execute(
+      `
+        INSERT INTO product_catalog (
+          id,
+          name,
+          normalized_name,
+          kind,
+          product_ean,
+          brand,
+          category,
+          image_url,
+          parent_catalog_product_id,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, 'generic', NULL, ?, ?, ?, NULL, datetime('now'), datetime('now'))
+        ON CONFLICT(kind, normalized_name) WHERE kind = 'generic' DO NOTHING
+      `,
+      [
+        id,
+        trimmedName,
+        normalizedName,
+        input.brand?.trim() || null,
+        input.category?.trim() || null,
+        input.imageUrl ?? null,
+      ],
+    );
+
+    const found = this.readCatalogProducts('catalog.kind = ? AND catalog.normalized_name = ?', ['generic', normalizedName])[0];
+    if (!found) {
+      throw new Error(`Catalog product not found after save: ${trimmedName}`);
+    }
+    return found;
   }
 
   async findCatalogProductByNormalizedName(

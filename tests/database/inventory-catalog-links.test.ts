@@ -200,7 +200,7 @@ describe('Inventory catalog links', () => {
   });
 
   it.each(['no alternatives', 'ambiguous generic alternatives', 'ambiguous specific alternatives'])(
-    'keeps purchased text unlinked with %s even when its label matches a catalog product',
+    'resolves purchased text with %s when its label matches a catalog product',
     async scenario => {
       const first = await createProduct(scenario === 'ambiguous specific alternatives' ? 'specific' : 'generic');
       const second = await products.saveGenericCatalogProduct({name: 'Inna zupa'});
@@ -219,16 +219,23 @@ describe('Inventory catalog links', () => {
       }
 
       await shopping.completePurchase(list.id);
-      const expected = [
-        expect.objectContaining({
-          name: label, ean: '', catalogProductId: null,
-          brand: null, category: null, imageUrl: null,
-        }),
-      ];
-      expect(await products.getFullInventory()).toEqual(expected);
+      const hasAlternatives = scenario !== 'no alternatives';
+      const expected = {
+        name: hasAlternatives ? label : first.name,
+        ean: '',
+        catalogProductId: hasAlternatives ? null : first.id,
+        brand: hasAlternatives ? null : first.brand,
+        category: hasAlternatives ? null : first.category,
+        imageUrl: hasAlternatives ? null : first.imageUrl,
+      };
+      expect(await products.getFullInventory()).toEqual([expect.objectContaining(expected)]);
 
       renameProduct(first, 'Żurek domowy');
-      expect(await products.getFullInventory()).toEqual(expected);
+      sqlite.reopen();
+      setupDatabase();
+      expect(await products.getFullInventory()).toEqual([
+        expect.objectContaining({...expected, name: hasAlternatives ? label : 'Żurek domowy'}),
+      ]);
     },
   );
 
