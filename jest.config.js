@@ -6,9 +6,6 @@ const tsJestTransformCfg = createDefaultPreset().transform;
 module.exports = {
   testEnvironment: "node",
   testMatch: ["<rootDir>/tests/**/*.test.ts", "<rootDir>/tests/**/*.test.tsx"],
-  moduleNameMapper: {
-    "^@env$": "<rootDir>/src/__mocks__/env.ts",
-  },
   transform: {
     ...tsJestTransformCfg,
   },
