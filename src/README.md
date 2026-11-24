@@ -1,97 +1,75 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# ShelfChef — mobile app
 
-# Getting Started
+The app is an [Expo](https://docs.expo.dev) (SDK 56, React Native 0.85) project using
+[Continuous Native Generation](https://docs.expo.dev/workflow/continuous-native-generation/).
+The `android/` and `ios/` folders are **not** committed: they are generated from `app.json`
+and the config plugins in `plugins/` whenever you build. Change native settings
+(identifiers, permissions, icons, orientation, …) in `app.json`, never in generated files.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+The app uses native libraries that are not part of Expo Go, so it runs in a
+**development build** (`expo-dev-client`), not in Expo Go.
 
-## Step 1: Start Metro
+## Prerequisites
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+- Node.js 22.11 or newer
+- Android: Android Studio with an SDK, an emulator or a device with USB debugging, and JDK 17
+- iOS (macOS only): Xcode and CocoaPods
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+## Install
 
-```sh
-# Using npm
-npm start
-
-# OR using Yarn
-yarn start
-```
-
-## Step 2: Build and run your app
-
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
+From the repository root:
 
 ```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
+npm ci
+npm --prefix src ci
 ```
 
-### iOS
-
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+## Run on Android
 
 ```sh
-bundle install
+cd src
+npm run android        # npx expo run:android
 ```
 
-Then, and every time you update your native dependencies, run:
+The first run generates `android/`, builds and installs the development build, and starts
+Metro. Later, when only JavaScript changed, it is enough to start Metro and open the
+installed app:
 
 ```sh
-bundle exec pod install
+npm start              # npx expo start --dev-client
 ```
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+Rebuild with `npm run android` after adding or updating a library with native code or after
+changing `app.json` / `plugins/`. To regenerate the native project from scratch:
 
 ```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
+npx expo prebuild --clean
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+## Run on iOS
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+```sh
+cd src
+npm run ios            # npx expo run:ios
+```
 
-## Step 3: Modify your app
+iOS is configured in `app.json` but has not been verified yet.
 
-Now that you have successfully run the app, let's make changes!
+## Tests and checks
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+From the repository root:
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+```sh
+npm test               # logic tests (tests/) and UI tests (src/__tests__, jest-expo preset)
+```
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+From `src/`:
 
-## Congratulations! :tada:
+```sh
+npm run lint
+npx tsc --noEmit
+npx expo-doctor
+npx expo install --check   # dependency versions match the Expo SDK
+```
 
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+Add libraries with `npx expo install <package>` so that versions match the SDK.

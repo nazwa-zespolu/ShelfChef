@@ -9,6 +9,7 @@ import {
   type ViewStyle,
   View,
 } from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {colors} from '../../theme/colors';
 
 export function DraggableBottomSheet({
@@ -33,6 +34,10 @@ export function DraggableBottomSheet({
   children: React.ReactNode;
 }) {
   const translateY = useRef(new Animated.Value(0)).current;
+  // Android is edge-to-edge under Expo, so the sheet reaches behind the navigation bar.
+  // Callers can still override paddingBottom through sheetStyle.
+  const insets = useSafeAreaInsets();
+  const bottomPadding = Math.max(insets.bottom, 16);
 
   const closeWithDrag = useCallback(() => {
     Animated.timing(translateY, {
@@ -94,7 +99,7 @@ export function DraggableBottomSheet({
         <Animated.View
           accessibilityElementsHidden={accessibilityContentHidden}
           importantForAccessibility={accessibilityContentHidden ? 'no-hide-descendants' : 'auto'}
-          style={[styles.sheet, sheetStyle, {transform: [{translateY}]}]}>
+          style={[styles.sheet, {paddingBottom: bottomPadding}, sheetStyle, {transform: [{translateY}]}]}>
           <View style={[styles.handleTouch, handleStyle]} {...dragResponder.panHandlers}>
             <View style={styles.handle} />
             {handleContent}
