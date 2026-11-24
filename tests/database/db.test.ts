@@ -23,7 +23,7 @@ describe('ProductRepository + database integration', () => {
 
   afterAll(() => sqlite.close());
 
-  it('tworzy od razu kompletny schemat bez danych demonstracyjnych', async () => {
+  it('tworzy od razu kompletny schemat bez danych demonstracyjnych', () => {
     const columns = (table: string) => {
       const rows = db.execute(`PRAGMA table_info(${table})`).rows!;
       return Array.from({length: rows.length}, (_, index) => rows.item(index).name);
@@ -40,14 +40,15 @@ describe('ProductRepository + database integration', () => {
     for (const table of ['inventory', 'product_definitions', 'product_catalog', 'app_settings', 'shopping_lists']) {
       expect(db.execute(`SELECT COUNT(*) AS count FROM ${table}`).rows!.item(0).count).toBe(0);
     }
-    expect(await repository.getRecipeModelConsentState()).toBe('unknown');
   });
 
   it('zachowuje dane i ustawienia po ponownym otwarciu bazy, bez przywracania usuniętych produktów', async () => {
     await repository.addToInventory('keep', null, 'Jabłko', '2030-01-01');
     await repository.addToInventory('remove', null, 'Gruszka', null);
     await repository.markAsOpened('keep', '2026-09-08T10:00:00.000Z');
-    await repository.setRecipeModelConsent(true);
+    const settingKey = 'test_setting';
+    const settingValue = 'saved';
+    db.execute('INSERT INTO app_settings (key, value) VALUES (?, ?)', [settingKey, settingValue]);
     await repository.removeFromInventory('remove');
     const before = await repository.getFullInventory();
 
@@ -57,7 +58,9 @@ describe('ProductRepository + database integration', () => {
 
     expect(await repository.getFullInventory()).toEqual(before);
     expect(before).toHaveLength(1);
-    expect(await repository.getRecipeModelConsentState()).toBe('accepted');
+    const settings = db.execute('SELECT value FROM app_settings WHERE key = ?', [settingKey]).rows!;
+    expect(settings.length).toBe(1);
+    expect(settings.item(0).value).toBe(settingValue);
   });
 
   it('wycofuje nieudaną inicjalizację i pozwala przygotować bazę ponownie', async () => {
@@ -203,36 +206,6 @@ describe('ProductRepository + database integration', () => {
       isGlutenFree: true,
       isLactoseFree: false,
     });
-  });
-
-  it('filtruje skladniki po diecie wegetarianskiej', async () => {
-    await repository.saveDefinition({
-      ean: '111',
-      name: 'Jajka',
-      dietary: {
-        isVegetarian: true,
-        isVegan: false,
-        isGlutenFree: true,
-        isLactoseFree: true,
-      },
-    });
-    await repository.saveDefinition({
-      ean: '222',
-      name: 'Kurczak',
-      dietary: {
-        isVegetarian: false,
-        isVegan: false,
-        isGlutenFree: true,
-        isLactoseFree: true,
-      },
-    });
-
-    await repository.addToInventory('inv-1', '111', null, '2026-01-01');
-    await repository.addToInventory('inv-2', '222', null, '2026-01-02');
-
-    const names = await repository.getRecipeIngredientNames('vegetarian');
-
-    expect(names).toEqual(['Jajka']);
   });
 
   it('zwraca null, gdy brak definicji dla EAN', async () => {

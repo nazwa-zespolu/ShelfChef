@@ -7,7 +7,6 @@ import {Button, Text} from 'react-native';
 import ReactTestRenderer, {act} from 'react-test-renderer';
 import App from '../App';
 import HomeView from '../HomeView';
-import RecipeGeneratorView from '../RecipeGeneratorView';
 import BottomNav from '../components/BottomNav';
 import ProductScannerView from '../ProductScannerView';
 import {setupDatabase} from '../infrastructure/db/init';
@@ -15,11 +14,8 @@ import {setupDatabase} from '../infrastructure/db/init';
 jest.mock('../infrastructure/db/init', () => ({setupDatabase: jest.fn()}));
 jest.mock('../HomeView', () => jest.fn(() => null));
 jest.mock('../ProductScannerView', () => jest.fn(() => null));
-jest.mock('../RecipeGeneratorView', () => jest.fn(() => null));
 jest.mock('../ShoppingListView', () => jest.fn(() => null));
 jest.mock('../components/BottomNav', () => jest.fn(() => null));
-jest.mock('react-native-executorch', () => ({initExecutorch: jest.fn()}));
-jest.mock('react-native-executorch-bare-resource-fetcher', () => ({BareResourceFetcher: {}}), {virtual: true});
 jest.mock('react-native-safe-area-context', () => ({
   SafeAreaProvider: require('react-native').View,
 }));
@@ -43,7 +39,6 @@ afterEach(async () => {
 test('initializes the database before mounting any database-dependent screens', async () => {
   jest.mocked(setupDatabase).mockImplementation(() => {
     expect(HomeView).not.toHaveBeenCalled();
-    expect(RecipeGeneratorView).not.toHaveBeenCalled();
     expect(BottomNav).not.toHaveBeenCalled();
   });
 
@@ -53,7 +48,6 @@ test('initializes the database before mounting any database-dependent screens', 
 
   expect(setupDatabase).toHaveBeenCalledTimes(1);
   expect(HomeView).toHaveBeenCalled();
-  expect(RecipeGeneratorView).toHaveBeenCalled();
   expect(BottomNav).toHaveBeenCalled();
 });
 
@@ -66,7 +60,6 @@ test('keeps screens unmounted on database failure and opens them after a success
   });
 
   expect(HomeView).not.toHaveBeenCalled();
-  expect(RecipeGeneratorView).not.toHaveBeenCalled();
   expect(BottomNav).not.toHaveBeenCalled();
   expect(consoleError).toHaveBeenCalledWith('[ShelfChef] setupDatabase failed', failure);
   expect(renderer.root.findAllByType(Text).some(
@@ -79,7 +72,7 @@ test('keeps screens unmounted on database failure and opens them after a success
 
   expect(setupDatabase).toHaveBeenCalledTimes(2);
   expect(HomeView).toHaveBeenCalled();
-  expect(RecipeGeneratorView).toHaveBeenCalled();
+  expect(BottomNav).toHaveBeenCalled();
   expect(renderer.root.findAllByType(Button)).toHaveLength(0);
 });
 

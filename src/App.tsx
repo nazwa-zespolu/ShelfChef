@@ -10,19 +10,10 @@ import {ActivityIndicator, BackHandler, Button, StyleSheet, Text, View} from 're
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import HomeView from './HomeView';
 import ProductScannerView from './ProductScannerView';
-import RecipeGeneratorView from './RecipeGeneratorView';
 import ShoppingListView from './ShoppingListView';
 import {setupDatabase} from './infrastructure/db/init';
-import {initExecutorch} from 'react-native-executorch';
-import {BareResourceFetcher} from 'react-native-executorch-bare-resource-fetcher';
 import BottomNav, {AppTab} from './components/BottomNav';
 import {colors} from './theme/colors';
-
-try {
-  initExecutorch({resourceFetcher: BareResourceFetcher});
-} catch (e) {
-  console.error('[ShelfChef] initExecutorch failed', e);
-}
 
 function App() {
   //const isDarkMode = useColorScheme() === 'dark';
@@ -109,11 +100,6 @@ function App() {
               }}
             />
           ) : null}
-          <View
-            style={[styles.tabPanel, activeTab !== 'recipes' && styles.tabPanelHidden]}
-            pointerEvents={activeTab === 'recipes' ? 'auto' : 'none'}>
-            <RecipeGeneratorView />
-          </View>
           {activeTab === 'shopping' ? (
             <ShoppingListView
               onRequestClose={() => {
@@ -160,11 +146,5 @@ const styles = StyleSheet.create({
   databaseStatusText: {
     color: colors.textPrimary,
     textAlign: 'center',
-  },
-  tabPanel: {
-    flex: 1,
-  },
-  tabPanelHidden: {
-    display: 'none',
   },
 });

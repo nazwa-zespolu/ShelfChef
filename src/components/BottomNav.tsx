@@ -1,10 +1,10 @@
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Astroid, List, ScanBarcode, ShelvingUnit} from 'lucide-react-native';
+import {List, ScanBarcode, ShelvingUnit} from 'lucide-react-native';
 import {colors} from '../theme/colors';
 
-export type AppTab = 'pantry' | 'scan' | 'shopping' | 'recipes';
+export type AppTab = 'pantry' | 'scan' | 'shopping';
 
 type BottomNavProps = {
   activeTab: AppTab;
@@ -21,7 +21,6 @@ const TAB_ITEMS: {key: AppTab; label: string; Icon: NavIcon}[] = [
   {key: 'pantry', label: 'Spiżarnia', Icon: ShelvingUnit},
   {key: 'scan', label: 'Dodaj produkt', Icon: ScanBarcode},
   {key: 'shopping', label: 'Listy zakupów', Icon: List},
-  {key: 'recipes', label: 'Przepisy AI', Icon: Astroid},
 ];
 
 export default function BottomNav({activeTab, onTabChange}: BottomNavProps) {
