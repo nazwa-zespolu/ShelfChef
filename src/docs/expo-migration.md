@@ -63,9 +63,11 @@ PR 1  usunięcie executorch (bare RN)
                  └─ PR 8  iOS: Expo Go + EAS Build
 ```
 
-PR 3, 5 i 6 są od siebie niezależne i można je robić równolegle (konflikty tylko w `package.json` / lockfile). Po każdym PR aplikacja ma działać i `npm test` z katalogu głównego ma przechodzić.
+PR 3, 5 i 6 są od siebie niezależne i można je robić równolegle. Konflikty pojawią się w `package.json` / lockfile, w konfiguracji pluginów w `app.json` (PR 5 i 6) oraz w testach zdjęć i skanera (PR 3 i 5, PR 5 i 6). Drugi i trzeci z tych PR-ów przed scaleniem robi rebase, `npx expo prebuild --clean` i przebudowę klienta Androida, żeby próba obejmowała scaloną konfigurację. Po każdym PR aplikacja ma działać i `npm test` z katalogu głównego ma przechodzić.
 
-Wspólna checklista ręczna dla każdego PR (Android, build deweloperski; od PR 7 także iPhone):
+Przed rozdzieleniem pracy nad PR 3–6 ustalone są trzy rzeczy, które wpływają na dane zapisywane w trakcie migracji: format zapisu zdjęć (PR 5), obsługiwane kody kreskowe (PR 6) i zachowanie bazy z PR 3 po wejściu PR 4. Wszystkie trzy są rozstrzygnięte w opisach PR-ów poniżej.
+
+Wspólna checklista ręczna dla każdego PR (Android, build deweloperski; po PR 7 szybka próba na iPhonie w Expo Go, pełna checklista iOS w PR 8):
 
 - start aplikacji, ekran spiżarni z danymi;
 - skan kodu EAN → dodanie produktu; ręczne dodanie produktu;
@@ -100,7 +102,7 @@ Gałąź: `refactor/remove-recipe-generator`. Baza: bare RN, bez Expo.
 **Weryfikacja**
 
 - `npm test`, build Androida, dolna nawigacja ma trzy zakładki.
-- `grep -rn "executorch\|recipe-generator\|RecipeGenerator\|@env\|PIXABAY" src tests` nic nie zwraca (poza `node_modules`).
+- `grep -rn "executorch\|recipe-generator\|RecipeGenerator\|@env\|PIXABAY" src tests --exclude-dir=node_modules --exclude-dir=docs` nic nie zwraca. `src/docs/` jest wyłączone, bo ten plan i `recipe-dataset.md` celowo wymieniają dawne nazwy.
 
 **Uwagi**
 
@@ -117,7 +119,8 @@ Gałąź: `feat/expo-adoption`. Największy PR konfiguracyjny; kod aplikacji pra
 1. Zależności (w `src/`):
    - `npm install expo@^56` → `npx expo install --fix` (wyrówna `react`, `react-native` 0.85.3, `react-native-svg`, `react-native-safe-area-context`, TypeScript).
    - dodać `expo-dev-client`, `jest-expo`;
-   - usunąć `@react-native-community/cli*`, `@react-native/metro-config`, `@react-native/babel-preset`, `@react-native/jest-preset`, `@react-native/typescript-config`, `@react-native/new-app-screen`, `@babel/preset-env`.
+   - usunąć `@react-native-community/cli*`, `@react-native/metro-config`, `@react-native/babel-preset`, `@react-native/typescript-config`, `@react-native/new-app-screen`, `@babel/preset-env`;
+   - **zostawić** `@react-native/jest-preset` jawnie w `devDependencies`, w wersji zgodnej z RN — `jest-expo` deklaruje go jako wymagany peer i ładuje przez `require`. Zmienia się tylko pole `preset` w konfiguracji Jesta.
 2. Wejście: `src/index.js` → `registerRootComponent(App)` z `expo`; `"main": "index.js"` w `src/package.json`.
 3. Skrypty: `start` → `expo start`, `android` → `expo run:android`, `ios` → `expo run:ios`.
 4. `src/app.json` w formacie Expo. Szkic:
@@ -128,6 +131,7 @@ Gałąź: `feat/expo-adoption`. Największy PR konfiguracyjny; kod aplikacji pra
        "name": "ShelfChef",
        "slug": "shelfchef",
        "version": "1.0.0",
+       "icon": "./assets/icon.png",
        "orientation": "portrait",
        "userInterfaceStyle": "light",
        "newArchEnabled": true,
@@ -151,23 +155,26 @@ Gałąź: `feat/expo-adoption`. Największy PR konfiguracyjny; kod aplikacji pra
    ```
 
    Nazwy pól zweryfikować z dokumentacją SDK 56 (`npx expo config --type prebuild` pokaże wynik). `READ_EXTERNAL_STORAGE` z `maxSdkVersion=32` wymaga osobnego wpisu lub pluginu — sprawdzić, czy `react-native-image-picker` w ogóle go potrzebuje.
-5. CNG: `git rm -r src/android src/ios src/Gemfile src/.bundle`; do `src/.gitignore` dodać `/android`, `/ios`, `.expo/`; z głównego `.gitignore` usunąć wyjątek `!src/android/gradle/wrapper/gradle-wrapper.jar`.
-6. `babel.config.js` → `babel-preset-expo`. `metro.config.js` → `getDefaultConfig` z `expo/metro-config`. `tsconfig.json` → `extends: "expo/tsconfig.base"`.
-7. Jest w `src/`: `preset: 'jest-expo'`. Dotychczasowe mocki bibliotek natywnych zostają.
-8. README (główny i `src/README.md`): nowa instrukcja uruchamiania (`npm --prefix src ci`, `npx expo run:android`, potem `npx expo start`).
+5. Ikona: **przed** usunięciem katalogów natywnych skopiować `src/ios/ShelfChef/Images.xcassets/AppIcon.appiconset/Icon-ios-marketing-1024x1024@1x.png` do `src/assets/icon.png` (wpis `expo.icon` wyżej). Wygenerowane `mipmap-*` na Androidzie zastąpi prebuild.
+6. CNG: `git rm -r src/android src/ios src/Gemfile src/.bundle`; do `src/.gitignore` dodać `/android`, `/ios`, `.expo/`; z głównego `.gitignore` usunąć wyjątek `!src/android/gradle/wrapper/gradle-wrapper.jar`.
+7. `babel.config.js` → `babel-preset-expo`. `metro.config.js` → `getDefaultConfig` z `expo/metro-config`. `tsconfig.json` → `extends: "expo/tsconfig.base"`.
+8. Jest w `src/`: `preset: 'jest-expo'`. Dotychczasowe mocki bibliotek natywnych zostają.
+9. README (główny i `src/README.md`): nowa instrukcja uruchamiania (`npm --prefix src ci`, `npx expo run:android`, potem `npx expo start`).
 
 **Weryfikacja**
 
-- `npx expo-doctor` i `npx expo install --check` bez błędów.
+- `npx expo install --check` bez błędów.
+- `npx expo-doctor`: wynik zapisany w opisie PR. Ostrzeżenia o bibliotekach, które usuwają kolejne PR-y (quick-sqlite w PR 3, vision-camera w PR 6, rn-fs / image-picker w PR 5), są akceptowalne — przy każdym podać numer PR, który je usuwa. Inne ostrzeżenia trzeba rozwiązać.
+- `npm ci && npm --prefix src ci` na czystym klonie, potem `npm test` (oba zestawy) — sprawdza, czy zestaw UI działa z lockfile, bez polegania na automatycznie doinstalowanych peerach.
 - `npx expo prebuild --clean` + `npx expo run:android` na czystym klonie.
-- `npm test` (oba zestawy) + checklista ręczna.
+- W wygenerowanym `AndroidManifest.xml`: `android.hardware.camera` z `required="false"` (dziś jest, CNG może go zgubić) i brak `RECORD_AUDIO`. W razie potrzeby uzupełnić w `app.json` / opcjach pluginów.
+- Checklista ręczna, w tym skan i zapis produktu.
 
 **Ryzyka**
 
 - **Edge-to-edge.** Dziś `edgeToEdgeEnabled=false`; w Expo edge-to-edge na Androidzie jest włączone zawsze. Sprawdzić na Androidzie < 16: `BottomNav`, bottom sheety, `FormScrollView`, `useKeyboardVisible` (zachowanie `adjustResize` się zmienia). Poprawki insetów mieszczą się w tym PR.
 - **Podpis debug.** Jeśli instalacja na urządzeniu z poprzednią wersją kończy się `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, odinstalować starą aplikację.
-- **iOS** w tym PR jest tylko konfigurowany (`bundleIdentifier`, opisy uprawnień), nie weryfikowany — pierwsze uruchomienie na iPhonie następuje w PR 8.
-- **Ikona aplikacji** (issue #25) staje się jednym wpisem w `app.json` — można dorzucić tu albo zostawić osobno.
+- **iOS** w tym PR jest tylko konfigurowany (`bundleIdentifier`, opisy uprawnień, ikona), nie weryfikowany. Na tym etapie Expo Go i tak nie uruchomi projektu (vision-camera, quick-sqlite, SDK 56); pierwsza próba na iPhonie jest po PR 7.
 
 ---
 
@@ -178,32 +185,43 @@ Gałąź: `refactor/expo-sqlite`. Zależy od PR 2.
 **Zakres**
 
 1. `npx expo install expo-sqlite`; usunąć `react-native-quick-sqlite`.
-2. Nowy moduł `src/infrastructure/db/client.ts` — jedyne miejsce importujące `expo-sqlite`. Zachowuje dotychczasowy kształt `db.execute(sql, params) → {rows: {length, item(i)}}`, żeby repozytoria (`ProductRepository` ~49 wywołań, `ShoppingListRepository` ~44, `productPhotoFiles`) nie wymagały zmian. Szkic:
+2. Nowy moduł `src/infrastructure/db/client.ts` — jedyne miejsce importujące `expo-sqlite`. Zachowuje dotychczasowy kształt `db.execute(sql, params) → {rows: {length, item(i)}}`, żeby repozytoria (`ProductRepository` ~49 wywołań, `ShoppingListRepository` ~44, `productPhotoFiles`) nie wymagały zmian.
+
+   **Połączenie otwierane leniwie, nie przy imporcie.** Dziś `open()` wykonuje się przy imporcie `init.ts`, a ekran „Spróbuj ponownie” w `App.tsx` łapie tylko wyjątki z `setupDatabase()`. Błąd otwarcia pliku przerwałby ładowanie aplikacji przed zamontowaniem tego ekranu. Szkic:
 
    ```ts
-   import {openDatabaseSync, type SQLiteBindValue} from 'expo-sqlite';
+   import {openDatabaseSync, type SQLiteBindValue, type SQLiteDatabase} from 'expo-sqlite';
 
-   const database = openDatabaseSync('shelfchef.db');
-   database.execSync('PRAGMA foreign_keys = OFF'); // jawnie: tak jak dotąd
+   let database: SQLiteDatabase | null = null;
+
+   export function openDatabase(): SQLiteDatabase {
+     if (!database) {
+       const connection = openDatabaseSync('shelfchef.db');
+       connection.execSync('PRAGMA foreign_keys = OFF'); // jawnie: tak jak dotąd
+       database = connection; // przypisane dopiero po udanej konfiguracji, więc ponowienie zaczyna od zera
+     }
+     return database;
+   }
 
    export const db = {
      execute(sql: string, params: SQLiteBindValue[] = []) {
-       const rows = database.getAllSync<any>(sql, params);
+       const rows = openDatabase().getAllSync<any>(sql, params);
        return {rows: {length: rows.length, item: (index: number) => rows[index]}};
      },
    };
    ```
 
-   `init.ts` reeksportuje `db` i `runInTransaction` z nowego modułu, importy w reszcie kodu zostają.
+   `setupDatabase()` woła `openDatabase()` jako pierwszy krok, więc błąd otwarcia trafia na istniejący ekran błędu, a „Spróbuj ponownie” próbuje otworzyć bazę od nowa. `init.ts` reeksportuje `db` i `runInTransaction` z nowego modułu, importy w reszcie kodu zostają.
 3. Testy logiki (`tests/`): 18 plików ma własny `jest.mock('react-native-quick-sqlite', ...)`. Zastąpić je jednym mapowaniem w głównym `jest.config.js`: `'^expo-sqlite$' → tests/helpers/expo-sqlite.ts`, gdzie `openDatabaseSync` zwraca obiekt z `getAllSync` / `execSync` oparty o istniejący `tests/helpers/sqlite.ts` (`node:sqlite`). Kolejna zmiana sterownika nie dotknie już plików testowych.
 4. Testy UI: w `src/jest.setup.js` mock `expo-sqlite` zamiast quick-sqlite.
 5. `docs/db/schema.md`: zaktualizować wzmianki o QuickSQLite.
 
-**Do sprawdzenia na urządzeniu** (testy logiki biegną na `node:sqlite`, nie na `expo-sqlite`):
+**Kryteria odbioru na urządzeniu** (testy logiki biegną na `node:sqlite`, więc nie potwierdzą zachowania `expo-sqlite`):
 
-- czy `getAllSync` poprawnie wykonuje `INSERT` / `UPDATE` / `DELETE` oraz `BEGIN` / `COMMIT` / `ROLLBACK`. Jeśli nie — adapter kieruje zapytania niebędące `SELECT` / `PRAGMA` do `runSync`. Nigdzie nie używamy `rowsAffected` ani `insertId`, więc wynik zapisu nie jest potrzebny;
-- wiązanie parametrów `boolean` i `undefined` (helper testowy zamienia je na `0/1` i `null` — adapter powinien robić to samo);
-- wycofanie transakcji po błędzie w `addToInventoryBatch` i finalizacji zakupów.
+- `getAllSync` poprawnie wykonuje `INSERT` / `UPDATE` / `DELETE` oraz `BEGIN` / `COMMIT` / `ROLLBACK`. Jeśli nie — adapter kieruje zapytania niebędące `SELECT` / `PRAGMA` do `runSync`. Nigdzie nie używamy `rowsAffected` ani `insertId`, więc wynik zapisu nie jest potrzebny;
+- wiązanie parametrów `boolean` i `undefined` (helper testowy zamienia je na `0/1` i `null` — adapter robi to samo);
+- próba transakcji: zapis, wymuszony błąd drugiego zapisu w tej samej transakcji (np. tymczasowy przycisk debug albo `addToInventoryBatch` z naruszeniem `CHECK`), zamknięcie i ponowne otwarcie aplikacji — w bazie nie ma żadnego z zapisów;
+- nieudane pierwsze otwarcie bazy pokazuje ekran błędu, a ponowienie kończy się sukcesem (do sprawdzenia testem UI z mockiem `openDatabaseSync` rzucającym za pierwszym razem).
 
 **Skutek uboczny**: nowa lokalizacja pliku bazy = pusta baza po aktualizacji (decyzja B). Opisać w PR.
 
@@ -221,7 +239,7 @@ Gałąź: `feat/db-migrations`. Zależy od PR 3 (technicznie niezależny od ster
   1. odczytuje `user_version`;
   2. jeśli jest **większe** niż liczba znanych migracji (starsza aplikacja na nowszej bazie) — rzuca błąd; `App.tsx` ma już ekran błędu bazy;
   3. dla każdej brakującej migracji: `BEGIN` → migracja → `PRAGMA user_version = n` → `COMMIT`; przy błędzie `ROLLBACK` i przerwanie. Zmiana `user_version` jest częścią transakcji, więc baza nigdy nie zostaje w stanie pośrednim.
-- `001_baseline` = obecny schemat z `init.ts` przeniesiony 1:1.
+- `001_baseline` = obecny schemat z `init.ts` przeniesiony 1:1, **razem z `IF NOT EXISTS`**. Dzięki temu baza utworzona przez PR 3 (tabele są, `user_version = 0`) zostaje po prostu oznaczona jako wersja 1, bez utraty danych. Wyjątek od zasady „migracja nie zakłada istniejącego stanu” dotyczy tylko migracji 1. Nie mamy użytkowników, więc wystarczy to i jeden test poniżej; awaryjnie deweloper może wyczyścić dane, jak dotąd.
 - Uzupełnianie `product_catalog` z `product_definitions` przy starcie (dziś w `setupShoppingListsSchema`) **nie** jest migracją — zostaje jako osobny, idempotentny krok po `migrate()`. Zniknie przy okazji issue #38.
 - `setupDatabase()` = `migrate()` + powyższy krok; sygnatura bez zmian, więc `App.tsx` i testy wołają to samo.
 
@@ -238,6 +256,7 @@ Gałąź: `feat/db-migrations`. Zależy od PR 3 (technicznie niezależny od ster
 - ponowne uruchomienie nic nie zmienia;
 - błąd w migracji wycofuje jej zmiany i zostawia poprzednie `user_version`;
 - `user_version` z przyszłości → błąd;
+- baza w stanie z PR 3 (schemat bez `user_version`, produkt z EAN i powiązana pozycja zakupów) → wersja 1; po dwóch uruchomieniach rekordy i powiązania są zachowane, a uzupełnianie katalogu z definicji nie tworzy duplikatu;
 - od drugiej migracji: test „baza w wersji n−1 z danymi → wersja n zachowuje dane”.
 
 ---
@@ -252,16 +271,23 @@ Gałąź: `refactor/expo-photos`. Zależy od PR 2.
 - `src/infrastructure/productPhotos.ts`:
   - `launchCamera` / `launchImageLibrary` → `launchCameraAsync` / `launchImageLibraryAsync` (`result.canceled`, `assets[0].uri`, `fileName`, `mimeType`);
   - `PermissionsAndroid` → `requestCameraPermissionsAsync()`; `granted === false && canAskAgain === false` mapuje się na obecne `ProductPhotoPermissionError('blocked')`, zwykła odmowa na `'denied'`;
-  - `mkdir` + `copyFile` → API `expo-file-system`.
+  - `mkdir` + `copyFile` → API `expo-file-system`. Katalog `product-photos` tworzony idempotentnie (`Directory.create({idempotent: true, intermediates: true})`) — obecny kod woła `mkdir` przy każdej kopii, a domyślne `create()` rzuca błąd dla istniejącego katalogu, więc drugie zdjęcie by się nie zapisało.
 - `src/infrastructure/productPhotoFiles.ts`: `exists` / `unlink` → `expo-file-system`. Logika `retained` / `pending` / `deleting` bez zmian.
+- **Format zapisu zdjęć w bazie.** Dla własnych kopii zapisujemy ścieżkę względną `product-photos/product-<n>-<n>.<ext>` zamiast pełnego `file://…`. Pełny URI budujemy przy odczycie i usuwaniu względem bieżącego `Paths.document`. Powód: na iOS absolutna ścieżka kontenera aplikacji zmienia się przy reinstalacji i aktualizacji (także Expo Go z App Store i każdego nowego buildu EAS), więc zapisany URI przestaje wskazywać plik. Dotyczy to nas już teraz, na urządzeniach deweloperskich. Zmiana jest tania, bo nie ma danych do przeniesienia (reset w PR 3).
+  - jedna funkcja `photoUri(stored)` zamienia wartość z bazy na URI do wyświetlenia; wartości zaczynające się od `http(s)://` (zdjęcia z OFF) i `file://` / `content://` przechodzą bez zmian;
+  - sprawdzanie referencji w `isReferenced` i sprzątanie operują na wartości zapisanej (względnej), w obu tabelach (`product_catalog`, `product_definitions`);
+  - `managedPhotoPath` rozpoznaje własne pliki po wzorcu ścieżki względnej, a nie po prefiksie absolutnym — znika problem z formatem URI katalogu dokumentów w Expo (`file://` i końcowy ukośnik).
 - Usunąć `require(...)` w `try/catch` — w `jest-expo` moduły są mockowane standardowo.
-- Testy: `src/__tests__/productPhotos.test.ts`, `ProductCatalogView.test.tsx`, `ProductScannerView.test.tsx`, `tests/database/product-photo-*.test.ts` — podmiana mocków.
+- **Główny Jest.** `ProductRepository` importuje `productPhotoFiles`, więc po statycznym imporcie `expo-file-system` ładują go też testy logiki w `tests/` (Node + `ts-jest`, bez `jest-expo`). Dodać w głównym `jest.config.js` mapowanie `'^expo-file-system$' → tests/helpers/expo-file-system.ts` — minimalną implementację `File` / `Directory` / `Paths` na `node:fs` i katalogu tymczasowym, tak żeby testy sprzątania dalej działały na prawdziwych plikach.
+- Testy: `src/__tests__/productPhotos.test.ts`, `ProductCatalogView.test.tsx`, `ProductScannerView.test.tsx`, `tests/database/product-photo-*.test.ts` — podmiana mocków. Nowe przypadki:
+  - dwa zdjęcia dodane po kolei;
+  - zmiana katalogu bazowego (`Paths.document`) po zapisaniu rekordu: podgląd działa, używane zdjęcie jest chronione, zwolniona kopia zostaje usunięta;
+  - URL z OFF i plik spoza `product-photos` nigdy nie są usuwane.
 
 **Na co uważać**
 
-- `managedPhotoPath` rozpoznaje własne pliki po prefiksie `file://${DocumentDirectoryPath}/product-photos/`. Katalog dokumentów w Expo jest podawany jako URI z `file://` i końcowym ukośnikiem — łatwo o podwójny ukośnik lub brakujący prefiks. To zabezpieczenie decyduje, które pliki wolno usuwać, więc potrzebny jest test z realnym formatem URI.
-- Fizyczna lokalizacja katalogu się nie zmienia, więc URI zapisane w bazie pozostają poprawne (o ile baza przetrwała — patrz decyzja B).
-- `expo-file-system` ma nowe API obiektowe (`File`, `Directory`, `Paths`) i starsze pod `expo-file-system/legacy`. Używamy nowego; nazwy metod sprawdzić w dokumentacji SDK 56.
+- `expo-file-system` ma nowe API obiektowe (`File`, `Directory`, `Paths`) i starsze pod `expo-file-system/legacy`. Używamy nowego; nazwy metod i opcji sprawdzić w dokumentacji SDK 56.
+- Aparat w pickerze a podgląd skanera: patrz ryzyka w PR 6.
 
 ---
 
@@ -274,15 +300,24 @@ Gałąź: `refactor/expo-camera`. Zależy od PR 2.
 - `npx expo install expo-camera`; usunąć `react-native-vision-camera` i jego plugin z `app.json`; dodać plugin `expo-camera` z tekstem uprawnienia.
 - `src/ProductScannerView.tsx`:
   - usunąć dynamiczne `require('react-native-vision-camera')`, typ `VisionCameraModule` i walidację modułu (okolice linii 34, 123, 1273);
-  - `<Camera device codeScanner isActive />` → `<CameraView facing="back" barcodeScannerSettings={{barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128']}} onBarcodeScanned={...} />`;
+  - `<Camera device codeScanner isActive />` → `<CameraView facing="back" barcodeScannerSettings={{barcodeTypes: ['ean13', 'ean8', 'upc_a']}} onBarcodeScanned={...} />`;
   - `useCameraPermission` → `useCameraPermissions`;
-  - obecne `isActive` → warunkowe renderowanie albo `onBarcodeScanned={undefined}` na czas przetwarzania.
-- `src/__tests__/ProductScannerView.test.tsx`: mock `expo-camera` zamiast vision-camera.
+  - obecne `isActive` → **warunkowe renderowanie** `CameraView` (nie samo `onBarcodeScanned={undefined}`, które zostawia aktywny podgląd). Aparat jest odmontowany, gdy otwarty jest formularz ręczny lub picker zdjęć — Android nie pozwala dwóm klientom trzymać kamery naraz.
+- **Obsługiwane kody.** Dziś `isValidEAN` w `ProductScannerView.tsx` i klient OFF przyjmują wyłącznie 8 lub 13 cyfr z poprawną sumą kontrolną, więc UPC-E i Code 128 z obecnej listy vision-camera i tak są odrzucane. Ustalenie:
+  - skanujemy EAN-13, EAN-8 i UPC-A; UPC-E i Code 128 wypadają z listy (brak zmiany zachowania);
+  - nowa funkcja `normalizeBarcode` w `domain/` zamienia 12-cyfrowy UPC-A na EAN-13 przez dodanie wiodącego `0` (suma kontrolna się nie zmienia). Wywoływana od razu po odczycie — **przed** walidacją, blokadą duplikatów i wyszukiwaniem w lokalnej bazie (`ScanToAdd` szuka najpierw lokalnie, więc normalizacja dopiero przed OFF byłaby za późno). Tej samej funkcji używa ręczne pole EAN;
+  - przy okazji iOS przestaje być problemem: niezależnie od tego, czy zgłosi UPC-A jako 12 czy 13 cyfr, w bazie ląduje ten sam EAN-13.
+- `src/__tests__/ProductScannerView.test.tsx`: mock `expo-camera` zamiast vision-camera. Testy `normalizeBarcode` (np. `036000291452` → `0036000291452`) w `tests/domain/`.
+- Plugin `expo-camera` w `app.json` z wyłączonym mikrofonem (`recordAudioAndroid: false`, bez `microphonePermission`) — nie nagrywamy wideo. Sprawdzić wygenerowany manifest.
+
+**Kryteria odbioru**
+
+- Sekwencja na telefonie: skan → formularz ręczny → zdjęcie z aparatu albo anulowanie → powrót → kolejny skan. Aparat w pickerze i podgląd skanera działają za każdym razem.
+- Ten sam produkt dodany ręcznie z EAN-13, a potem zeskanowany jako UPC-A, daje jeden wpis w katalogu.
 
 **Ryzyka**
 
-- `onBarcodeScanned` odpala się wielokrotnie dla tego samego kodu — sprawdzić, czy obecna blokada duplikatów wystarcza.
-- Na iOS kody UPC-A bywają zgłaszane jako EAN-13 z wiodącym zerem — zweryfikować normalizację EAN przed zapytaniem do OFF.
+- `onBarcodeScanned` odpala się wielokrotnie dla tego samego kodu — sprawdzić, czy obecna blokada duplikatów wystarcza (działa na kodzie po normalizacji).
 - Porównać szybkość i skuteczność skanowania ze stanem sprzed PR na 2–3 realnych opakowaniach. Powrót do vision-camera jest możliwy technicznie, ale odcina Expo Go — iOS wymagałby wtedy płatnego konta Apple od pierwszego dnia. Przy regresji najpierw szukać poprawki w ustawieniach `expo-camera`.
 
 Po tym PR wszystkie moduły natywne pochodzą z Expo SDK, więc aplikację da się uruchomić w **Expo Go** — pod warunkiem, że projekt jest na SDK wspieranym przez aktualne Expo Go (czyli po PR 7).
@@ -296,7 +331,11 @@ Gałąź: `chore/expo-sdk-58`. Po PR 3–6.
 **Zakres**
 
 - Upgrade po jednej wersji: `npm install expo@^57 && npx expo install --fix`, test, potem to samo dla `^58`. Przed każdym krokiem przeczytać changelog SDK (breaking changes w `expo-sqlite`, `expo-camera`, `expo-file-system`).
+- Po każdym kroku: `npm --prefix src ci` z lockfile i zestaw UI. Przy SDK 58 (React 19.3) podbić razem z Reactem `react-test-renderer` (przypięty do 19.2.3, importowany bezpośrednio w testach) i `@react-native/jest-preset` (peer `jest-expo` 58: `^0.88.1`).
+- Dodać `tsc --noEmit -p src/tsconfig.json` do weryfikacji (najlepiej jako skrypt `typecheck`). RN 0.88 domyślnie stosuje ściślejsze typy; do sprawdzenia `useRef<ScrollView>` w `FormScrollView.tsx` i `WheelPicker.tsx`.
 - `npx expo-doctor`, `npx expo prebuild --clean`, pełna checklista ręczna.
+- Opcjonalnie, bo nie dystrybuujemy buildów release: jeden lokalny build release Androida, żeby sprawdzić R8 (w SDK 58 domyślnie włączony). Obowiązkowo przed pierwszym buildem dla kogoś spoza zespołu.
+- Szybka próba w Expo Go na iPhonie (`cd src && npx expo start --go` — po instalacji `expo-dev-client` domyślnym celem jest build deweloperski, nie Expo Go). Start aplikacji i skan; pełna checklista iOS w PR 8.
 - Wymagania Node dla SDK 58: `^22.13.0 || ^24.3.0` — zaktualizować `engines` w `src/package.json`.
 - Opcjonalnie: ESLint 8 + `@react-native/eslint-config` → `eslint-config-expo` (`npx expo lint`).
 - Opcjonalnie: wyrównać Jest (29 w `src/`, 30 w katalogu głównym) i TypeScript (5.8 vs 6) między pakietami.
@@ -311,7 +350,8 @@ Gałąź: `feat/ios-builds`. Po PR 7. Tło i koszty w [sekcji 4](#4-ios-bez-maco
 
 **Etap 1 — Expo Go (bez kosztów, bez konta Apple)**
 
-- Uruchomić `npx expo start` na Linuksie i otworzyć projekt w Expo Go na iPhonie (ta sama sieć Wi-Fi albo `--tunnel`).
+- Uruchomić `cd src && npx expo start --go` na Linuksie i otworzyć projekt w Expo Go na iPhonie (ta sama sieć Wi-Fi albo `--tunnel`). Flaga `--go` jest potrzebna, bo z zainstalowanym `expo-dev-client` CLI domyślnie celuje w build deweloperski.
+- Expo Go pokazuje własną ikonę, nazwę i teksty uprawnień. Nasze teksty uprawnień, ikonę i podpis da się ocenić dopiero w buildzie z etapu 2.
 - Przejść checklistę ręczną na iOS i naprawić różnice platformowe. Spodziewane miejsca: uprawnienia aparatu i galerii, format kodów UPC-A w skanerze, bezpieczne obszary (notch, pasek gestów), zachowanie klawiatury w formularzach, `BackHandler` (na iOS nie działa — sprawdzić, czy każdy ekran ma widoczny sposób powrotu).
 - Dopisać do README instrukcję uruchamiania na iPhonie.
 
@@ -433,6 +473,8 @@ Depends on: #TBD (Remove the recipe generator)
 ## Scope
 
 - Install `expo` (SDK 56), `expo-dev-client`, `jest-expo`; align versions with `npx expo install --fix`
+- Keep `@react-native/jest-preset` as an explicit dev dependency: `jest-expo` requires it as a peer
+- Move the app icon to `src/assets/icon.png` and set `expo.icon` before deleting the native folders
 - Entry point via `registerRootComponent`; scripts use `expo start` / `expo run:android` / `expo run:ios`
 - Move native configuration to `app.json`: Android package and iOS bundle identifier `com.shelfchef`, portrait orientation, light UI style, permissions and usage descriptions, vision-camera config plugin with the code scanner enabled
 - Delete `src/android`, `src/ios`, `Gemfile`, `.bundle`; ignore generated native folders and `.expo/`
@@ -448,8 +490,9 @@ Depends on: #TBD (Remove the recipe generator)
 
 ## Acceptance criteria
 
-- `npx expo-doctor` reports no issues
-- A clean clone builds and runs with `npx expo run:android`
+- `npx expo-doctor` output is recorded in the PR; any warning about a library scheduled for removal names the task that removes it, other warnings are fixed
+- A clean clone installs from the lockfiles, builds and runs with `npx expo run:android`
+- The generated Android manifest keeps the camera optional and does not request `RECORD_AUDIO`
 - Scanning, manual add, product photos and shopping lists work as before
 - `npm test` passes
 ````
@@ -466,6 +509,7 @@ Depends on: #TBD (Adopt Expo)
 ## Scope
 
 - Add `src/infrastructure/db/client.ts` as the only module importing the SQLite driver; keep the current `db.execute(sql, params)` result shape so repositories do not change
+- Open the connection lazily from `setupDatabase()`, not at import time, so an open failure reaches the existing database error screen and "Try again" reopens it
 - Remove `react-native-quick-sqlite`
 - Replace the per-file `jest.mock('react-native-quick-sqlite')` blocks in `tests/` with a single `moduleNameMapper` entry backed by the existing `node:sqlite` helper
 - Update the SQLite mock in `src/jest.setup.js`
@@ -474,12 +518,14 @@ Depends on: #TBD (Adopt Expo)
 ## Notes
 
 - `expo-sqlite` stores the database file in a different directory, so existing development installs start with an empty database. No data transfer is planned.
-- Verify on a device: write statements and manual `BEGIN`/`COMMIT`/`ROLLBACK` through the adapter, boolean parameters, rollback on a failed batch insert
+- Tests run on `node:sqlite`, so they cannot confirm how `expo-sqlite` handles writes and parameter binding; that needs a device check
 
 ## Acceptance criteria
 
 - Only `db/client.ts` imports `expo-sqlite`
 - No test file mocks the SQLite driver directly
+- A failed first open shows the error screen and a retry succeeds
+- On a device: write statements, boolean parameters and manual `BEGIN`/`COMMIT`/`ROLLBACK` work through the adapter; after a forced failure of the second write in a transaction and an app restart, neither write is in the database
 - `npm test` passes; inventory, catalog and shopping list flows work on a device
 ````
 
@@ -495,7 +541,7 @@ Depends on: #TBD (expo-sqlite)
 ## Scope
 
 - Track the schema version in `PRAGMA user_version`
-- Add `src/infrastructure/db/migrations/` with an ordered list of migrations; migration 1 is the current schema, moved unchanged
+- Add `src/infrastructure/db/migrations/` with an ordered list of migrations; migration 1 is the current schema, moved unchanged and keeping `IF NOT EXISTS`, so a database created before this task is stamped as version 1 without losing data
 - Run each pending migration and its version bump in one transaction; roll back and stop on failure
 - Fail with a clear error when the database version is newer than the app knows (the app already has a database error screen)
 - Keep the startup backfill of `product_catalog` from `product_definitions` as a separate idempotent step after migrations
@@ -506,6 +552,7 @@ Depends on: #TBD (expo-sqlite)
 - An empty database reaches the latest version with all tables and indexes
 - Running migrations twice changes nothing
 - A failing migration leaves both the schema and `user_version` untouched
+- A database created by the expo-sqlite task (with a product and a linked shopping item) reaches version 1 and keeps its records and links after two starts, with no duplicate catalog entry
 - Tests cover the cases above
 - `docs/db/schema.md` no longer tells developers to wipe data after schema changes
 ````
@@ -521,20 +568,20 @@ Depends on: #TBD (Adopt Expo)
 
 ## Scope
 
-- `productPhotos.ts`: pick photos with `expo-image-picker`, request camera permission through its API (keep the existing `denied` / `blocked` distinction), copy files with `expo-file-system`
-- `productPhotoFiles.ts`: existence checks and deletion with `expo-file-system`; retain/pending/deleting logic stays unchanged
+- `productPhotos.ts`: pick photos with `expo-image-picker`, request camera permission through its API (keep the existing `denied` / `blocked` distinction), copy files with `expo-file-system`; create the `product-photos` directory idempotently
+- Store app-owned photos in the database as a path relative to the document directory (`product-photos/...`) and resolve it against the current `Paths.document` when reading or deleting. On iOS the absolute container path changes on reinstall and update, so stored absolute URIs stop working. Remote URLs and other URIs are stored and used as they are
+- `productPhotoFiles.ts`: existence checks and deletion with `expo-file-system`; reference checks compare stored values in both tables; retain/pending/deleting logic stays unchanged
 - Add the `expo-image-picker` config plugin; drop permissions it already declares
 - Remove both old packages and the `try { require(...) }` guards
+- Map `expo-file-system` in the root Jest config to a `node:fs`-backed helper: `ProductRepository` imports the photo file module, so logic tests load it too
 - Update mocks in UI and database tests
-
-## Notes
-
-- `managedPhotoPath` decides which files may be deleted by matching the app's `product-photos` directory. Expo reports the document directory as a `file://` URI with a trailing slash; add a test using the real URI format.
 
 ## Acceptance criteria
 
 - Taking a photo, choosing from the gallery, replacing, clearing and cancelling a draft behave as before
-- Unused photo copies are still cleaned up; referenced and foreign files are never deleted
+- Two photos added one after another are both saved
+- After the document directory changes, stored photos still display, referenced photos are protected and released copies are deleted (test)
+- Unused photo copies are still cleaned up; referenced files, remote URLs and files outside `product-photos` are never deleted
 - `npm test` passes
 ````
 
@@ -549,20 +596,24 @@ Depends on: #TBD (Adopt Expo)
 
 ## Scope
 
-- `ProductScannerView.tsx`: use `CameraView` with `barcodeScannerSettings` (EAN-13, EAN-8, UPC-A, UPC-E, Code 128) and `useCameraPermissions`
+- `ProductScannerView.tsx`: use `CameraView` with `barcodeScannerSettings` (EAN-13, EAN-8, UPC-A) and `useCameraPermissions`. UPC-E and Code 128 are dropped: the current validator already rejects them
+- Add `normalizeBarcode` in `domain/`: a 12-digit UPC-A becomes EAN-13 with a leading zero. Apply it right after reading a code, before validation, the duplicate guard and the local lookup, and in the manual EAN field
+- Unmount `CameraView` while the manual form or the photo picker is open, instead of only disabling the scan callback
 - Remove the dynamic `require` of vision-camera and the module shape checks
-- Replace the vision-camera config plugin with the `expo-camera` one
+- Replace the vision-camera config plugin with the `expo-camera` one, with audio recording disabled
 - Update the camera mock in `ProductScannerView.test.tsx`
 
 ## Risks to check
 
 - `onBarcodeScanned` fires repeatedly for the same code; the existing duplicate guard must hold
-- On iOS, UPC-A may be reported as EAN-13 with a leading zero
 - Compare scan speed and reliability with the current build on a few real products. Falling back to vision-camera would rule out Expo Go, so try tuning `expo-camera` first
 
 ## Acceptance criteria
 
 - Scanning the supported formats adds products as before
+- A product added manually with its EAN-13 and then scanned as UPC-A ends up as one catalog entry
+- On a phone: scan → manual form → take a photo or cancel → back → scan again works every time
+- The generated Android manifest does not request `RECORD_AUDIO`
 - The permission denied and no-camera states still render
 - `npm test` passes
 ````
@@ -578,7 +629,10 @@ Depends on: the SQLite, migrations, photos and camera tasks
 
 ## Scope
 
-- Upgrade one SDK at a time (56 → 57 → 58) with `npx expo install --fix`, reading each changelog
+- Upgrade one SDK at a time (56 → 57 → 58) with `npx expo install --fix`, reading each changelog; after each step install from the lockfile and run the UI tests
+- Bump `react-test-renderer` and `@react-native/jest-preset` together with React 19.3 / RN 0.88
+- Add a `typecheck` script (`tsc --noEmit -p src/tsconfig.json`); RN 0.88 ships stricter types
+- Smoke test in Expo Go on an iPhone (`npx expo start --go`)
 - Update `engines.node` to match SDK 58 requirements
 - Update `docs/third-party-notices.md`, the README and any documentation listing the tech stack
 - Remove remaining references to the replaced libraries
@@ -587,7 +641,9 @@ Depends on: the SQLite, migrations, photos and camera tasks
 ## Acceptance criteria
 
 - `npx expo-doctor` reports no issues on SDK 58
+- `typecheck` passes
 - The app builds from a clean clone and passes the manual checklist in `src/docs/expo-migration.md`
+- The app starts and scans a barcode in Expo Go on an iPhone
 - `npm test` passes
 ````
 
@@ -602,7 +658,7 @@ Depends on: #TBD (Upgrade to Expo SDK 58) — Expo Go only supports the latest S
 
 ## Stage 1: Expo Go
 
-- Open the project in Expo Go on an iPhone from `npx expo start` running on Linux
+- Open the project in Expo Go on an iPhone from `cd src && npx expo start --go` running on Linux (`--go` is needed because `expo-dev-client` is installed)
 - Run the manual checklist on iOS and fix platform differences: camera and photo permissions, UPC-A barcodes, safe areas, keyboard behaviour in forms, screens that rely on the Android back button
 - Document the iPhone workflow in the README
 
