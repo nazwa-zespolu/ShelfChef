@@ -10,8 +10,10 @@ Aplikacja korzysta z bibliotek natywnych spoza Expo Go, dlatego działa w **deve
 
 ## 1. Pierwsze uruchomienie projektu na emulatorze
 
-Tę procedurę wykonaj po raz pierwszy po pobraniu projektu, przy nowym emulatorze, po instalacji
-biblioteki natywnej lub po zmianie `src/app.json` / `src/plugins/`.
+Tę procedurę wykonaj po raz pierwszy po pobraniu projektu, przy nowym emulatorze lub po instalacji
+biblioteki natywnej.
+
+Wymagany Node.js: **22.13 lub nowszy** z linii 22.x albo 24.3+ (wymaga tego Metro).
 
 1.  **Instalacja zależności** (z głównego katalogu repozytorium):
     ```bash
@@ -26,10 +28,12 @@ biblioteki natywnej lub po zmianie `src/app.json` / `src/plugins/`.
     npm run android   # npx expo run:android
     ```
     Komenda generuje folder `android/`, buduje i instaluje development build oraz uruchamia Metro.
-4.  **Problemy z wygenerowanym projektem natywnym:** wygeneruj go od nowa:
+4.  **Po zmianie `src/app.json` lub `src/plugins/`:** istniejący folder `src/android` nie
+    zawsze uwzględnia te zmiany, więc przed przebudową wygeneruj go od nowa:
     ```bash
     cd src
-    npx expo prebuild --clean
+    npx expo prebuild --clean --platform android
+    npm run android
     ```
 
 ---
@@ -50,7 +54,7 @@ Gdy aplikacja jest już zainstalowana na Twoim emulatorze.
 4.  **Szybkie odświeżanie (Fast Refresh):**
     Po każdej zmianie w kodzie i zapisaniu pliku (`Ctrl + S`), aplikacja na emulatorze zaktualizuje się automatycznie.
 
-_Uwaga: `npm run android` nie musisz już powtarzać, chyba że zainstalujesz nową bibliotekę natywną lub zmienisz `src/app.json` / `src/plugins/`._
+_Uwaga: `npm run android` nie musisz już powtarzać, chyba że zainstalujesz nową bibliotekę natywną. Po zmianie `src/app.json` / `src/plugins/` najpierw uruchom `npx expo prebuild --clean --platform android` (patrz punkt 4 wyżej)._
 
 ---
 

@@ -11,7 +11,7 @@ The app uses native libraries that are not part of Expo Go, so it runs in a
 
 ## Prerequisites
 
-- Node.js 22.11 or newer
+- Node.js 22.13 or newer in the 22.x line, or 24.3+ (required by Metro)
 - Android: Android Studio with an SDK, an emulator or a device with USB debugging, and JDK 17
 - iOS (macOS only): Xcode and CocoaPods
 
@@ -39,11 +39,15 @@ installed app:
 npm start              # npx expo start --dev-client
 ```
 
-Rebuild with `npm run android` after adding or updating a library with native code or after
-changing `app.json` / `plugins/`. To regenerate the native project from scratch:
+Rebuild with `npm run android` after adding or updating a library with native code.
+
+Once `android/` exists, `npm run android` reuses it and does **not** pick up every change
+to `app.json` or `plugins/`. After changing either of them, regenerate the native project
+before rebuilding:
 
 ```sh
-npx expo prebuild --clean
+npx expo prebuild --clean --platform android
+npm run android
 ```
 
 ## Run on iOS
