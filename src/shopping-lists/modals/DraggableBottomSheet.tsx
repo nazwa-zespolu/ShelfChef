@@ -1,8 +1,10 @@
-import React, {useCallback, useMemo, useRef} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Animated,
+  Keyboard,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   type StyleProp,
   StyleSheet,
@@ -38,6 +40,7 @@ export function DraggableBottomSheet({
   // Callers can still override paddingBottom through sheetStyle.
   const insets = useSafeAreaInsets();
   const bottomPadding = Math.max(insets.bottom, 16);
+  const androidKeyboardHeight = useAndroidKeyboardHeight(visible);
 
   const closeWithDrag = useCallback(() => {
     Animated.timing(translateY, {
@@ -88,7 +91,7 @@ export function DraggableBottomSheet({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
+      <View style={[styles.backdrop, androidKeyboardHeight > 0 && {paddingBottom: androidKeyboardHeight}]}>
         <Pressable
           accessibilityElementsHidden={accessibilityContentHidden}
           importantForAccessibility={accessibilityContentHidden ? 'no-hide-descendants' : 'auto'}
@@ -99,7 +102,14 @@ export function DraggableBottomSheet({
         <Animated.View
           accessibilityElementsHidden={accessibilityContentHidden}
           importantForAccessibility={accessibilityContentHidden ? 'no-hide-descendants' : 'auto'}
-          style={[styles.sheet, {paddingBottom: bottomPadding}, sheetStyle, {transform: [{translateY}]}]}>
+          style={[
+            styles.sheet,
+            {paddingBottom: bottomPadding},
+            sheetStyle,
+            // The keyboard already covers the navigation bar, so drop the inset padding.
+            androidKeyboardHeight > 0 && styles.sheetAboveKeyboard,
+            {transform: [{translateY}]},
+          ]}>
           <View style={[styles.handleTouch, handleStyle]} {...dragResponder.panHandlers}>
             <View style={styles.handle} />
             {handleContent}
@@ -110,6 +120,29 @@ export function DraggableBottomSheet({
       </View>
     </Modal>
   );
+}
+
+/**
+ * Keyboard height while the sheet is open on Android, 0 otherwise.
+ *
+ * Under edge-to-edge (always on with Expo) the Modal window no longer shrinks for the
+ * keyboard (adjustResize has no effect), so the sheet lifts itself above it instead.
+ */
+function useAndroidKeyboardHeight(visible: boolean) {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !visible) {
+      setHeight(0);
+      return;
+    }
+    const show = Keyboard.addListener('keyboardDidShow', event => setHeight(event.endCoordinates.height));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, [visible]);
+  return height;
 }
 
 const styles = StyleSheet.create({
@@ -126,6 +159,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderColor: colors.border,
     maxHeight: '88%',
+  },
+  sheetAboveKeyboard: {
+    paddingBottom: 16,
   },
   handleTouch: {
     alignSelf: 'center',
